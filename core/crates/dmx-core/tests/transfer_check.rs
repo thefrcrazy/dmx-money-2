@@ -39,7 +39,9 @@ fn checking_one_transfer_leg_checks_the_linked_leg() {
         .unwrap()
         .id
         .clone();
-    assert!(engine.toggle_transactions_checked(&[incoming.clone()]).unwrap());
+    assert!(engine
+        .toggle_transactions_checked(std::slice::from_ref(&incoming))
+        .unwrap());
 
     // … pointe aussi la sortie du Livret A, et l'inverse dépointe les deux.
     let snapshot = engine.snapshot().unwrap();
@@ -54,7 +56,9 @@ fn checking_one_transfer_leg_checks_the_linked_leg() {
         TransactionType::Expense,
         "sortie stockée en dépense"
     );
-    assert!(!engine.toggle_transactions_checked(&[outgoing.id.clone()]).unwrap());
+    assert!(!engine
+        .toggle_transactions_checked(std::slice::from_ref(&outgoing.id))
+        .unwrap());
     assert!(engine
         .snapshot()
         .unwrap()

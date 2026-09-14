@@ -40,9 +40,10 @@ jobs:
           echo "==> version $version"
 
   macos:
-    name: macOS (DMG universel)
+    name: macOS (DMG Apple Silicon et Intel)
     needs: version
-    runs-on: macos-15
+    # Xcode 26 par défaut : la variante modern cible macOS 26 (voir ci.yml).
+    runs-on: macos-26
     env:
       # Le contexte `secrets` n'est pas lisible dans un `if` d'étape : on le copie ici.
       APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
@@ -83,7 +84,14 @@ jobs:
           EOF
           cd apple && xcodegen generate
 
-      # Deux builds séparés, comme en DmxMoney 1.x : Apple Silicon (macOS 11+) et
+      # Le projet Xcode embarque pwa/dist (la PWA servie par le pont local), qui n'est pas versionné.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Client PWA du compagnon
+        run: ./scripts/build-pwa.sh
+
+      # Deux builds séparés, comme en DmxMoney 1.x : Apple Silicon (macOS 26+) et
       # Intel/Catalina (macOS 10.15+). Aucun binaire universel n'est publié.
       - name: Build modern (Apple Silicon) et legacy (Intel/Catalina)
         run: |

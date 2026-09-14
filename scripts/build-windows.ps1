@@ -12,6 +12,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Sans cette préférence, un code de sortie non nul de cargo ou dotnet n'interrompt pas le script :
+# la CI affichait « Terminé » juste après un échec de compilation.
+$PSNativeCommandUseErrorActionPreference = $true
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 try {

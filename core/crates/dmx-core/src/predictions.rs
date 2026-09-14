@@ -389,7 +389,7 @@ pub fn predictions(snapshot: &Snapshot, query: &PredictionQuery, today: NaiveDat
 
         let (mut total_close, mut total_low) = (0_i64, 0_i64);
         for (index, balance) in balances.iter_mut().enumerate() {
-            let DayBalances { low, close } = apply_day_flow(*balance, Some(&flows[index][day]));
+            let DayBalances { low, close } = apply_day_flow(*balance, flows[index].get(day));
             *balance = close;
             closes_cents[index + 1].push(close);
             lows_cents[index + 1].push(low);

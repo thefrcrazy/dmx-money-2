@@ -49,8 +49,15 @@ jobs:
                                   desktop-file-utils appstream
       - name: Icônes symboliques
         run: ./scripts/gen-linux-icons.sh
-      - name: Les icônes versionnées sont à jour
-        run: git diff --exit-code -- linux/dmx-money-gtk/data/icons
+      # Seules les icônes symboliques (SVG) sont générées de façon déterministe. L'icône d'app en
+      # PNG est redimensionnée par sips sur macOS et par ImageMagick ici : les octets diffèrent
+      # d'une plateforme à l'autre sans que l'image change, on ne la compare donc pas.
+      - name: Les icônes symboliques versionnées sont à jour
+        run: |
+          git diff --exit-code -- \
+            linux/dmx-money-gtk/data/icons/hicolor/scalable/actions \
+            linux/dmx-money-gtk/data/icons/hicolor/index.theme
+          git checkout -- linux/dmx-money-gtk/data/icons
       - name: Clippy
         run: cargo clippy -p dmx-money-gtk --all-targets -- -D warnings
       - name: Build release
@@ -69,7 +76,9 @@ jobs:
 
   apple:
     name: Apple (macOS, iOS)
-    runs-on: macos-15
+    # macos-26 : Xcode 26 par défaut, comme en local. L'image macos-15 reste sur Xcode 16.4, sans le
+    # SDK macOS 26 dont la variante modern a besoin (SwiftUI 26, FoundationModels).
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -82,9 +91,15 @@ jobs:
         run: ./scripts/build-apple-xcframework.sh
       - name: Tests DmxKit
         run: swift test --package-path apple/Packages/DmxKit
+      # Le projet Xcode embarque pwa/dist (la PWA servie par le pont local), qui n'est pas versionné.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Client PWA du compagnon
+        run: ./scripts/build-pwa.sh
       - name: Projet Xcode
         run: cd apple && xcodegen generate
-      - name: macOS modern (Apple Silicon, macOS 11+)
+      - name: macOS modern (Apple Silicon, macOS 26 Tahoe)
         run: SKIP_CORE=1 ./scripts/build-macos.sh modern
       - name: macOS legacy (Intel, macOS 10.15 Catalina)
         run: SKIP_CORE=1 ./scripts/build-macos.sh legacy

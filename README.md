@@ -84,4 +84,4 @@ DMXMONEY_DATA_DIR=/tmp/dmx-demo cargo run -p dmx-money-gtk    # ou l'app macOS /
 
 ## Licence
 
-MIT. Les icônes proviennent de [Lucide](https://lucide.dev) (licence ISC, voir `shared/icons/lucide/LICENSE`).
+MIT, voir [`LICENSE`](LICENSE). Les icônes proviennent de [Lucide](https://lucide.dev) (licence ISC, voir `shared/icons/lucide/LICENSE`).

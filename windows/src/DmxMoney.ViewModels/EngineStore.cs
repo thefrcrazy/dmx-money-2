@@ -21,6 +21,9 @@ public sealed partial class EngineStore : ObservableObject, IDisposable
         });
 
         public void BridgeStatusChanged() => store.Dispatch(store.RefreshBridgeStatus);
+
+        // Appelé depuis le fil du pont, avant que le noyau n'interprète la phrase.
+        public string? RephraseAssistantRequest(string text) => store.AssistantRewriter?.Invoke(text);
     }
 
     private readonly Listener listener;
@@ -35,6 +38,12 @@ public sealed partial class EngineStore : ObservableObject, IDisposable
 
     /// <summary>Renvoi vers le fil d'interface ; remplacé par l'application WinUI.</summary>
     public Action<Action> Dispatch { get; set; } = action => action();
+
+    /// <summary>
+    /// Reformulation par un modèle local d'une demande envoyée à l'assistant, hors du fil d'interface.
+    /// Sans modèle (par défaut), le noyau interprète la phrase telle quelle.
+    /// </summary>
+    public Func<string, string?>? AssistantRewriter { get; set; }
 
     public string Today => DmxFfiMethods.Today();
 
