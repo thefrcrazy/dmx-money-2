@@ -83,8 +83,9 @@ jobs:
           # Sans secret, le flux est celui des releases GitHub du dépôt, où updates.json est publié.
           FEED_URL: ${{ secrets.DMX_UPDATE_FEED_URL || format('https://github.com/{0}/releases/latest/download/updates.json', github.repository) }}
         run: |
-          # Un xcconfig lit « // » comme un commentaire : l'URL s'y écrit « /$()/ ».
-          ESCAPED_FEED_URL="${FEED_URL//\/\//\/\$()\/}"
+          # Un xcconfig lit « // » comme un commentaire : l'URL s'y écrit « /$()/ ». sed plutôt que
+          # ${var//…/…}, dont le bash 3.2 de macOS garde les antislashs du remplacement.
+          ESCAPED_FEED_URL="$(printf '%s' "$FEED_URL" | sed 's#//#/$()/#')"
           {
             echo "DEVELOPMENT_TEAM = ${{ secrets.APPLE_TEAM_ID }}"
             echo "DMX_ENTITLEMENTS_SUFFIX = ${{ secrets.APPLE_TEAM_ID != '' && '-iCloud' || '' }}"
