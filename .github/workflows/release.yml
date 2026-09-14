@@ -145,7 +145,8 @@ jobs:
   windows:
     name: Windows (${{ matrix.rid }})
     needs: version
-    runs-on: windows-2022
+    # Visual Studio 2026, comme dans ci.yml : compilation XAML en processus et ciblage de .NET 10.
+    runs-on: windows-2025-vs2026
     strategy:
       matrix:
         rid: [win-x64, win-arm64]

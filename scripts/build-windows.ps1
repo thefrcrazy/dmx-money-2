@@ -44,12 +44,26 @@ try {
 
     Write-Host "==> Publication de l'application"
     $publish = Join-Path $root "target/windows/$Rid"
-    # Sous dotnet, le Windows App SDK lance XamlCompiler.exe (net472), qui échoue sans jamais afficher
-    # ses erreurs (microsoft-ui-xaml#10027) ; la tâche MSBuild .NET du même paquet les journalise.
-    dotnet publish (Join-Path $root "windows/src/DmxMoney.App/DmxMoney.App.csproj") `
-        -c $Configuration -r $Rid --self-contained true `
-        -p:Version=$Version -p:PublishReadyToRun=true -p:UseXamlCompilerExecutable=false `
-        -o $publish
+    $project = Join-Path $root "windows/src/DmxMoney.App/DmxMoney.App.csproj"
+    # Sous dotnet, le Windows App SDK lance XamlCompiler.exe, qui échoue sans jamais afficher ses erreurs
+    # (microsoft-ui-xaml#10027), et sa tâche .NET ne se charge pas avec MSBuild 18. Le MSBuild de
+    # Visual Studio exécute le compilateur XAML en processus : c'est lui qu'on utilise quand il est là.
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+    $msbuild = if (Test-Path $vswhere) {
+        & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\amd64\MSBuild.exe" |
+            Select-Object -First 1
+    }
+    if ($msbuild) {
+        Write-Host "    MSBuild : $msbuild"
+        $platform = if ($Rid -eq "win-arm64") { "ARM64" } else { "x64" }
+        & $msbuild $project -restore -t:Publish -m -nologo -v:minimal `
+            -p:Configuration=$Configuration -p:Platform=$platform -p:RuntimeIdentifier=$Rid `
+            -p:SelfContained=true -p:PublishReadyToRun=true -p:Version=$Version "-p:PublishDir=$publish/"
+    }
+    else {
+        dotnet publish $project -c $Configuration -r $Rid --self-contained true `
+            -p:Version=$Version -p:PublishReadyToRun=true -o $publish
+    }
 
     if ($SkipInstaller) {
         Write-Host "==> Terminé : $publish"
