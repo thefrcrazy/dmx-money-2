@@ -33,7 +33,7 @@ public sealed partial class AccountsPage : Page
             TypesList.ItemsSource = ViewModel.AccountTypes;
             syncingTypes = false;
         }
-        Bindings.Update();
+        Bindings?.Update();
         UpdateVisuals();
     }
 

@@ -37,7 +37,7 @@ public sealed partial class CategoriesPage : Page
             ViewModel = shell.CategoriesPage;
             ViewModel.PropertyChanged += OnViewModelChanged;
         }
-        Bindings.Update();
+        Bindings?.Update();
         UpdateVisuals();
     }
 

@@ -40,7 +40,7 @@ public sealed partial class JournalPage : Page
             BudgetsList.ItemsSource = JournalViewModel.BudgetOptions.Select(option => new FilterOption(option.Id, option.Label)).ToList();
             syncing = false;
         }
-        Bindings.Update();
+        Bindings?.Update();
         UpdateVisuals();
     }
 

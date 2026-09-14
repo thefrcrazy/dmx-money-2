@@ -37,7 +37,8 @@ public sealed partial class AnalyticsPage : Page
             rangeOptions = [.. ViewModel.Ranges.Select(range => new TimeRangeOption(range, Format.TimeRangeLabel(range)))];
             RangeBox.ItemsSource = rangeOptions;
         }
-        Bindings.Update();
+        // Bindings n'existe que si la page a des x:Bind hors des modèles de données : nul ici.
+        Bindings?.Update();
         UpdateVisuals();
     }
 

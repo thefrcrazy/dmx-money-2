@@ -30,7 +30,7 @@ public sealed partial class DashboardPage : Page
             ViewModel = shell.Dashboard;
             ViewModel.PropertyChanged += OnViewModelChanged;
         }
-        Bindings.Update();
+        Bindings?.Update();
         UpdateVisuals();
     }
 
@@ -38,7 +38,7 @@ public sealed partial class DashboardPage : Page
     {
         if (args.PropertyName == nameof(DashboardViewModel.View))
         {
-            Bindings.Update();
+            Bindings?.Update();
             UpdateVisuals();
         }
     }

@@ -39,7 +39,7 @@ public sealed partial class PredictionsPage : Page
                 .Select(item => new MarkerLegendItem(item.Color, item.Label))
                 .ToList();
         }
-        Bindings.Update();
+        Bindings?.Update();
         UpdateVisuals();
     }
 

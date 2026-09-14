@@ -47,7 +47,7 @@ public sealed partial class ScheduledPage : Page
             FrequenciesList.ItemsSource = frequencyOptions;
             syncing = false;
         }
-        Bindings.Update();
+        Bindings?.Update();
         UpdateVisuals();
     }
 

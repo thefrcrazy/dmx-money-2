@@ -34,7 +34,7 @@ public sealed partial class SettingsPage : Page
             ViewModel.PropertyChanged += OnViewModelChanged;
             BuildAccentSwatches();
         }
-        Bindings.Update();
+        Bindings?.Update();
         ViewModel.Store.RefreshBridgeStatus();
         UpdateVisuals();
     }

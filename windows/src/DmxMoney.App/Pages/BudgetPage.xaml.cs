@@ -34,7 +34,7 @@ public sealed partial class BudgetPage : Page
             CategoriesList.ItemsSource = shell.Store.SelectableCategories;
             syncing = false;
         }
-        Bindings.Update();
+        Bindings?.Update();
         UpdateVisuals();
     }
 
