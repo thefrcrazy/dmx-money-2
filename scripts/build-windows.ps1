@@ -44,9 +44,11 @@ try {
 
     Write-Host "==> Publication de l'application"
     $publish = Join-Path $root "target/windows/$Rid"
+    # Sous dotnet, le Windows App SDK lance XamlCompiler.exe (net472), qui échoue sans jamais afficher
+    # ses erreurs (microsoft-ui-xaml#10027) ; la tâche MSBuild .NET du même paquet les journalise.
     dotnet publish (Join-Path $root "windows/src/DmxMoney.App/DmxMoney.App.csproj") `
         -c $Configuration -r $Rid --self-contained true `
-        -p:Version=$Version -p:PublishReadyToRun=true `
+        -p:Version=$Version -p:PublishReadyToRun=true -p:UseXamlCompilerExecutable=false `
         -o $publish
 
     if ($SkipInstaller) {

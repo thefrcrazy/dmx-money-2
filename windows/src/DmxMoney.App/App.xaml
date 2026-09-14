@@ -8,7 +8,8 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
                 <ResourceDictionary Source="ms-appx:///Styles/Theme.xaml" />
-                <ResourceDictionary Source="ms-appx:///Dialogs/FormTemplates.xaml" />
+                <!-- Instancié par sa classe : ses modèles utilisent x:Bind, que Source= ne branche pas. -->
+                <local:FormTemplates xmlns:local="using:DmxMoney.App" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Application.Resources>
