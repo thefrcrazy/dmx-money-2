@@ -235,9 +235,18 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
+      # download-artifact abandonne dès un 403 renvoyé par un intermédiaire réseau, souvent passager
+      # (vécu à la publication de la 2.0.0) : une seconde tentative suit un premier échec.
       - uses: actions/download-artifact@v4
+        id: download
+        continue-on-error: true
+        with:
+          path: artifacts
+      - uses: actions/download-artifact@v4
+        if: steps.download.outcome == 'failure'
         with:
           path: artifacts
       - name: Notes de version
