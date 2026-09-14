@@ -46,8 +46,8 @@ public static class Format
     public static string BudgetStateLabel(BudgetState state) => DmxFfiMethods.BudgetStateLabel(state);
 
     /// <summary>Légende d'un camembert : barrée et grisée quand la catégorie est masquée.</summary>
-    public static Microsoft.UI.Xaml.TextDecorations Strike(bool hidden)
-        => hidden ? Microsoft.UI.Xaml.TextDecorations.Strikethrough : Microsoft.UI.Xaml.TextDecorations.None;
+    public static Windows.UI.Text.TextDecorations Strike(bool hidden)
+        => hidden ? Windows.UI.Text.TextDecorations.Strikethrough : Windows.UI.Text.TextDecorations.None;
 
     public static Brush LegendBrush(bool hidden, string hex)
         => hidden ? Palette.Resource("TextFillColorTertiaryBrush") : Brush(hex);

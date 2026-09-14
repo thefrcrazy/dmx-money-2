@@ -2,6 +2,8 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
+// Les using implicites apportent aussi System.IO.Path.
+using Path = Microsoft.UI.Xaml.Shapes.Path;
 
 namespace DmxMoney.App;
 

@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using DmxMoney.Interop;
 using DmxMoney.ViewModels;
 using Microsoft.UI;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;

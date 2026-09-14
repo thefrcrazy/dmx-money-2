@@ -163,14 +163,18 @@ public sealed partial class SettingsPage : Page
 }
 
 /// <summary>Étape de préparation du pont (PWA, provisionnement, DNS, certificat, API).</summary>
-public sealed class BridgeStepRow : Border
+public sealed class BridgeStepRow : UserControl
 {
     public BridgeStepRow(string label, string value, bool ready, string icon)
     {
-        CornerRadius = new CornerRadius(10);
-        Padding = new Thickness(10, 7, 10, 7);
+        // Border est scellé en WinUI 3 : la ligne contient sa bordure au lieu d'en hériter.
+        var row = new Border
+        {
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(10, 7, 10, 7),
+            Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["DmxSubtleBackground"],
+        };
         Margin = new Thickness(0, 0, 0, 6);
-        Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["DmxSubtleBackground"];
 
         var grid = new Grid { ColumnSpacing = 10 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -205,6 +209,7 @@ public sealed class BridgeStepRow : Border
         });
         Grid.SetColumn(stack, 1);
         grid.Children.Add(stack);
-        Child = grid;
+        row.Child = grid;
+        Content = row;
     }
 }
