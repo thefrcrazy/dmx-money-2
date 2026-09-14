@@ -56,7 +56,7 @@
                             Text="Aucune échéance à venir"
                             Style="{StaticResource DmxCaption}"
                             HorizontalAlignment="Center"
-                            Visibility="{x:Bind local:Format.VisibleIfNone(ViewModel.View.Upcoming.Length), Mode=OneWay}" />
+                            Visibility="{x:Bind local:Format.VisibleIfNone(ViewModel.View.Upcoming), Mode=OneWay}" />
                     </StackPanel>
                 </Border>
 
@@ -150,7 +150,7 @@
                             Text="Aucune dépense ce mois-ci"
                             Style="{StaticResource DmxCaption}"
                             HorizontalAlignment="Center"
-                            Visibility="{x:Bind local:Format.VisibleIfNone(ViewModel.View.TopCategories.Length), Mode=OneWay}" />
+                            Visibility="{x:Bind local:Format.VisibleIfNone(ViewModel.View.TopCategories), Mode=OneWay}" />
                     </StackPanel>
                 </Border>
 

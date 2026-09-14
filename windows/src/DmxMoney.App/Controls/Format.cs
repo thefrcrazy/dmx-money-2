@@ -126,7 +126,11 @@ public static class Format
 
     public static string Ratio(int visible, int total) => $"{visible} / {total}";
 
-    public static string Number(int value) => value.ToString();
+    // Le compilateur XAML plante (WMC9999) sur tout membre d'un tableau dans x:Bind, « .Length » compris :
+    // les fonctions de comptage reçoivent donc le tableau lui-même.
+    private static int LengthOf(object items) => items is Array array ? array.Length : 0;
+
+    public static string ItemCount(object items) => LengthOf(items).ToString();
 
     public static Brush Brush(string hex) => Palette.ToBrush(hex, Colors.Gray);
 
@@ -155,15 +159,15 @@ public static class Format
 
     public static Visibility VisibleIfAny(int count) => count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-    public static Visibility VisibleIfNone(int count) => count > 0 ? Visibility.Collapsed : Visibility.Visible;
+    public static Visibility VisibleIfNone(object items) => LengthOf(items) > 0 ? Visibility.Collapsed : Visibility.Visible;
 
     public static string CheckGlyph(bool checkedState) => checkedState ? "CheckCircle2" : "Circle";
 
     public static Brush CheckBrush(bool checkedState) => checkedState ? Palette.Income : Palette.Resource("TextFillColorTertiaryBrush");
 
     /// <summary>« 2 enveloppes · 1 échéance liée ».</summary>
-    public static string Envelopes(int envelopes, uint scheduled)
-        => $"{Plural.Of(envelopes, "enveloppe")} · {Plural.Of((int)scheduled, "échéance")} {(scheduled > 1 ? "liées" : "liée")}";
+    public static string Envelopes(object envelopes, uint scheduled)
+        => $"{Plural.Of(LengthOf(envelopes), "enveloppe")} · {Plural.Of((int)scheduled, "échéance")} {(scheduled > 1 ? "liées" : "liée")}";
 
     /// <summary>Pastille « OK » : ni dépassement, ni catégorie hors budget.</summary>
     public static Visibility OkVisible(bool overBudget, bool unbudgeted)

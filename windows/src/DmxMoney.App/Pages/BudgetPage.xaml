@@ -135,7 +135,7 @@
                                         </Border>
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                             <TextBlock Text="{x:Bind Category.Name}" FontSize="14" FontWeight="SemiBold" />
-                                            <TextBlock Text="{x:Bind local:Format.Envelopes(Envelopes.Length, LinkedScheduledCount)}" Style="{StaticResource DmxCaption}" FontSize="11" />
+                                            <TextBlock Text="{x:Bind local:Format.Envelopes(Envelopes, LinkedScheduledCount)}" Style="{StaticResource DmxCaption}" FontSize="11" />
                                         </StackPanel>
                                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                             <Button
