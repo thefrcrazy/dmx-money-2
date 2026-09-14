@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0 - en développement
+## 2.0.0 - 2026-09-14
 
 ### Applications natives
 

@@ -76,8 +76,10 @@ try {
     }
 
     Write-Host "==> Installeur Velopack"
+    # Un canal par architecture : les installeurs x64 et arm64 ont des noms distincts dans la
+    # release, et l'app installée lit le flux de son canal (releases.<canal>.json).
     vpk pack --packId DmxMoney --packTitle DmxMoney --packVersion $Version `
-        --packDir $publish --mainExe DmxMoney.exe `
+        --packDir $publish --mainExe DmxMoney.exe --channel $Rid `
         --icon (Join-Path $root "windows/src/DmxMoney.App/Assets/dmxmoney.ico") `
         --outputDir (Join-Path $root "target/windows/releases/$Rid")
 }

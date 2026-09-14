@@ -2,7 +2,7 @@
 """Écrit le flux de mise à jour macOS (JSON lu par UpdateChecker) sur la sortie standard.
 
 Une entrée par architecture, comme le `latest.json` de DmxMoney 1.x :
-Apple Silicon (macOS 11+) et Intel/Catalina (macOS 10.15+).
+Apple Silicon (macOS 26+) et Intel/Catalina (macOS 10.15+).
 
     update-feed.py <version> <owner/repo>
 """
@@ -13,7 +13,7 @@ from pathlib import Path
 
 # (clé de plateforme, suffixe du DMG, macOS minimum)
 BUILDS = [
-    ("darwin-arm64", "apple-silicon", "11.0"),
+    ("darwin-arm64", "apple-silicon", "26.0"),
     ("darwin-x86_64", "intel-catalina", "10.15"),
 ]
 

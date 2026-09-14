@@ -8,6 +8,10 @@ on:
       version:
         description: "Version à construire (par défaut : fichier VERSION)"
         required: false
+      prerelease:
+        description: "Publier en pré-version"
+        type: boolean
+        default: false
 
 concurrency:
   group: release-${{ github.ref }}
@@ -75,13 +79,19 @@ jobs:
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
       - name: Réglages locaux (signature, iCloud, flux de mise à jour)
+        env:
+          # Sans secret, le flux est celui des releases GitHub du dépôt, où updates.json est publié.
+          FEED_URL: ${{ secrets.DMX_UPDATE_FEED_URL || format('https://github.com/{0}/releases/latest/download/updates.json', github.repository) }}
         run: |
-          cat > apple/Config/Signing.local.xcconfig <<EOF
-          DEVELOPMENT_TEAM = ${{ secrets.APPLE_TEAM_ID }}
-          DMX_ENTITLEMENTS_SUFFIX = ${{ secrets.APPLE_TEAM_ID != '' && '-iCloud' || '' }}
-          DMX_ICLOUD_CONTAINER = ${{ secrets.DMX_ICLOUD_CONTAINER }}
-          DMX_UPDATE_FEED_URL = ${{ secrets.DMX_UPDATE_FEED_URL }}
-          EOF
+          # Un xcconfig lit « // » comme un commentaire : l'URL s'y écrit « /$()/ ».
+          ESCAPED_FEED_URL="${FEED_URL//\/\//\/\$()\/}"
+          {
+            echo "DEVELOPMENT_TEAM = ${{ secrets.APPLE_TEAM_ID }}"
+            echo "DMX_ENTITLEMENTS_SUFFIX = ${{ secrets.APPLE_TEAM_ID != '' && '-iCloud' || '' }}"
+            echo "DMX_ICLOUD_CONTAINER = ${{ secrets.DMX_ICLOUD_CONTAINER }}"
+            echo "DMX_UPDATE_FEED_URL = $ESCAPED_FEED_URL"
+          } > apple/Config/Signing.local.xcconfig
+          cat apple/Config/Signing.local.xcconfig
           cd apple && xcodegen generate
 
       # Le projet Xcode embarque pwa/dist (la PWA servie par le pont local), qui n'est pas versionné.
@@ -123,12 +133,13 @@ jobs:
         run: |
           version="${{ needs.version.outputs.version }}"
           mkdir -p artifacts
+          # create-dmg copie le contenu du dossier source : on lui passe le dossier qui contient l'app.
           create-dmg --volname "DmxMoney $version" \
             --app-drop-link 420 180 --window-size 620 360 --icon DmxMoney.app 180 180 \
-            "artifacts/DmxMoney-$version-apple-silicon.dmg" dist/modern/DmxMoney.app
+            "artifacts/DmxMoney-$version-apple-silicon.dmg" dist/modern
           create-dmg --volname "DmxMoney $version (Intel)" \
             --app-drop-link 420 180 --window-size 620 360 --icon DmxMoney.app 180 180 \
-            "artifacts/DmxMoney-$version-intel-catalina.dmg" dist/legacy/DmxMoney.app
+            "artifacts/DmxMoney-$version-intel-catalina.dmg" dist/legacy
 
       - name: Flux de mise à jour
         run: |
@@ -158,7 +169,8 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.11.0+v0.31.0 --locked
-      - run: dotnet tool install -g vpk
+      # Même version que le paquet Velopack de l'app (DmxMoney.App.csproj).
+      - run: dotnet tool install -g vpk --version 0.0.1298
       - name: Application et installeur Velopack
         run: pwsh scripts/build-windows.ps1 -Rid ${{ matrix.rid }} -Version ${{ needs.version.outputs.version }}
       - uses: actions/upload-artifact@v4
@@ -187,10 +199,13 @@ jobs:
           cd pwa && bun install --frozen-lockfile && bun run build
       - name: appimagetool
         run: |
-          curl -sL -o /usr/local/bin/appimagetool \
+          sudo curl -fsSL -o /usr/local/bin/appimagetool \
             https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x /usr/local/bin/appimagetool
+          sudo chmod +x /usr/local/bin/appimagetool
       - name: AppImage
+        env:
+          # Pas de FUSE sur les runners : l'outil s'extrait avant de s'exécuter.
+          APPIMAGE_EXTRACT_AND_RUN: 1
         run: ./scripts/build-linux-appimage.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -232,7 +247,18 @@ jobs:
       - name: Release GitHub
         env:
           GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ inputs.prerelease }}
         run: |
           version="${{ needs.version.outputs.version }}"
-          gh release create "v$version" --title "DmxMoney $version" --notes-file notes.md \
-            $(find artifacts -type f | tr '\n' ' ')
+          # Les assets d'une release doivent porter des noms uniques.
+          duplicates="$(find artifacts -type f -printf '%f\n' | sort | uniq -d)"
+          if [ -n "$duplicates" ]; then
+            echo "::error::Noms d'assets en double : $duplicates"
+            exit 1
+          fi
+          flags=()
+          if [ "$PRERELEASE" = "true" ] || [[ "$version" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "v$version" --target "$GITHUB_SHA" --title "DmxMoney $version" \
+            --notes-file notes.md "${flags[@]}" $(find artifacts -type f | tr '\n' ' ')
