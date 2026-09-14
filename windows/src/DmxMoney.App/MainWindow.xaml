@@ -38,7 +38,7 @@
                         Background="Transparent"
                         BorderThickness="0">
                         <StackPanel Orientation="Horizontal" Spacing="10">
-                            <local:LucideIcon Glyph="Power" Size="16" Stroke="{ThemeResource DmxExpense}" />
+                            <local:AppIcon Icon="Power" FontSize="16" Foreground="{ThemeResource DmxExpense}" />
                             <TextBlock Text="Quitter" Foreground="{ThemeResource DmxExpense}" />
                         </StackPanel>
                     </Button>
@@ -72,7 +72,7 @@
                                         <ListView.ItemTemplate>
                                             <DataTemplate x:DataType="local:AccountFilterItem">
                                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                                    <local:LucideIcon Glyph="{x:Bind Icon}" Size="14" Stroke="{x:Bind Brush}" />
+                                                    <local:AppIcon Icon="{x:Bind Icon}" FontSize="14" Foreground="{x:Bind Brush}" />
                                                     <TextBlock Text="{x:Bind Name}" />
                                                 </StackPanel>
                                             </DataTemplate>

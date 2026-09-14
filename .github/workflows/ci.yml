@@ -47,16 +47,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libdbus-1-dev \
                                   desktop-file-utils appstream
-      - name: Icônes symboliques
+      - name: Icônes natives à jour (Windows, Apple, Linux)
+        run: python3 scripts/gen-native-icons.py --check
+      - name: Icône de l'application
         run: ./scripts/gen-linux-icons.sh
-      # Seules les icônes symboliques (SVG) sont générées de façon déterministe. L'icône d'app en
-      # PNG est redimensionnée par sips sur macOS et par ImageMagick ici : les octets diffèrent
-      # d'une plateforme à l'autre sans que l'image change, on ne la compare donc pas.
-      - name: Les icônes symboliques versionnées sont à jour
+      # L'icône d'app en PNG est redimensionnée par sips sur macOS et par ImageMagick ici : les
+      # octets diffèrent d'une plateforme à l'autre sans que l'image change, on ne la compare donc pas.
+      - name: Le thème d'icônes versionné est à jour
         run: |
-          git diff --exit-code -- \
-            linux/dmx-money-gtk/data/icons/hicolor/scalable/actions \
-            linux/dmx-money-gtk/data/icons/hicolor/index.theme
+          git diff --exit-code -- linux/dmx-money-gtk/data/icons/hicolor/index.theme
           git checkout -- linux/dmx-money-gtk/data/icons
       - name: Clippy
         run: cargo clippy -p dmx-money-gtk --all-targets -- -D warnings

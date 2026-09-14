@@ -4,6 +4,7 @@ mod bridge;
 mod charts;
 mod format;
 mod forms;
+mod icon_names;
 mod icons;
 mod pages;
 mod snapshot;

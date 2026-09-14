@@ -58,7 +58,7 @@
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBox PlaceholderText="Nouveau groupe..." Width="300" Text="{x:Bind NewGroup, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                 <Button Style="{StaticResource AccentButtonStyle}" Command="{x:Bind AddCommand}">
-                    <local:LucideIcon Glyph="Plus" Size="14" Stroke="White" />
+                    <local:AppIcon Icon="Plus" FontSize="14" Foreground="White" />
                 </Button>
             </StackPanel>
             <ItemsControl ItemsSource="{x:Bind Groups, Mode=OneWay}">
@@ -69,16 +69,16 @@
                                 <TextBlock Text="{x:Bind}" FontSize="13" FontWeight="Medium" VerticalAlignment="Center" />
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                     <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind}" Click="OnMoveGroupUp" ToolTipService.ToolTip="Monter">
-                                        <local:LucideIcon Glyph="ChevronUp" Size="14" />
+                                        <local:AppIcon Icon="ChevronUp" FontSize="14" />
                                     </Button>
                                     <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind}" Click="OnMoveGroupDown" ToolTipService.ToolTip="Descendre">
-                                        <local:LucideIcon Glyph="ChevronDown" Size="14" />
+                                        <local:AppIcon Icon="ChevronDown" FontSize="14" />
                                     </Button>
                                     <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind}" Click="OnRenameGroup" ToolTipService.ToolTip="Renommer">
-                                        <local:LucideIcon Glyph="Edit2" Size="14" />
+                                        <local:AppIcon Icon="Edit2" FontSize="14" />
                                     </Button>
                                     <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind}" Click="OnDeleteGroup" ToolTipService.ToolTip="Supprimer">
-                                        <local:LucideIcon Glyph="Trash2" Size="14" Stroke="{ThemeResource DmxExpense}" />
+                                        <local:AppIcon Icon="Trash2" FontSize="14" Foreground="{ThemeResource DmxExpense}" />
                                     </Button>
                                 </StackPanel>
                             </Grid>
@@ -102,7 +102,7 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <Border Grid.Column="0" Width="44" Height="44" CornerRadius="12" Background="{x:Bind local:Format.Brush(Color), Mode=OneWay}">
-                    <local:LucideIcon Glyph="{x:Bind Icon, Mode=OneWay}" Size="22" Stroke="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <local:AppIcon Icon="{x:Bind Icon, Mode=OneWay}" FontSize="22" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
                 <StackPanel Grid.Column="1" Spacing="4">
                     <TextBlock Text="Nom" Style="{StaticResource DmxCaption}" />
@@ -114,7 +114,7 @@
                 <GridView ItemsSource="{x:Bind Icons}" SelectedItem="{x:Bind Icon, Mode=TwoWay}" SelectionMode="Single" MaxHeight="170">
                     <GridView.ItemTemplate>
                         <DataTemplate x:DataType="x:String">
-                            <local:LucideIcon Glyph="{x:Bind}" Size="18" Margin="4" />
+                            <local:AppIcon Icon="{x:Bind}" FontSize="18" Margin="4" />
                         </DataTemplate>
                     </GridView.ItemTemplate>
                 </GridView>
@@ -388,7 +388,7 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Border Grid.Column="0" Width="40" Height="40" CornerRadius="12" Background="{x:Bind local:Format.Tint(Category.Color)}">
-                                    <local:LucideIcon Glyph="{x:Bind Category.Icon}" Size="18" Stroke="{x:Bind local:Format.Brush(Category.Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <local:AppIcon Icon="{x:Bind Category.Icon}" FontSize="18" Foreground="{x:Bind local:Format.Brush(Category.Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                     <TextBlock Text="{x:Bind Name}" FontSize="13" FontWeight="SemiBold" />
@@ -398,13 +398,13 @@
                                 <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6">
                                     <Button Tag="{x:Bind}" Click="OnAcceptBudgetSuggestion">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <local:LucideIcon Glyph="Plus" Size="12" />
+                                            <local:AppIcon Icon="Plus" FontSize="12" />
                                             <TextBlock Text="Ajouter" />
                                         </StackPanel>
                                     </Button>
                                     <Button Background="Transparent" BorderThickness="0" Tag="{x:Bind}" Click="OnDismissBudgetSuggestion">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <local:LucideIcon Glyph="Trash2" Size="12" Stroke="{ThemeResource DmxExpense}" />
+                                            <local:AppIcon Icon="Trash2" FontSize="12" Foreground="{ThemeResource DmxExpense}" />
                                             <TextBlock Text="Supprimer" Foreground="{ThemeResource DmxExpense}" />
                                         </StackPanel>
                                     </Button>
@@ -432,7 +432,7 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Border Grid.Column="0" Width="40" Height="40" CornerRadius="12" Background="{x:Bind local:Format.Tint(Category.Color)}">
-                                    <local:LucideIcon Glyph="{x:Bind Category.Icon}" Size="18" Stroke="{x:Bind local:Format.Brush(Category.Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <local:AppIcon Icon="{x:Bind Category.Icon}" FontSize="18" Foreground="{x:Bind local:Format.Brush(Category.Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                     <TextBlock Text="{x:Bind Description}" FontSize="13" FontWeight="SemiBold" />
@@ -448,13 +448,13 @@
                                 <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6">
                                     <Button Tag="{x:Bind}" Click="OnAcceptScheduledSuggestion">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <local:LucideIcon Glyph="Plus" Size="12" />
+                                            <local:AppIcon Icon="Plus" FontSize="12" />
                                             <TextBlock Text="Ajouter" />
                                         </StackPanel>
                                     </Button>
                                     <Button Background="Transparent" BorderThickness="0" Tag="{x:Bind}" Click="OnDismissScheduledSuggestion">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <local:LucideIcon Glyph="Trash2" Size="12" Stroke="{ThemeResource DmxExpense}" />
+                                            <local:AppIcon Icon="Trash2" FontSize="12" Foreground="{ThemeResource DmxExpense}" />
                                             <TextBlock Text="Supprimer" Foreground="{ThemeResource DmxExpense}" />
                                         </StackPanel>
                                     </Button>
@@ -472,7 +472,7 @@
         <StackPanel Spacing="14" Width="460">
             <StackPanel Orientation="Horizontal" Spacing="12">
                 <Border Width="40" Height="40" CornerRadius="12" Background="{ThemeResource DmxSubtleBackground}">
-                    <local:LucideIcon Glyph="Database" Size="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <local:AppIcon Icon="Database" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="{x:Bind FileName}" FontSize="13" FontWeight="SemiBold" />
@@ -524,7 +524,7 @@
 
             <StackPanel Spacing="10" Visibility="{x:Bind local:Format.Visible(IsConfirmStep), Mode=OneWay}" HorizontalAlignment="Center">
                 <Border Width="56" Height="56" CornerRadius="28" Background="{ThemeResource DmxSubtleBackground}" HorizontalAlignment="Center">
-                    <local:LucideIcon Glyph="Check" Size="26" Stroke="{ThemeResource DmxIncome}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <local:AppIcon Icon="Check" FontSize="26" Foreground="{ThemeResource DmxIncome}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
                 <TextBlock Text="Prêt à importer" FontSize="17" FontWeight="Bold" HorizontalAlignment="Center" />
                 <TextBlock Text="{x:Bind ConfirmSummary, Mode=OneWay}" Style="{StaticResource DmxCaption}" TextAlignment="Center" TextWrapping="Wrap" />
@@ -547,7 +547,7 @@
         <StackPanel Spacing="14" Width="460">
             <StackPanel Orientation="Horizontal" Spacing="12">
                 <Border Width="44" Height="44" CornerRadius="12" Background="{ThemeResource DmxAccent}">
-                    <local:LucideIcon Glyph="Sparkles" Size="22" Stroke="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <local:AppIcon Icon="Sparkles" FontSize="22" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="Nouveautés" FontSize="16" FontWeight="SemiBold" />
@@ -558,7 +558,7 @@
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="x:String">
                         <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,0,0,10">
-                            <local:LucideIcon Glyph="CheckCircle2" Size="14" Stroke="{ThemeResource DmxAccent}" VerticalAlignment="Top" />
+                            <local:AppIcon Icon="CheckCircle2" FontSize="14" Foreground="{ThemeResource DmxAccent}" VerticalAlignment="Top" />
                             <TextBlock Text="{x:Bind}" FontSize="13" TextWrapping="Wrap" MaxWidth="380" />
                         </StackPanel>
                     </DataTemplate>

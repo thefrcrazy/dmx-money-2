@@ -4,9 +4,10 @@ Deux workflows GitHub Actions :
 
 * **`ci.yml`** — à chaque push et pull request : noyau Rust (format, clippy, tests), app Linux
   (clippy, build release, validation `.desktop`/AppStream), app Apple (bindings, tests DmxKit,
-  build macOS universel et iOS simulateur), app Windows (bindings, build, tests xUnit).
-  Les étapes « les fichiers générés sont à jour » échouent si les bindings Swift/C# ou les
-  icônes symboliques n'ont pas été régénérés après une modification du noyau ou des SVG.
+  builds macOS modern et legacy, iOS simulateur), app Windows (bindings, build, tests xUnit,
+  ouverture de chaque page de l'app publiée). Les étapes de vérification échouent si les
+  bindings Swift/C# ou les icônes natives (`scripts/gen-native-icons.py --check`) n'ont pas été
+  régénérés après une modification du noyau ou de `shared/icons/native.json`.
 * **`release.yml`** — sur un tag `v2.*` (ou déclenchement manuel) : deux DMG macOS signés et
   notarisés (`-apple-silicon` et `-intel-catalina`) + flux `updates.json`, installeurs Velopack
   x64 et arm64, AppImage, bundle Flatpak, puis création de la release GitHub avec les notes
@@ -41,8 +42,9 @@ d'appcast).
 | `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER` | clé App Store Connect (base64) pour la notarisation |
 | `DMX_UPDATE_FEED_URL` | URL du flux lu par l'app macOS, par exemple `https://github.com/<owner>/<repo>/releases/latest/download/updates.json` |
 
-Sans `DMX_UPDATE_FEED_URL`, l'app macOS ne cherche aucune mise à jour et masque l'entrée de
-menu « Rechercher les mises à jour… » : une compilation locale ne contacte rien.
+Sans ce secret, `release.yml` utilise le flux des releases GitHub du dépôt. Une compilation
+locale n'a pas de flux : l'app macOS ne cherche alors aucune mise à jour et masque l'entrée de
+menu « Rechercher les mises à jour… ».
 
 ## Mises à jour macOS
 
@@ -53,7 +55,7 @@ menu « Rechercher les mises à jour… » : une compilation locale ne contacte 
   "version": "2.0.1",
   "notes": "- …",
   "platforms": {
-    "darwin-arm64":  { "url": "https://…/DmxMoney-2.0.1-apple-silicon.dmg",  "minimumSystemVersion": "11.0" },
+    "darwin-arm64":  { "url": "https://…/DmxMoney-2.0.1-apple-silicon.dmg",  "minimumSystemVersion": "26.0" },
     "darwin-x86_64": { "url": "https://…/DmxMoney-2.0.1-intel-catalina.dmg", "minimumSystemVersion": "10.15" }
   }
 }

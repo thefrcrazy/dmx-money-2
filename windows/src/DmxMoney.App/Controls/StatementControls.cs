@@ -137,7 +137,7 @@ public sealed class StatementAccountPicker : ContentControl
                     Spacing = 8,
                     Children =
                     {
-                        new LucideIcon { Glyph = account.Icon, Size = 16, Stroke = Format.Brush(account.Color) },
+                        new AppIcon { Icon = account.Icon, FontSize = 16, Foreground = Format.Brush(account.Color) },
                         new TextBlock { Text = account.Name, FontWeight = Microsoft.UI.Text.FontWeights.Medium },
                     },
                 },
@@ -250,7 +250,7 @@ public sealed class StatementCategoryTable : ContentControl
             Grid.SetColumn(label, 0);
             row.Children.Add(label);
 
-            var arrow = new LucideIcon { Glyph = "ArrowRight", Size = 14, VerticalAlignment = VerticalAlignment.Center };
+            var arrow = new AppIcon { Icon = "ArrowRight", FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(arrow, 1);
             row.Children.Add(arrow);
 

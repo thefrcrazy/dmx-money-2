@@ -19,13 +19,13 @@
             <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
                 <Button x:Name="SuggestionsButton" Command="{x:Bind ViewModel.ShowSuggestionsCommand}" Visibility="Collapsed">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <local:LucideIcon Glyph="Sparkles" Size="14" />
+                        <local:AppIcon Icon="Sparkles" FontSize="14" />
                         <TextBlock x:Name="SuggestionsLabel" />
                     </StackPanel>
                 </Button>
                 <Button Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.NewScheduledCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <local:LucideIcon Glyph="Plus" Size="14" Stroke="White" />
+                        <local:AppIcon Icon="Plus" FontSize="14" Foreground="White" />
                         <TextBlock Text="Nouvelle transaction" />
                     </StackPanel>
                 </Button>
@@ -107,20 +107,20 @@
 
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <local:LucideIcon Glyph="Calendar" Size="13" Stroke="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <local:AppIcon Icon="Calendar" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <TextBlock Text="{x:Bind local:Format.Medium(Scheduled.NextDate)}" FontSize="12" />
                             </StackPanel>
                             <local:ScheduledBadge Row="{x:Bind}" />
                         </StackPanel>
 
                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                            <local:LucideIcon Glyph="Clock" Size="13" Stroke="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <local:AppIcon Icon="Clock" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             <TextBlock Text="{x:Bind FrequencyLabel}" Style="{StaticResource DmxCaption}" />
                         </StackPanel>
 
                         <Border Grid.Column="3" CornerRadius="9" Padding="8,2" VerticalAlignment="Center" HorizontalAlignment="Left" Background="{x:Bind local:Format.Tint(Category.Color)}">
                             <StackPanel Orientation="Horizontal" Spacing="5">
-                                <local:LucideIcon Glyph="{x:Bind Category.Icon}" Size="11" Stroke="{x:Bind local:Format.Brush(Category.Color)}" />
+                                <local:AppIcon Icon="{x:Bind Category.Icon}" FontSize="11" Foreground="{x:Bind local:Format.Brush(Category.Color)}" />
                                 <TextBlock Text="{x:Bind Category.Name}" FontSize="11" FontWeight="Medium" Foreground="{x:Bind local:Format.Brush(Category.Color)}" TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                         </Border>
@@ -128,7 +128,7 @@
                         <StackPanel Grid.Column="4" VerticalAlignment="Center">
                             <TextBlock Text="{x:Bind Scheduled.Description}" FontSize="13" TextTrimming="CharacterEllipsis" />
                             <StackPanel Orientation="Horizontal" Spacing="4" Visibility="{x:Bind local:Format.VisibleIfText(BudgetName)}">
-                                <local:LucideIcon Glyph="Tag" Size="11" Stroke="{ThemeResource DmxIncome}" />
+                                <local:AppIcon Icon="Tag" FontSize="11" Foreground="{ThemeResource DmxIncome}" />
                                 <TextBlock Text="{x:Bind BudgetName}" FontSize="11" Foreground="{ThemeResource DmxIncome}" />
                             </StackPanel>
                         </StackPanel>
@@ -142,10 +142,10 @@
 
                         <StackPanel Grid.Column="6" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                             <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind Scheduled.Id}" Click="OnEdit" ToolTipService.ToolTip="Modifier">
-                                <local:LucideIcon Glyph="Edit2" Size="14" />
+                                <local:AppIcon Icon="Edit2" FontSize="14" />
                             </Button>
                             <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind Scheduled.Id}" Click="OnDelete" ToolTipService.ToolTip="Supprimer">
-                                <local:LucideIcon Glyph="Trash2" Size="14" Stroke="{ThemeResource DmxExpense}" />
+                                <local:AppIcon Icon="Trash2" FontSize="14" Foreground="{ThemeResource DmxExpense}" />
                             </Button>
                         </StackPanel>
                     </Grid>

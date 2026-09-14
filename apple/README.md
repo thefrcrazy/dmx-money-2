@@ -18,7 +18,7 @@ montants et les règles restent identiques.
 
 | Dossier | Contenu |
 |---|---|
-| `DmxMoney-macOS-Modern` | app SwiftUI : `DmxMoneyModernApp`, `ModernShell`, pages natives, tous les formulaires en `Form` groupés (assistant d'import, restauration `.dmx`, suggestions, nouveautés comprises), compagnon mobile natif (QR CoreImage), page Paramètres dans la fenêtre, correspondance Lucide → SF Symbols |
+| `DmxMoney-macOS-Modern` | app SwiftUI : `DmxMoneyModernApp`, `ModernShell`, pages natives, tous les formulaires en `Form` groupés (assistant d'import, restauration `.dmx`, suggestions, nouveautés comprises), compagnon mobile natif (QR CoreImage), page Paramètres dans la fenêtre, icônes SF Symbols (table commune de DmxKit, générée depuis `shared/icons/native.json`) |
 | `DmxMoney-macOS` | app AppKit : `AppDelegate`, `MainWindowController`, `JournalViewController`, menus |
 | `DmxMoney-macOS-Shared` | code commun aux deux : recherche de mise à jour, panneaux de fichiers, démarrage du pont, reprise d'une base 1.x, mode capture |
 

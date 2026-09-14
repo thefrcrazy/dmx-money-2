@@ -69,11 +69,12 @@ d'erreur, ce qui permet de repérer un arbre de widgets incorrect.
 
 ## Icônes
 
-`scripts/gen-linux-icons.sh` convertit les SVG Lucide de `shared/icons/lucide` en icônes
-symboliques GTK dans `dmx-money-gtk/data/icons/hicolor/scalable/actions`
-(`Wallet` → `dmx-wallet-symbolic`). GTK recolore une icône symbolique en forçant `fill` :
-les traits Lucide sont donc transformés en surfaces fermées par `tools/gen-symbolic-icons`,
-ce qui rend les icônes correctes sur toutes les versions de GTK, avec la couleur du thème
+Les icônes sont celles de GNOME : icônes symboliques du thème Adwaita quand il en a un
+équivalent, sinon du GNOME Icon Development Kit (licence CC0). Toutes sont embarquées dans
+`dmx-money-gtk/data/icons/hicolor/scalable/actions` sous un nom préfixé (`dmx-adwaita-…`,
+`dmx-…`) : elles s'affichent même sans thème Adwaita installé (autre bureau, AppImage).
+`scripts/gen-native-icons.py` génère la correspondance (`src/icon_names.rs`) depuis
+`shared/icons/native.json` et copie les icônes ; GTK les recolore avec la couleur du thème
 comme avec les 120 couleurs de comptes et de catégories.
 
 Les noms d'icônes stockés en base restent les noms Lucide, identiques sur les trois

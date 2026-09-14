@@ -186,11 +186,11 @@ public sealed class BridgeStepRow : UserControl
             Height = 24,
             CornerRadius = new CornerRadius(6),
             Background = ready ? Format.Tint("#10b981") : Format.Tint("#9ca3af"),
-            Child = new LucideIcon
+            Child = new AppIcon
             {
-                Glyph = ready ? "CheckCircle2" : icon,
-                Size = 13,
-                Stroke = ready ? Palette.Income : Palette.Resource("TextFillColorSecondaryBrush"),
+                Icon = ready ? "CheckCircle2" : icon,
+                FontSize = 13,
+                Foreground = ready ? Palette.Income : Palette.Resource("TextFillColorSecondaryBrush"),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             },

@@ -16,8 +16,9 @@ que le noyau calcule.
 Les graphiques sont dessinés avec les primitives XAML (`Path`, `Polyline`, `ArcSegment`) plutôt
 qu'avec une bibliothèque tierce : même rendu que sur macOS et Linux, aucune dépendance de plus.
 
-Les icônes Lucide sont converties en géométries XAML par `scripts/gen-winui-icons.py`
-(`Icons/LucideIcons.g.cs`), ce qui permet de les teinter comme du texte.
+Les icônes sont celles de Windows : `AppIcon` affiche le glyphe Segoe Fluent Icons (Segoe MDL2
+Assets sous Windows 10) du nom d'icône stocké en base. La correspondance vient de
+`shared/icons/native.json`, générée dans `Icons/FluentIcons.g.cs` par `scripts/gen-native-icons.py`.
 
 ## Développer
 

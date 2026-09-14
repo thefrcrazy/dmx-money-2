@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.2 - en développement
+
+### Interface
+
+- Icônes natives sur chaque système : SF Symbols sur macOS et iOS, Segoe Fluent Icons sous Windows, icônes symboliques GNOME (thème Adwaita et GNOME Icon Development Kit) sous Linux. Les dessins Lucide ne servent plus qu'à la PWA et à macOS 10.15, qui n'a pas de SF Symbols.
+
+### Corrections
+
+- Windows : l'app se fermait en ouvrant la page Analyses, restée à moitié affichée (plage vide, graphiques non remplis).
+- Windows : une page qui ne peut pas s'ouvrir laisse désormais son exception réelle dans `crash.log`, avec les dernières étapes (pages, formulaires) ; la CI ouvre chaque page de l'app publiée.
+
 ## 2.0.1 - 2026-09-14
 
 ### Corrections

@@ -26,8 +26,7 @@ La version 2 est une réécriture **native sur chaque plateforme** autour d'un *
 ├── linux/dmx-money-gtk/         # app GTK4/libadwaita
 ├── pwa/                         # client web du compagnon mobile, embarqué par les apps de bureau
 ├── cloudflare/managed-bridge/   # Worker du pont HTTPS managé
-├── shared/                      # icônes Lucide, logos
-├── tools/gen-symbolic-icons/    # conversion des icônes Lucide en symboliques GTK
+├── shared/                      # icônes (catalogue, correspondances natives, kit GNOME), logos
 ├── tools/seed-demo/             # jeu de données de démonstration (captures, essais)
 └── scripts/                     # builds et génération des bindings
 ```
@@ -84,4 +83,4 @@ DMXMONEY_DATA_DIR=/tmp/dmx-demo cargo run -p dmx-money-gtk    # ou l'app macOS /
 
 ## Licence
 
-MIT, voir [`LICENSE`](LICENSE). Les icônes proviennent de [Lucide](https://lucide.dev) (licence ISC, voir `shared/icons/lucide/LICENSE`).
+MIT, voir [`LICENSE`](LICENSE). Chaque app affiche les icônes de son système : SF Symbols sur Apple, Segoe Fluent Icons sous Windows, icônes symboliques GNOME sous Linux : thème [Adwaita](https://gitlab.gnome.org/GNOME/adwaita-icon-theme) (LGPL v3 ou CC BY-SA 3.0, voir `shared/icons/adwaita`) et [GNOME Icon Development Kit](https://gitlab.gnome.org/Teams/Design/icon-development-kit) (CC0, voir `shared/icons/gnome-kit`). La PWA et macOS 10.15 utilisent [Lucide](https://lucide.dev) (licence ISC, voir `shared/icons/lucide/LICENSE`).

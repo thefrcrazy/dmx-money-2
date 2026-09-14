@@ -12,7 +12,7 @@
                 <TextBlock Text="Gestion des Catégories" Style="{StaticResource DmxPageTitle}" VerticalAlignment="Center" />
                 <Button Style="{StaticResource AccentButtonStyle}" HorizontalAlignment="Right" Command="{x:Bind ViewModel.NewCategoryCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <local:LucideIcon Glyph="Plus" Size="14" Stroke="White" />
+                        <local:AppIcon Icon="Plus" FontSize="14" Foreground="White" />
                         <TextBlock Text="Nouvelle catégorie" />
                     </StackPanel>
                 </Button>
@@ -38,24 +38,24 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Border Grid.Column="0" Width="36" Height="36" CornerRadius="10" Background="{x:Bind local:Format.Tint(Color)}">
-                                    <local:LucideIcon Glyph="{x:Bind Icon}" Size="18" Stroke="{x:Bind local:Format.Brush(Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <local:AppIcon Icon="{x:Bind Icon}" FontSize="18" Foreground="{x:Bind local:Format.Brush(Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <TextBlock Grid.Column="1" Text="{x:Bind Name}" FontSize="13" FontWeight="Medium" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                 <StackPanel Grid.Column="2" Orientation="Horizontal" Visibility="{x:Bind local:CategoriesPage.EditableVisibility(Id)}">
                                     <Button Background="Transparent" BorderThickness="0" Padding="6" Tag="{x:Bind Id}" Click="OnEdit" ToolTipService.ToolTip="Modifier">
-                                        <local:LucideIcon Glyph="Edit2" Size="14" />
+                                        <local:AppIcon Icon="Edit2" FontSize="14" />
                                     </Button>
                                     <Button Background="Transparent" BorderThickness="0" Padding="6" Tag="{x:Bind Id}" Click="OnDelete" ToolTipService.ToolTip="Supprimer">
-                                        <local:LucideIcon Glyph="Trash2" Size="14" Stroke="{ThemeResource DmxExpense}" />
+                                        <local:AppIcon Icon="Trash2" FontSize="14" Foreground="{ThemeResource DmxExpense}" />
                                     </Button>
                                 </StackPanel>
-                                <local:LucideIcon
+                                <local:AppIcon
                                     Grid.Column="2"
-                                    Glyph="Lock"
-                                    Size="14"
+                                    Icon="Lock"
+                                    FontSize="14"
                                     Margin="6,0"
                                     VerticalAlignment="Center"
-                                    Stroke="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                     Visibility="{x:Bind local:CategoriesPage.LockedVisibility(Id)}" />
                             </Grid>
                         </Border>

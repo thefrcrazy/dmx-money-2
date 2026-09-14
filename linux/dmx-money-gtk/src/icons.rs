@@ -1,4 +1,4 @@
-//! Icônes Lucide installées comme icônes symboliques GTK, donc recolorées par le thème,
+//! Icônes natives (thème Adwaita et GNOME Icon Development Kit), recolorées par le thème,
 //! et couleurs des comptes et catégories appliquées par CSS.
 
 use std::cell::{Cell, RefCell};
@@ -15,16 +15,10 @@ thread_local! {
     static FLUSH_QUEUED: Cell<bool> = const { Cell::new(false) };
 }
 
-/// « Wallet » → « dmx-wallet-symbolic ».
-pub fn icon_name(lucide: &str) -> String {
-    let mut kebab = String::new();
-    for (index, character) in lucide.chars().enumerate() {
-        if character.is_uppercase() && index > 0 {
-            kebab.push('-');
-        }
-        kebab.extend(character.to_lowercase());
-    }
-    format!("dmx-{kebab}-symbolic")
+/// Icône native d'un nom stocké en base : icône du thème Adwaita, ou icône embarquée du GNOME
+/// Icon Development Kit (table partagée shared/icons/native.json).
+pub fn icon_name(name: &str) -> String {
+    crate::icon_names::native(name).to_string()
 }
 
 /// Ajoute les dossiers d'icônes possibles : installation système, AppImage, ou sources.
@@ -154,7 +148,7 @@ pub fn preload_palette() {
     flush();
 }
 
-/// Icône symbolique Lucide.
+/// Icône symbolique native.
 pub fn image(lucide: &str, size: i32) -> gtk::Image {
     let image = gtk::Image::from_icon_name(&icon_name(lucide));
     image.set_pixel_size(size);

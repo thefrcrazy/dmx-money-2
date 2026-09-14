@@ -6,7 +6,9 @@ import AppKit
 import UIKit
 #endif
 
-/// Icône Lucide (nom stocké en base), rendue en mode modèle pour prendre la couleur du texte.
+/// Icône d'un nom stocké en base (catalogue partagé avec les autres plateformes), rendue avec les
+/// SF Symbols du système et teintée par la couleur du texte. Seul macOS 10.15, qui n'a pas de
+/// SF Symbols, retombe sur les dessins embarqués.
 public struct DmxIcon: View {
     private let name: String
     private let size: CGFloat
@@ -17,24 +19,50 @@ public struct DmxIcon: View {
     }
 
     public var body: some View {
-        Image(DmxIcon.resolvedName(name), bundle: .module)
-            .renderingMode(.template)
+        DmxIcon.swiftUIImage(name)
             .resizable()
             .aspectRatio(contentMode: .fit)
             .frame(width: size, height: size)
     }
 
-    /// Nom disponible dans le catalogue, « Tag » sinon (comme le repli de 1.x).
-    public static func resolvedName(_ name: String) -> String {
-        exists(name) ? name : "Tag"
+    /// SF Symbol correspondant au nom stocké en base (« tag » par défaut).
+    public static func symbolName(for name: String) -> String {
+        SymbolNames.map[name] ?? "tag"
     }
 
     /// Image SwiftUI en mode modèle (barres d'onglets, listes système).
     public static func swiftUIImage(_ name: String) -> Image {
-        Image(resolvedName(name), bundle: .module).renderingMode(.template)
+        if #available(macOS 11, iOS 14, *) {
+            return Image(systemName: availableSymbol(for: name))
+        }
+        return Image(resolvedName(name), bundle: .module).renderingMode(.template)
+    }
+
+    /// Symbole présent sur le système en cours : certains n'existent qu'à partir d'une version
+    /// récente, « tag » les remplace alors.
+    @available(macOS 11, iOS 14, *)
+    static func availableSymbol(for name: String) -> String {
+        let symbol = symbolName(for: name)
+        lock.lock()
+        defer { lock.unlock() }
+        if let known = symbolCache[symbol] { return known }
+        #if os(macOS)
+        let exists = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) != nil
+        #else
+        let exists = UIImage(systemName: symbol) != nil
+        #endif
+        let resolved = exists ? symbol : "tag"
+        symbolCache[symbol] = resolved
+        return resolved
+    }
+
+    /// Dessin embarqué (macOS 10.15) : nom disponible dans le catalogue, « Tag » sinon.
+    public static func resolvedName(_ name: String) -> String {
+        exists(name) ? name : "Tag"
     }
 
     private static var cache: [String: Bool] = [:]
+    private static var symbolCache: [String: String] = [:]
     private static let lock = NSLock()
 
     public static func exists(_ name: String) -> Bool {
@@ -58,6 +86,12 @@ public struct DmxIcon: View {
     #if os(macOS)
     /// Image AppKit pour les tableaux et menus.
     public static func image(_ name: String, size: CGFloat = 16) -> NSImage? {
+        if #available(macOS 11, *),
+           let symbol = NSImage(systemSymbolName: availableSymbol(for: name), accessibilityDescription: nil)?
+               .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size * 0.8, weight: .regular)) {
+            symbol.isTemplate = true
+            return symbol
+        }
         guard let image = Bundle.module.image(forResource: NSImage.Name(resolvedName(name)))?.copy() as? NSImage else {
             return nil
         }

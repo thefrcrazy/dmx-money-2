@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Génère le catalogue d'icônes Lucide de DmxKit (images vectorielles en mode modèle) à partir de
-# shared/icons/lucide. Les noms d'images sont les noms Lucide stockés en base.
+# shared/icons/lucide. Les noms d'images sont les noms Lucide stockés en base. Ce n'est qu'un
+# repli pour macOS 10.15, qui n'a pas de SF Symbols : ailleurs, DmxIcon affiche les SF Symbols
+# de SymbolNames.swift (scripts/gen-native-icons.py).
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 

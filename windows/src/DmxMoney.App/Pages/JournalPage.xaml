@@ -21,7 +21,7 @@
                 <TextBlock x:Name="Summary" Style="{StaticResource DmxCaption}" VerticalAlignment="Center" />
                 <Button Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.NewTransactionCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <local:LucideIcon Glyph="Plus" Size="14" Stroke="White" />
+                        <local:AppIcon Icon="Plus" FontSize="14" Foreground="White" />
                         <TextBlock Text="Nouvelle transaction" />
                     </StackPanel>
                 </Button>
@@ -76,7 +76,7 @@
                     <TextBlock x:Name="SelectionLabel" FontWeight="SemiBold" VerticalAlignment="Center" />
                     <Button Background="Transparent" BorderThickness="0" Command="{x:Bind ViewModel.ToggleCheckedSelectionCommand}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <local:LucideIcon Glyph="CheckCircle2" Size="14" />
+                            <local:AppIcon Icon="CheckCircle2" FontSize="14" />
                             <TextBlock Text="Pointer/Dépointer" />
                         </StackPanel>
                     </Button>
@@ -85,7 +85,7 @@
                     <Button Content="Annuler" Click="OnClearSelection" />
                     <Button Command="{x:Bind ViewModel.DeleteSelectionCommand}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <local:LucideIcon Glyph="Trash2" Size="14" Stroke="{ThemeResource DmxExpense}" />
+                            <local:AppIcon Icon="Trash2" FontSize="14" Foreground="{ThemeResource DmxExpense}" />
                             <TextBlock Text="Supprimer" Foreground="{ThemeResource DmxExpense}" />
                         </StackPanel>
                     </Button>
@@ -154,7 +154,7 @@
 
                         <Border Grid.Column="2" CornerRadius="9" Padding="8,2" VerticalAlignment="Center" HorizontalAlignment="Left" Background="{x:Bind local:Format.Tint(Category.Color)}">
                             <StackPanel Orientation="Horizontal" Spacing="5">
-                                <local:LucideIcon Glyph="{x:Bind Category.Icon}" Size="11" Stroke="{x:Bind local:Format.Brush(Category.Color)}" />
+                                <local:AppIcon Icon="{x:Bind Category.Icon}" FontSize="11" Foreground="{x:Bind local:Format.Brush(Category.Color)}" />
                                 <TextBlock Text="{x:Bind local:Format.Upper(Category.Name)}" FontSize="10" FontWeight="Bold" Foreground="{x:Bind local:Format.Brush(Category.Color)}" TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                         </Border>
@@ -173,17 +173,17 @@
                             VerticalAlignment="Center"
                             Tag="{x:Bind Transaction.Id}"
                             Click="OnToggleChecked">
-                            <local:LucideIcon Glyph="{x:Bind local:Format.CheckGlyph(Transaction.Checked)}" Size="18" Stroke="{x:Bind local:Format.CheckBrush(Transaction.Checked)}" />
+                            <local:AppIcon Icon="{x:Bind local:Format.CheckGlyph(Transaction.Checked)}" FontSize="18" Foreground="{x:Bind local:Format.CheckBrush(Transaction.Checked)}" />
                         </Button>
 
                         <TextBlock Grid.Column="7" Text="{x:Bind local:Format.Money(Balance)}" Style="{StaticResource DmxCaption}" TextAlignment="Right" VerticalAlignment="Center" Opacity="0.7" />
 
                         <StackPanel Grid.Column="8" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                             <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind Transaction.Id}" Click="OnEdit" ToolTipService.ToolTip="Modifier">
-                                <local:LucideIcon Glyph="Edit2" Size="14" />
+                                <local:AppIcon Icon="Edit2" FontSize="14" />
                             </Button>
                             <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind Transaction.Id}" Click="OnDelete" ToolTipService.ToolTip="Supprimer">
-                                <local:LucideIcon Glyph="Trash2" Size="14" Stroke="{ThemeResource DmxExpense}" />
+                                <local:AppIcon Icon="Trash2" FontSize="14" Foreground="{ThemeResource DmxExpense}" />
                             </Button>
                         </StackPanel>
                     </Grid>

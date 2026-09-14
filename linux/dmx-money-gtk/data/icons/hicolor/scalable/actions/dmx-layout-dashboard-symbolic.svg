@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-  <path class="foreground-fill" fill="#000000" d="M4 2 L9 2 Q11 2 11 4 L11 11 Q11 13 9 13 L4 13 Q2 13 2 11 L2 4 Q2 2 4 2 Z M4 4 L4 4 L4 11 L4 11 L9 11 L9 11 L9 4 L9 4 L4 4 Z"/>
-  <path class="foreground-fill" fill="#000000" d="M15 2 L20 2 Q22 2 22 4 L22 7 Q22 9 20 9 L15 9 Q13 9 13 7 L13 4 Q13 2 15 2 Z M15 4 L15 4 L15 7 Q15 7 15 7 L20 7 L20 7 L20 4 L20 4 L15 4 Z"/>
-  <path class="foreground-fill" fill="#000000" d="M15 11 L20 11 Q22 11 22 13 L22 20 Q22 22 20 22 L15 22 Q13 22 13 20 L13 13 Q13 11 15 11 Z M15 13 L15 13 L15 20 L15 20 L20 20 L20 20 L20 13 L20 13 L15 13 Z"/>
-  <path class="foreground-fill" fill="#000000" d="M4 15 L9 15 Q11 15 11 17 L11 20 Q11 22 9 22 L4 22 Q2 22 2 20 L2 17 Q2 15 4 15 Z M4 17 L4 17 L4 20 L4 20 L9 20 L9 20 L9 17 L9 17 L4 17 Z"/>
-</svg>

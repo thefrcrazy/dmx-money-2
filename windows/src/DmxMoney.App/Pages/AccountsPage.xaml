@@ -13,13 +13,13 @@
                 <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
                     <Button Command="{x:Bind ViewModel.ManageGroupsCommand}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <local:LucideIcon Glyph="Settings" Size="14" />
+                            <local:AppIcon Icon="Settings" FontSize="14" />
                             <TextBlock Text="Gérer les groupes" />
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.NewAccountCommand}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <local:LucideIcon Glyph="Plus" Size="14" Stroke="White" />
+                            <local:AppIcon Icon="Plus" FontSize="14" Foreground="White" />
                             <TextBlock Text="Nouveau compte" />
                         </StackPanel>
                     </Button>
@@ -71,7 +71,7 @@
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
                                                     <Border Grid.Column="0" Width="44" Height="44" CornerRadius="12" Background="{x:Bind local:Format.Tint(Account.Color)}">
-                                                        <local:LucideIcon Glyph="{x:Bind Account.Icon}" Size="22" Stroke="{x:Bind local:Format.Brush(Account.Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                        <local:AppIcon Icon="{x:Bind Account.Icon}" FontSize="22" Foreground="{x:Bind local:Format.Brush(Account.Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                     </Border>
                                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                         <TextBlock Text="{x:Bind Account.Name}" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
@@ -79,10 +79,10 @@
                                                     </StackPanel>
                                                     <StackPanel Grid.Column="2" Orientation="Horizontal">
                                                         <Button Background="Transparent" BorderThickness="0" Padding="6" Tag="{x:Bind Account.Id}" Click="OnEditAccount" ToolTipService.ToolTip="Modifier">
-                                                            <local:LucideIcon Glyph="Edit2" Size="14" />
+                                                            <local:AppIcon Icon="Edit2" FontSize="14" />
                                                         </Button>
                                                         <Button Background="Transparent" BorderThickness="0" Padding="6" Tag="{x:Bind Account.Id}" Click="OnDeleteAccount" ToolTipService.ToolTip="Supprimer">
-                                                            <local:LucideIcon Glyph="Trash2" Size="14" Stroke="{ThemeResource DmxExpense}" />
+                                                            <local:AppIcon Icon="Trash2" FontSize="14" Foreground="{ThemeResource DmxExpense}" />
                                                         </Button>
                                                     </StackPanel>
                                                 </Grid>

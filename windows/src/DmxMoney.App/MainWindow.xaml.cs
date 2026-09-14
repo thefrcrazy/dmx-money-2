@@ -137,10 +137,12 @@ public sealed partial class MainWindow : Window
 
     private NavigationViewItem CreateItem(AppRoute route)
     {
-        var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        content.Children.Add(new LucideIcon { Glyph = NavigationGlyphs[route], Size = 16 });
-        content.Children.Add(new TextBlock { Text = route.Title() });
-        var item = new NavigationViewItem { Content = content, Tag = route };
+        var item = new NavigationViewItem
+        {
+            Content = route.Title(),
+            Icon = new AppIcon { Icon = NavigationGlyphs[route] },
+            Tag = route,
+        };
         navigationItems[route] = item;
         return item;
     }

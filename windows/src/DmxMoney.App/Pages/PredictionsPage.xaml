@@ -27,13 +27,13 @@
                         <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
                             <Button x:Name="ClearFakeButton" Command="{x:Bind ViewModel.ClearFakeTransactionsCommand}" Visibility="Collapsed">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <local:LucideIcon Glyph="Trash2" Size="14" />
+                                    <local:AppIcon Icon="Trash2" FontSize="14" />
                                     <TextBlock Text="Tout retirer" />
                                 </StackPanel>
                             </Button>
                             <Button Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.NewFakeTransactionCommand}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <local:LucideIcon Glyph="Plus" Size="14" Stroke="White" />
+                                    <local:AppIcon Icon="Plus" FontSize="14" Foreground="White" />
                                     <TextBlock Text="Ajouter" />
                                 </StackPanel>
                             </Button>
@@ -65,7 +65,7 @@
                                             Unchecked="OnToggleFake"
                                             MinWidth="0" />
                                         <Border Grid.Column="1" Width="34" Height="34" CornerRadius="10" Background="{x:Bind local:Format.KindTint(Transaction.TransactionType)}">
-                                            <local:LucideIcon Glyph="{x:Bind local:Format.KindGlyph(Transaction.TransactionType)}" Size="16" Stroke="{x:Bind local:Format.KindBrush(Transaction.TransactionType)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <local:AppIcon Icon="{x:Bind local:Format.KindGlyph(Transaction.TransactionType)}" FontSize="16" Foreground="{x:Bind local:Format.KindBrush(Transaction.TransactionType)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                         <StackPanel Grid.Column="2" VerticalAlignment="Center">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -84,10 +84,10 @@
                                             VerticalAlignment="Center" />
                                         <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
                                             <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind Transaction.Id}" Click="OnEditFake" ToolTipService.ToolTip="Modifier cette transaction fictive">
-                                                <local:LucideIcon Glyph="Edit2" Size="14" />
+                                                <local:AppIcon Icon="Edit2" FontSize="14" />
                                             </Button>
                                             <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind Transaction.Id}" Click="OnRemoveFake" ToolTipService.ToolTip="Retirer cette transaction fictive">
-                                                <local:LucideIcon Glyph="Trash2" Size="14" Stroke="{ThemeResource DmxExpense}" />
+                                                <local:AppIcon Icon="Trash2" FontSize="14" Foreground="{ThemeResource DmxExpense}" />
                                             </Button>
                                         </StackPanel>
                                     </Grid>
@@ -135,7 +135,7 @@
             <Border x:Name="RiskCard" Style="{StaticResource DmxCard}" Visibility="Collapsed">
                 <StackPanel Spacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="10">
-                        <local:LucideIcon Glyph="ShieldAlert" Size="18" Stroke="{ThemeResource DmxWarning}" />
+                        <local:AppIcon Icon="ShieldAlert" FontSize="18" Foreground="{ThemeResource DmxWarning}" />
                         <TextBlock x:Name="RiskTitle" Style="{StaticResource DmxCardTitle}" />
                     </StackPanel>
                     <TextBlock

@@ -16,13 +16,13 @@
                 <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
                     <Button x:Name="SuggestionsButton" Command="{x:Bind ViewModel.ShowSuggestionsCommand}" Visibility="Collapsed">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <local:LucideIcon Glyph="Sparkles" Size="14" />
+                            <local:AppIcon Icon="Sparkles" FontSize="14" />
                             <TextBlock x:Name="SuggestionsLabel" />
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.NewBudgetCommand}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <local:LucideIcon Glyph="Plus" Size="14" Stroke="White" />
+                            <local:AppIcon Icon="Plus" FontSize="14" Foreground="White" />
                             <TextBlock Text="Nouveau budget" />
                         </StackPanel>
                     </Button>
@@ -41,7 +41,7 @@
                     <StackPanel Spacing="6">
                         <Grid>
                             <TextBlock Text="PRÉVU" Style="{StaticResource DmxSectionLabel}" />
-                            <local:LucideIcon Glyph="CalendarClock" Size="15" HorizontalAlignment="Right" Stroke="{ThemeResource DmxAccent}" />
+                            <local:AppIcon Icon="CalendarClock" FontSize="15" HorizontalAlignment="Right" Foreground="{ThemeResource DmxAccent}" />
                         </Grid>
                         <TextBlock x:Name="PlannedValue" FontSize="22" FontWeight="Bold" />
                         <TextBlock x:Name="PlannedCaption" Style="{StaticResource DmxCaption}" FontSize="11" />
@@ -51,7 +51,7 @@
                     <StackPanel Spacing="6">
                         <Grid>
                             <TextBlock Text="DÉPENSÉ" Style="{StaticResource DmxSectionLabel}" />
-                            <local:LucideIcon Glyph="TrendingDown" Size="15" HorizontalAlignment="Right" Stroke="{ThemeResource DmxExpense}" />
+                            <local:AppIcon Icon="TrendingDown" FontSize="15" HorizontalAlignment="Right" Foreground="{ThemeResource DmxExpense}" />
                         </Grid>
                         <TextBlock x:Name="SpentValue" FontSize="22" FontWeight="Bold" />
                         <TextBlock x:Name="SpentCaption" Style="{StaticResource DmxCaption}" FontSize="11" />
@@ -61,7 +61,7 @@
                     <StackPanel Spacing="6">
                         <Grid>
                             <TextBlock Text="RESTANT" Style="{StaticResource DmxSectionLabel}" />
-                            <local:LucideIcon x:Name="RemainingIcon" Glyph="Wallet" Size="15" HorizontalAlignment="Right" />
+                            <local:AppIcon x:Name="RemainingIcon" Icon="Wallet" FontSize="15" HorizontalAlignment="Right" />
                         </Grid>
                         <TextBlock x:Name="RemainingValue" FontSize="22" FontWeight="Bold" />
                         <TextBlock x:Name="RemainingCaption" Style="{StaticResource DmxCaption}" FontSize="11" />
@@ -71,7 +71,7 @@
                     <StackPanel Spacing="6">
                         <Grid>
                             <TextBlock Text="ÉTAT" Style="{StaticResource DmxSectionLabel}" />
-                            <local:LucideIcon x:Name="StateIcon" Glyph="CheckCircle2" Size="15" HorizontalAlignment="Right" />
+                            <local:AppIcon x:Name="StateIcon" Icon="CheckCircle2" FontSize="15" HorizontalAlignment="Right" />
                         </Grid>
                         <TextBlock x:Name="StateValue" FontSize="22" FontWeight="Bold" />
                         <TextBlock x:Name="StateCaption" Style="{StaticResource DmxCaption}" FontSize="11" />
@@ -131,7 +131,7 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <Border Grid.Column="0" Width="36" Height="36" CornerRadius="10" Background="{x:Bind local:Format.Tint(Category.Color)}">
-                                            <local:LucideIcon Glyph="{x:Bind Category.Icon}" Size="18" Stroke="{x:Bind local:Format.Brush(Category.Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <local:AppIcon Icon="{x:Bind Category.Icon}" FontSize="18" Foreground="{x:Bind local:Format.Brush(Category.Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                             <TextBlock Text="{x:Bind Category.Name}" FontSize="14" FontWeight="SemiBold" />
@@ -143,16 +143,16 @@
                                                 Click="OnCreateBudgetForCategory"
                                                 Visibility="{x:Bind local:Format.Visible(IsUnbudgeted)}">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                                    <local:LucideIcon Glyph="Plus" Size="12" />
+                                                    <local:AppIcon Icon="Plus" FontSize="12" />
                                                     <TextBlock Text="Créer un budget" />
                                                 </StackPanel>
                                             </Button>
                                             <StackPanel Orientation="Horizontal" Spacing="4" Visibility="{x:Bind local:Format.Visible(IsOverBudget)}">
-                                                <local:LucideIcon Glyph="AlertCircle" Size="13" Stroke="{ThemeResource DmxExpense}" />
+                                                <local:AppIcon Icon="AlertCircle" FontSize="13" Foreground="{ThemeResource DmxExpense}" />
                                                 <TextBlock Text="Dépassé" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource DmxExpense}" />
                                             </StackPanel>
                                             <StackPanel Orientation="Horizontal" Spacing="4" Visibility="{x:Bind local:Format.OkVisible(IsOverBudget, IsUnbudgeted)}">
-                                                <local:LucideIcon Glyph="CheckCircle2" Size="13" Stroke="{ThemeResource DmxIncome}" />
+                                                <local:AppIcon Icon="CheckCircle2" FontSize="13" Foreground="{ThemeResource DmxIncome}" />
                                                 <TextBlock Text="OK" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource DmxIncome}" />
                                             </StackPanel>
                                         </StackPanel>
@@ -180,10 +180,10 @@
                                                             <TextBlock Grid.Column="3" Text="{x:Bind local:Format.Money(Remaining)}" Foreground="{x:Bind local:Format.PositiveBrush(Remaining)}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
                                                             <StackPanel Grid.Column="4" Orientation="Horizontal">
                                                                 <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind Budget.Id}" Click="OnEditBudget" ToolTipService.ToolTip="Modifier">
-                                                                    <local:LucideIcon Glyph="Edit2" Size="14" />
+                                                                    <local:AppIcon Icon="Edit2" FontSize="14" />
                                                                 </Button>
                                                                 <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind Budget.Id}" Click="OnDeleteBudget" ToolTipService.ToolTip="Supprimer">
-                                                                    <local:LucideIcon Glyph="Trash2" Size="14" Stroke="{ThemeResource DmxExpense}" />
+                                                                    <local:AppIcon Icon="Trash2" FontSize="14" Foreground="{ThemeResource DmxExpense}" />
                                                                 </Button>
                                                             </StackPanel>
                                                         </Grid>
@@ -192,7 +192,7 @@
                                                             <ItemsControl.ItemTemplate>
                                                                 <DataTemplate x:DataType="interop:LinkedScheduled">
                                                                     <StackPanel Orientation="Horizontal" Spacing="6">
-                                                                        <local:LucideIcon Glyph="CalendarClock" Size="11" Stroke="{ThemeResource DmxAccent}" />
+                                                                        <local:AppIcon Icon="CalendarClock" FontSize="11" Foreground="{ThemeResource DmxAccent}" />
                                                                         <TextBlock Text="{x:Bind Description}" Style="{StaticResource DmxCaption}" FontSize="11" />
                                                                         <TextBlock Text="{x:Bind local:Format.Signed(Amount, TransactionType)}" Foreground="{x:Bind local:Format.KindBrush(TransactionType)}" FontSize="11" FontWeight="SemiBold" />
                                                                         <TextBlock Text="·" Style="{StaticResource DmxCaption}" FontSize="11" />

@@ -13,7 +13,7 @@
             <!-- Apparence -->
             <StackPanel Spacing="10">
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <local:LucideIcon Glyph="Palette" Size="14" Stroke="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <local:AppIcon Icon="Palette" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <TextBlock Text="APPARENCE" Style="{StaticResource DmxSectionLabel}" />
                 </StackPanel>
                 <Border Style="{StaticResource DmxCard}" Padding="0" CornerRadius="14">
@@ -25,13 +25,13 @@
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Center">
                                 <ToggleButton x:Name="LightTheme" Click="OnThemeClicked" Tag="light" Padding="12,6" ToolTipService.ToolTip="Clair">
-                                    <local:LucideIcon Glyph="Sun" Size="15" />
+                                    <local:AppIcon Icon="Sun" FontSize="15" />
                                 </ToggleButton>
                                 <ToggleButton x:Name="DarkTheme" Click="OnThemeClicked" Tag="dark" Padding="12,6" ToolTipService.ToolTip="Sombre">
-                                    <local:LucideIcon Glyph="Moon" Size="15" />
+                                    <local:AppIcon Icon="Moon" FontSize="15" />
                                 </ToggleButton>
                                 <ToggleButton x:Name="SystemTheme" Click="OnThemeClicked" Tag="system" Padding="12,6" ToolTipService.ToolTip="Système">
-                                    <local:LucideIcon Glyph="Monitor" Size="15" />
+                                    <local:AppIcon Icon="Monitor" FontSize="15" />
                                 </ToggleButton>
                             </StackPanel>
                         </Grid>
@@ -60,7 +60,7 @@
             <!-- Mode compagnon mobile -->
             <StackPanel x:Name="BridgeSection" Spacing="10">
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <local:LucideIcon Glyph="Smartphone" Size="14" Stroke="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <local:AppIcon Icon="Smartphone" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <TextBlock Text="MODE COMPAGNON MOBILE" Style="{StaticResource DmxSectionLabel}" />
                 </StackPanel>
                 <Border Style="{StaticResource DmxCard}" Padding="0" CornerRadius="14">
@@ -73,7 +73,7 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Border Grid.Column="0" Width="34" Height="34" CornerRadius="17" Background="{ThemeResource DmxSubtleBackground}">
-                                    <local:LucideIcon Glyph="Lock" Size="16" Stroke="{ThemeResource DmxIncome}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <local:AppIcon Icon="Lock" FontSize="16" Foreground="{ThemeResource DmxIncome}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel Grid.Column="1">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
@@ -126,13 +126,13 @@
                                         </Border>
                                         <Button x:Name="PairingButton" Style="{StaticResource AccentButtonStyle}" HorizontalAlignment="Stretch" Click="OnRegeneratePairing">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <local:LucideIcon Glyph="KeyRound" Size="13" Stroke="White" />
+                                                <local:AppIcon Icon="KeyRound" FontSize="13" Foreground="White" />
                                                 <TextBlock x:Name="PairingLabel" />
                                             </StackPanel>
                                         </Button>
                                         <Button x:Name="CopyButton" HorizontalAlignment="Stretch" Command="{x:Bind ViewModel.CopyPairingUrlCommand}" Visibility="Collapsed">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <local:LucideIcon Glyph="Copy" Size="13" />
+                                                <local:AppIcon Icon="Copy" FontSize="13" />
                                                 <TextBlock Text="Copier" />
                                             </StackPanel>
                                         </Button>
@@ -158,7 +158,7 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <local:LucideIcon Grid.Column="0" Glyph="Smartphone" Size="16" VerticalAlignment="Center" />
+                                                <local:AppIcon Grid.Column="0" Icon="Smartphone" FontSize="16" VerticalAlignment="Center" />
                                                 <StackPanel Grid.Column="1">
                                                     <TextBlock Text="{x:Bind local:Format.PasskeyName(DeviceLabel)}" FontSize="12" FontWeight="Medium" />
                                                     <TextBlock Text="{x:Bind local:Format.PasskeyMeta(CreatedAt, LastUsedAt)}" Style="{StaticResource DmxCaption}" FontSize="11" />
@@ -178,7 +178,7 @@
             <!-- Données -->
             <StackPanel Spacing="10">
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <local:LucideIcon Glyph="HardDrive" Size="14" Stroke="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <local:AppIcon Icon="HardDrive" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <TextBlock Text="DONNÉES &amp; STOCKAGE" Style="{StaticResource DmxSectionLabel}" />
                 </StackPanel>
                 <Border Style="{StaticResource DmxCard}" Padding="0" CornerRadius="14">
@@ -191,13 +191,13 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Border Grid.Column="0" Width="36" Height="36" CornerRadius="9" Background="{ThemeResource DmxSubtleBackground}">
-                                    <local:LucideIcon Glyph="Download" Size="17" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <local:AppIcon Icon="Download" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel Grid.Column="1">
                                     <TextBlock Text="Exporter les données" FontSize="14" FontWeight="Medium" />
                                     <TextBlock Text="Créer une sauvegarde locale (.dmx)" Style="{StaticResource DmxCaption}" />
                                 </StackPanel>
-                                <local:LucideIcon Grid.Column="2" Glyph="ChevronRight" Size="16" VerticalAlignment="Center" Stroke="{ThemeResource TextFillColorTertiaryBrush}" />
+                                <local:AppIcon Grid.Column="2" Icon="ChevronRight" FontSize="16" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                             </Grid>
                         </Button>
                         <Border Height="1" Background="{ThemeResource DmxSeparator}" />
@@ -209,13 +209,13 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Border Grid.Column="0" Width="36" Height="36" CornerRadius="9" Background="{ThemeResource DmxSubtleBackground}">
-                                    <local:LucideIcon Glyph="Upload" Size="17" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <local:AppIcon Icon="Upload" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel Grid.Column="1">
                                     <TextBlock Text="Importer ou Restaurer" FontSize="14" FontWeight="Medium" />
                                     <TextBlock Text="Depuis un backup ou un fichier CSV/OFX/QIF" Style="{StaticResource DmxCaption}" />
                                 </StackPanel>
-                                <local:LucideIcon Grid.Column="2" Glyph="ChevronRight" Size="16" VerticalAlignment="Center" Stroke="{ThemeResource TextFillColorTertiaryBrush}" />
+                                <local:AppIcon Grid.Column="2" Icon="ChevronRight" FontSize="16" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                             </Grid>
                         </Button>
                     </StackPanel>
@@ -225,7 +225,7 @@
             <!-- À propos -->
             <StackPanel Spacing="10">
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <local:LucideIcon Glyph="Info" Size="14" Stroke="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <local:AppIcon Icon="Info" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <TextBlock Text="À PROPOS" Style="{StaticResource DmxSectionLabel}" />
                 </StackPanel>
                 <Border Style="{StaticResource DmxCard}" Padding="0" CornerRadius="14">
@@ -245,7 +245,7 @@
                             </StackPanel>
                             <Button x:Name="UpdateButton" HorizontalAlignment="Right" VerticalAlignment="Center" Command="{x:Bind ViewModel.CheckForUpdatesCommand}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <local:LucideIcon Glyph="RefreshCw" Size="13" />
+                                    <local:AppIcon Icon="RefreshCw" FontSize="13" />
                                     <TextBlock x:Name="UpdateLabel" Text="Vérifier" />
                                 </StackPanel>
                             </Button>

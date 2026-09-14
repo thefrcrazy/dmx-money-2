@@ -6,7 +6,6 @@ members = [
     "core/crates/dmx-ffi",
     "core/crates/uniffi-bindgen",
     "linux/dmx-money-gtk",
-    "tools/gen-symbolic-icons",
     "tools/seed-demo",
 ]
 default-members = ["core/crates/dmx-core", "core/crates/dmx-bridge", "core/crates/dmx-ffi"]

@@ -1,18 +1,12 @@
 #!/usr/bin/env bash
-# Installe les icônes de l'app Linux :
-#   - les icônes Lucide converties en icônes symboliques GTK (traits transformés en surfaces,
-#     pour que GTK les recolore correctement : thème clair/sombre et couleurs de comptes) ;
-#   - l'icône d'application aux tailles attendues par les thèmes hicolor.
+# Installe l'icône d'application aux tailles attendues par les thèmes hicolor. Les icônes
+# symboliques de l'interface (thème Adwaita et GNOME Icon Development Kit) sont générées par
+# scripts/gen-native-icons.py et versionnées.
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 
 THEME="$DMX_ROOT/linux/dmx-money-gtk/data/icons/hicolor"
-ACTIONS="$THEME/scalable/actions"
 BRAND="$DMX_ROOT/shared/brand/icons/icon.png"
-
-rm -rf "$ACTIONS"
-mkdir -p "$ACTIONS"
-cargo run --quiet -p gen-symbolic-icons -- "$DMX_ROOT/shared/icons/lucide" "$ACTIONS"
 
 cat > "$THEME/index.theme" <<'THEME_EOF'
 [Icon Theme]
