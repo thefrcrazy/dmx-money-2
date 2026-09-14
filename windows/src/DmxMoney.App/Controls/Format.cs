@@ -126,6 +126,8 @@ public static class Format
 
     public static string Ratio(int visible, int total) => $"{visible} / {total}";
 
+    public static string Number(int value) => value.ToString();
+
     public static Brush Brush(string hex) => Palette.ToBrush(hex, Colors.Gray);
 
     public static Brush Tint(string hex)

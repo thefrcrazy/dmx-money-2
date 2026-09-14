@@ -15,7 +15,8 @@ public static class Program
     {
         VelopackApp.Build().Run();
         ComWrappersSupport.InitializeComWrappers();
-        Application.Start(_ =>
+        // Paramètre nommé : un « _ » unique serait un vrai paramètre, et « _ = new App() » l'affecterait.
+        Application.Start(callbackParams =>
         {
             var queue = DispatcherQueue.GetForCurrentThread();
             SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(queue));

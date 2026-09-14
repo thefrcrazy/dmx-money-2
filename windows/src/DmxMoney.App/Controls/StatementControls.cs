@@ -78,14 +78,18 @@ public sealed class CsvMappingTable : ContentControl
             var line = new StackPanel { Orientation = Orientation.Horizontal };
             for (var column = 0; column < columns; column++)
             {
-                line.Children.Add(new TextBlock
+                // TextBlock n'a pas de fond en WinUI : la teinte de la colonne passe par une Border.
+                line.Children.Add(new Border
                 {
-                    Text = column < row.Length ? row[column] : string.Empty,
-                    Width = 150,
                     Margin = new Thickness(8, 4, 8, 4),
-                    FontSize = 12,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
                     Background = wizard.RoleOf(column) == "ignore" ? null : Format.Tint("#6366f1"),
+                    Child = new TextBlock
+                    {
+                        Text = column < row.Length ? row[column] : string.Empty,
+                        Width = 150,
+                        FontSize = 12,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    },
                 });
             }
             host.Children.Add(line);

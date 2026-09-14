@@ -53,7 +53,7 @@
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <TextBlock Text="{x:Bind Name}" FontSize="17" FontWeight="SemiBold" />
                                 <Border CornerRadius="10" Padding="8,1" Background="{ThemeResource DmxSubtleBackground}" VerticalAlignment="Center">
-                                    <TextBlock Text="{x:Bind Accounts.Length}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Text="{x:Bind local:Format.Number(Accounts.Length)}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </Border>
                             </StackPanel>
                             <ItemsRepeater ItemsSource="{x:Bind Accounts}">
