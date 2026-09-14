@@ -127,6 +127,27 @@ jobs:
         run: pwsh scripts/build-windows.ps1 -Rid win-x64 -SkipInstaller
       - name: Tests (noyau et modèles de vue)
         run: dotnet test windows/tests/DmxMoney.Tests/DmxMoney.Tests.csproj --configuration Release
+      # Test de démarrage : l'app publiée doit rester ouverte. Un démarrage raté ferme le processus
+      # sans fenêtre ni message (vécu avec la pré-version 2.0.0) : son crash.log est alors affiché.
+      - name: Démarrage de l'application
+        env:
+          DMXMONEY_DATA_DIR: ${{ runner.temp }}\dmx-smoke
+          DMXMONEY_NO_DIALOG: '1'
+        run: |
+          $app = Start-Process -FilePath (Resolve-Path target/windows/win-x64/DmxMoney.exe) -PassThru
+          Start-Sleep -Seconds 20
+          $log = Join-Path $env:LOCALAPPDATA 'DmxMoney/crash.log'
+          if ($app.HasExited) {
+            if (Test-Path $log) { Get-Content $log }
+            throw "L'application s'est fermée au démarrage (code $($app.ExitCode))."
+          }
+          if (Test-Path $log) {
+            Get-Content $log
+            Stop-Process -Id $app.Id -Force
+            throw "L'application a écrit un rapport d'erreur."
+          }
+          Stop-Process -Id $app.Id -Force
+          Write-Host "==> L'application tourne toujours après 20 s."
       - uses: actions/upload-artifact@v4
         with:
           name: dmxmoney-win-x64

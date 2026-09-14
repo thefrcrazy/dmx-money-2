@@ -65,6 +65,12 @@ try {
             -p:Version=$Version -p:PublishReadyToRun=true -o $publish
     }
 
+    # WinUI charge le XAML compilé de l'app depuis resources.pri : sans ce fichier, l'application se
+    # ferme dès son lancement, sans aucun message (voir EnableMsixTooling dans DmxMoney.App.csproj).
+    if (-not (Test-Path (Join-Path $publish "resources.pri"))) {
+        throw "resources.pri absent de $publish : l'application se fermerait au lancement."
+    }
+
     if ($SkipInstaller) {
         Write-Host "==> Terminé : $publish"
         return

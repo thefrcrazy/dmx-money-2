@@ -13,6 +13,8 @@ public static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        AppDomain.CurrentDomain.UnhandledException += (sender, error) =>
+            CrashReport.Show(error.ExceptionObject as Exception ?? new Exception(error.ExceptionObject?.ToString()));
         VelopackApp.Build().Run();
         ComWrappersSupport.InitializeComWrappers();
         // Paramètre nommé : un « _ » unique serait un vrai paramètre, et « _ = new App() » l'affecterait.
@@ -20,7 +22,16 @@ public static class Program
         {
             var queue = DispatcherQueue.GetForCurrentThread();
             SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(queue));
-            _ = new App();
+            try
+            {
+                _ = new App();
+            }
+            catch (Exception error)
+            {
+                // Sinon la boucle de messages continue sans fenêtre : un processus invisible et inutile.
+                CrashReport.Show(error);
+                Environment.Exit(1);
+            }
         });
     }
 }

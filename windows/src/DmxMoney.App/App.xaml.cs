@@ -12,7 +12,12 @@ public partial class App : Application
 
     public static MainWindow? Window { get; private set; }
 
-    public App() => InitializeComponent();
+    public App()
+    {
+        // Abonné avant InitializeComponent, pour couvrir aussi le chargement du XAML.
+        UnhandledException += (sender, args) => CrashReport.Show(args.Exception);
+        InitializeComponent();
+    }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
