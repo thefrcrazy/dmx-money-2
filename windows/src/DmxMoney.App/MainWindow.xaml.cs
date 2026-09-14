@@ -57,6 +57,7 @@ public sealed partial class MainWindow : Window
     {
         ShowWindowCommand = new RelayCommand(ShowFromTray);
         InitializeComponent();
+        ContentFrame.NavigationFailed += OnNavigationFailed;
         SystemBackdrop = new MicaBackdrop();
         VersionLabel.Text = $"DMXMONEY • V{AppInfo.Version}";
 
@@ -169,6 +170,12 @@ public sealed partial class MainWindow : Window
         }
         FilterLabel.Visibility = AccountFilterButton.Visibility = route.UsesAccountFilter() ? Visibility.Visible : Visibility.Collapsed;
         BalancePanel.Visibility = route.ShowsBalances() ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnNavigationFailed(object sender, Microsoft.UI.Xaml.Navigation.NavigationFailedEventArgs args)
+    {
+        // Non géré, cet échec devient un E_UNEXPECTED muet de WinUI : on garde l'exception de la page.
+        CrashReport.Show(args.Exception, $"Ouverture de la page {args.SourcePageType?.Name} impossible");
     }
 
     // --- Réactions au store ---
