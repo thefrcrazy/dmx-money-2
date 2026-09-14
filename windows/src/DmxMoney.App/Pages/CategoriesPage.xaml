@@ -41,7 +41,7 @@
                                     <local:LucideIcon Glyph="{x:Bind Icon}" Size="18" Stroke="{x:Bind local:Format.Brush(Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <TextBlock Grid.Column="1" Text="{x:Bind Name}" FontSize="13" FontWeight="Medium" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                <StackPanel Grid.Column="2" Orientation="Horizontal" Visibility="{x:Bind local:Format.Hidden(local:CategoriesPage.IsLocked(Id))}">
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" Visibility="{x:Bind local:CategoriesPage.EditableVisibility(Id)}">
                                     <Button Background="Transparent" BorderThickness="0" Padding="6" Tag="{x:Bind Id}" Click="OnEdit" ToolTipService.ToolTip="Modifier">
                                         <local:LucideIcon Glyph="Edit2" Size="14" />
                                     </Button>
@@ -56,7 +56,7 @@
                                     Margin="6,0"
                                     VerticalAlignment="Center"
                                     Stroke="{ThemeResource TextFillColorTertiaryBrush}"
-                                    Visibility="{x:Bind local:Format.Visible(local:CategoriesPage.IsLocked(Id))}" />
+                                    Visibility="{x:Bind local:CategoriesPage.LockedVisibility(Id)}" />
                             </Grid>
                         </Border>
                     </DataTemplate>

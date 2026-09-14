@@ -19,6 +19,12 @@ public sealed partial class CategoriesPage : Page
     /// <summary>La catégorie « Virement » est réservée aux virements : ni modifiable, ni supprimable.</summary>
     public static bool IsLocked(string id) => id == "transfer";
 
+    // Une seule fonction par liaison : x:Bind génère un code invalide (CS0103) quand une fonction
+    // est passée en argument d'une autre.
+    public static Visibility EditableVisibility(string id) => Format.Hidden(IsLocked(id));
+
+    public static Visibility LockedVisibility(string id) => Format.Visible(IsLocked(id));
+
     protected override void OnNavigatedTo(NavigationEventArgs args)
     {
         var shell = (ShellViewModel)args.Parameter;
