@@ -3,19 +3,23 @@
 
 Les noms d'icônes stockés en base sont ceux du catalogue Lucide, que seule la PWA dessine tel
 quel. Les apps natives affichent les icônes de leur système :
-  - Windows : windows/src/DmxMoney.App/Icons/FluentIcons.g.cs (glyphes Segoe Fluent Icons) ;
+  - Windows : windows/src/DmxMoney.App/Icons/FluentIcons.g.cs (glyphes Segoe Fluent Icons ; sous
+    Windows 10, dont la police Segoe MDL2 Assets n'a pas tous ces glyphes, « mdl2 » remplace
+    ceux qui y manquent) ;
   - Apple : apple/Packages/DmxKit/Sources/DmxKit/Design/SymbolNames.swift (SF Symbols) ;
   - Linux : linux/dmx-money-gtk/src/icon_names.rs et les icônes symboliques GNOME, embarquées
     sous un nom préfixé pour être trouvées quel que soit le thème installé : thème Adwaita
     (shared/icons/adwaita) et GNOME Icon Development Kit, CC0 (shared/icons/gnome-kit).
 
 Usage :
-  gen-native-icons.py [--check] [--fetch --adwaita liste.txt] [--fluent IconsData.json]
+  gen-native-icons.py [--check] [--fetch --adwaita liste.txt] [--fluent IconsData.json] [--mdl2 page.md]
     --check    compare au lieu d'écrire (CI) : code de sortie 1 si un fichier n'est pas à jour ;
     --fetch    télécharge les icônes GNOME qui manquent dans shared/icons ;
     --adwaita  liste « catégorie/nom-symbolic » du thème Adwaita : vérifie les noms et situe les
                fichiers à télécharger ;
-    --fluent   vérifie les glyphes contre IconsData.json de la galerie WinUI.
+    --fluent   vérifie les glyphes contre IconsData.json de la galerie WinUI ;
+    --mdl2     vérifie que Windows 10 a chaque glyphe, d'après le tableau de la page Segoe MDL2
+               Assets de la documentation Microsoft (windows-dev-docs, segoe-ui-symbol-font.md).
 """
 from __future__ import annotations
 
@@ -42,6 +46,7 @@ APPLE = ROOT / "apple" / "Packages" / "DmxKit" / "Sources" / "DmxKit" / "Design"
 LINUX = ROOT / "linux" / "dmx-money-gtk" / "src" / "icon_names.rs"
 LINUX_ICONS = ROOT / "linux" / "dmx-money-gtk" / "data" / "icons" / "hicolor" / "scalable" / "actions"
 HEADER = "Généré par scripts/gen-native-icons.py depuis shared/icons/native.json : ne pas modifier à la main."
+GLYPH_FONTS = {"fluent": "Fluent", "mdl2": "MDL2"}
 
 
 def load() -> tuple[dict[str, dict[str, str]], str]:
@@ -69,7 +74,18 @@ def adwaita_categories(listing: Path | None) -> dict[str, str]:
     return categories
 
 
-def validate(icons: dict[str, dict[str, str]], fallback: str, fluent: Path | None, categories: dict[str, str]) -> list[str]:
+def mdl2_codes(page: Path | None) -> set[str]:
+    """Codes des glyphes listés dans les tableaux Markdown de la page Segoe MDL2 Assets."""
+    if not page:
+        return set()
+    codes = set()
+    for line in page.read_text(encoding="utf-8").splitlines():
+        if line.lstrip().startswith("|"):
+            codes |= {cell.strip().upper() for cell in line.split("|") if re.fullmatch(r"\s*[0-9A-Fa-f]{4}\s*", cell)}
+    return codes
+
+
+def validate(icons: dict[str, dict[str, str]], fallback: str, fluent: Path | None, mdl2: Path | None, categories: dict[str, str]) -> list[str]:
     errors = []
     catalogue = json.loads(CATALOGUE.read_text(encoding="utf-8"))["icons"]
     errors += [f"{name} : absent de native.json (catalogue shared/icons/icons.json)" for name in catalogue if name not in icons]
@@ -78,14 +94,22 @@ def validate(icons: dict[str, dict[str, str]], fallback: str, fluent: Path | Non
     glyphs = {}
     if fluent:
         glyphs = {item["Code"]: item["Name"] for item in json.loads(fluent.read_text(encoding="utf-8-sig"))}
+    windows10 = mdl2_codes(mdl2)
+    errors += [f"aucun glyphe lu dans {page}" for page, codes in ((fluent, glyphs), (mdl2, windows10)) if page and not codes]
     for name, entry in icons.items():
         if not re.fullmatch(r"[a-z0-9]+(\.[a-z0-9]+)*", entry.get("sf", "")):
             errors.append(f"{name} : SF Symbol invalide {entry.get('sf')!r}")
-        match = re.fullmatch(r"([0-9A-F]{4}) (\w+)", entry.get("fluent", ""))
-        if not match:
-            errors.append(f"{name} : glyphe Fluent invalide {entry.get('fluent')!r}")
-        elif glyphs and glyphs.get(match.group(1)) != match.group(2):
-            errors.append(f"{name} : {match.group(1)} est {glyphs.get(match.group(1), 'inconnu')} dans Segoe Fluent Icons, pas {match.group(2)}")
+        for key in [key for key in GLYPH_FONTS if key == "fluent" or key in entry]:
+            match = re.fullmatch(r"([0-9A-F]{4}) (\w+)", entry.get(key, ""))
+            if not match:
+                errors.append(f"{name} : glyphe {GLYPH_FONTS[key]} invalide {entry.get(key)!r}")
+            elif glyphs and glyphs.get(match.group(1)) != match.group(2):
+                errors.append(f"{name} : {match.group(1)} est {glyphs.get(match.group(1), 'inconnu')} dans Segoe Fluent Icons, pas {match.group(2)}")
+        if windows10:
+            if "mdl2" in entry and entry["fluent"][:4] in windows10:
+                errors.append(f"{name} : « mdl2 » inutile, Segoe MDL2 Assets a déjà {entry['fluent']}")
+            elif entry.get("mdl2", entry.get("fluent", ""))[:4] not in windows10:
+                errors.append(f"{name} : {entry.get('mdl2', entry.get('fluent'))} absent de Segoe MDL2 Assets (Windows 10) : ajouter un glyphe « mdl2 »")
         source, icon = gnome(entry)
         if source not in VENDORED or not re.fullmatch(r"[a-z0-9-]+", icon):
             errors.append(f"{name} : icône GNOME invalide {entry.get('gnome')!r}")
@@ -114,10 +138,20 @@ def linux_name(entry: dict[str, str]) -> str:
     return f"dmx-{icon}-symbolic" if source == "kit" else f"dmx-{source}-{icon}-symbolic"
 
 
+def csharp_glyphs(icons: dict[str, dict[str, str]], key: str) -> list[str]:
+    lines = []
+    for name in sorted(icons):
+        if key in icons[name]:
+            code, label = icons[name][key].split(" ", 1)
+            lines.append(f'        ["{name}"] = "\\u{code}", // {label}')
+    return lines
+
+
 def render(icons: dict[str, dict[str, str]], fallback: str) -> dict[Path, str]:
     names = sorted(icons)
     windows = [
         f"// {HEADER}",
+        "#nullable enable",  # le compilateur désactive les annotations dans les fichiers .g.cs
         "namespace DmxMoney.App;",
         "",
         "/// <summary>Glyphes Segoe Fluent Icons des noms d'icônes stockés en base.</summary>",
@@ -125,16 +159,24 @@ def render(icons: dict[str, dict[str, str]], fallback: str) -> dict[Path, str]:
         "{",
         "    private static readonly Dictionary<string, string> Glyphs = new()",
         "    {",
-    ]
-    for name in names:
-        code, label = icons[name]["fluent"].split(" ", 1)
-        windows.append(f'        ["{name}"] = "\\u{code}", // {label}')
-    windows += [
+        *csharp_glyphs(icons, "fluent"),
         "    };",
         "",
+        "    /// <summary>Remplaçants sous Windows 10 : sa police Segoe MDL2 Assets n'a pas ces glyphes.</summary>",
+        "    private static readonly Dictionary<string, string> Windows10Glyphs = new()",
+        "    {",
+        *csharp_glyphs(icons, "mdl2"),
+        "    };",
+        "",
+        "    /// <summary>Segoe Fluent Icons n'est fournie avec le système qu'à partir de Windows 11.</summary>",
+        "    private static readonly bool HasFluentFont = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);",
+        "",
         f"    /// <summary>Glyphe du nom donné, celui de « {fallback} » pour un nom inconnu.</summary>",
-        "    public static string Glyph(string? name) =>",
-        f'        name is not null && Glyphs.TryGetValue(name, out var glyph) ? glyph : Glyphs["{fallback}"];',
+        "    public static string Glyph(string? name)",
+        "    {",
+        f'        var key = name is not null && Glyphs.ContainsKey(name) ? name : "{fallback}";',
+        "        return !HasFluentFont && Windows10Glyphs.TryGetValue(key, out var glyph) ? glyph : Glyphs[key];",
+        "    }",
         "}",
         "",
     ]
@@ -164,13 +206,14 @@ def main() -> int:
     parser.add_argument("--fetch", action="store_true")
     parser.add_argument("--adwaita", type=Path)
     parser.add_argument("--fluent", type=Path)
+    parser.add_argument("--mdl2", type=Path)
     arguments = parser.parse_args()
 
     icons, fallback = load()
     categories = adwaita_categories(arguments.adwaita)
     if arguments.fetch:
         fetch(icons, categories)
-    errors = validate(icons, fallback, arguments.fluent, categories)
+    errors = validate(icons, fallback, arguments.fluent, arguments.mdl2, categories)
     if errors:
         print("\n".join(f"!! {error}" for error in errors), file=sys.stderr)
         return 1

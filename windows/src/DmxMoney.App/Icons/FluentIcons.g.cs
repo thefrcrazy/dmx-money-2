@@ -1,4 +1,5 @@
 // Généré par scripts/gen-native-icons.py depuis shared/icons/native.json : ne pas modifier à la main.
+#nullable enable
 namespace DmxMoney.App;
 
 /// <summary>Glyphes Segoe Fluent Icons des noms d'icônes stockés en base.</summary>
@@ -165,7 +166,21 @@ internal static class FluentIcons
         ["Zap"] = "\uE945", // LightningBolt
     };
 
+    /// <summary>Remplaçants sous Windows 10 : sa police Segoe MDL2 Assets n'a pas ces glyphes.</summary>
+    private static readonly Dictionary<string, string> Windows10Glyphs = new()
+    {
+        ["CircleOff"] = "\uECE4", // Blocked2
+        ["Cpu"] = "\uE977", // PC1
+        ["KeyRound"] = "\uE8D7", // Permissions
+    };
+
+    /// <summary>Segoe Fluent Icons n'est fournie avec le système qu'à partir de Windows 11.</summary>
+    private static readonly bool HasFluentFont = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
+
     /// <summary>Glyphe du nom donné, celui de « Tag » pour un nom inconnu.</summary>
-    public static string Glyph(string? name) =>
-        name is not null && Glyphs.TryGetValue(name, out var glyph) ? glyph : Glyphs["Tag"];
+    public static string Glyph(string? name)
+    {
+        var key = name is not null && Glyphs.ContainsKey(name) ? name : "Tag";
+        return !HasFluentFont && Windows10Glyphs.TryGetValue(key, out var glyph) ? glyph : Glyphs[key];
+    }
 }

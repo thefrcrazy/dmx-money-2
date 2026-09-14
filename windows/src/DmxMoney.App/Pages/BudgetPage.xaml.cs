@@ -54,18 +54,18 @@ public sealed partial class BudgetPage : Page
         SpentCaption.Text = $"{Plural.Of((int)view.ExpenseCount, "dépense")} ce mois-ci";
         RemainingValue.Text = Money.Rounded(view.Remaining);
         RemainingValue.Foreground = Format.PositiveBrush(view.Remaining);
-        RemainingIcon.Stroke = Format.PositiveBrush(view.Remaining);
+        RemainingIcon.Foreground = Format.PositiveBrush(view.Remaining);
         RemainingCaption.Text = $"{Money.Rounded(view.RemainingPerDay)} / jour restant";
 
         StateValue.Text = ViewModel.StateLabel;
         StateCaption.Text = ViewModel.PaceLabel;
-        (StateIcon.Glyph, var stateBrush) = view.State switch
+        (StateIcon.Icon, var stateBrush) = view.State switch
         {
             BudgetState.ToConfigure => ("CalendarClock", Palette.Resource("TextFillColorSecondaryBrush")),
             BudgetState.UnderControl => ("CheckCircle2", Palette.Income),
             _ => ("AlertCircle", Palette.Expense),
         };
-        StateIcon.Stroke = stateBrush;
+        StateIcon.Foreground = stateBrush;
         StateValue.Foreground = stateBrush;
 
         ProgressLabel.Text = $"{Format.PercentTight(view.Progress)} utilisé";

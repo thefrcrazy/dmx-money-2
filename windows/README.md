@@ -16,9 +16,11 @@ que le noyau calcule.
 Les graphiques sont dessinés avec les primitives XAML (`Path`, `Polyline`, `ArcSegment`) plutôt
 qu'avec une bibliothèque tierce : même rendu que sur macOS et Linux, aucune dépendance de plus.
 
-Les icônes sont celles de Windows : `AppIcon` affiche le glyphe Segoe Fluent Icons (Segoe MDL2
-Assets sous Windows 10) du nom d'icône stocké en base. La correspondance vient de
-`shared/icons/native.json`, générée dans `Icons/FluentIcons.g.cs` par `scripts/gen-native-icons.py`.
+Les icônes sont celles de Windows : `AppIcon` affiche le glyphe Segoe Fluent Icons du nom d'icône
+stocké en base. Windows 10 n'a que Segoe MDL2 Assets, qui n'a pas tous ces glyphes : la table
+prévoit alors un équivalent (`mdl2`). La correspondance vient de `shared/icons/native.json`,
+générée dans `Icons/FluentIcons.g.cs` par `scripts/gen-native-icons.py`. Ses options `--fluent`
+et `--mdl2` vérifient les glyphes contre la galerie WinUI et la documentation Microsoft.
 
 ## Développer
 

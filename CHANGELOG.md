@@ -4,7 +4,7 @@
 
 ### Interface
 
-- Icônes natives sur chaque système : SF Symbols sur macOS et iOS, Segoe Fluent Icons sous Windows, icônes symboliques GNOME (thème Adwaita et GNOME Icon Development Kit) sous Linux. Les dessins Lucide ne servent plus qu'à la PWA et à macOS 10.15, qui n'a pas de SF Symbols.
+- Icônes natives sur chaque système : SF Symbols sur macOS et iOS, Segoe Fluent Icons sous Windows (sous Windows 10, un glyphe équivalent remplace les rares icônes absentes de sa police Segoe MDL2 Assets), icônes symboliques GNOME (thème Adwaita et GNOME Icon Development Kit) sous Linux. Les dessins Lucide ne servent plus qu'à la PWA et à macOS 10.15, qui n'a pas de SF Symbols.
 
 ### Corrections
 
