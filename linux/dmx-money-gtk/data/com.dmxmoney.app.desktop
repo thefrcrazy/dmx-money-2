@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=DmxMoney
+GenericName=Gestion financière
+GenericName[en]=Personal finance
+Comment=Comptes, budgets, échéancier, analyses et prédictions de trésorerie
+Comment[en]=Accounts, budgets, scheduled items, analytics and cash-flow predictions
+Exec=dmxmoney %f
+Icon=com.dmxmoney.app
+Terminal=false
+Categories=GNOME;GTK;Office;Finance;
+Keywords=finance;budget;comptes;banque;trésorerie;money;
+MimeType=application/x-dmxmoney-backup;
+StartupNotify=true
+StartupWMClass=com.dmxmoney.app
+X-GNOME-UsesNotifications=true

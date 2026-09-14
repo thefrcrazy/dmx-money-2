@@ -1,0 +1,12 @@
+[package]
+name = "gen-symbolic-icons"
+version = "2.0.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Convertit les icônes Lucide en icônes symboliques GTK (traits transformés en surfaces)"
+license = "MIT"
+publish = false
+
+[dependencies]
+usvg = { version = "0.45", default-features = false }
+tiny-skia-path = "0.11"

@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DmxMoney.App/DmxMoney.App.csproj" />
+    <Project Path="src/DmxMoney.Interop/DmxMoney.Interop.csproj" />
+    <Project Path="src/DmxMoney.ViewModels/DmxMoney.ViewModels.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DmxMoney.Tests/DmxMoney.Tests.csproj" />
+  </Folder>
+</Solution>

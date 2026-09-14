@@ -1,0 +1,62 @@
+# OS / éditeurs
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Rust
+/target/
+**/*.rs.bk
+
+# Apple
+apple/*.xcodeproj/
+apple/build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+apple/Packages/DmxKit/.build/
+apple/Packages/DmxKit/Frameworks/
+apple/Packages/DmxKit/Sources/DmxCore/Generated/
+
+# Windows / .NET
+windows/**/bin/
+windows/**/obj/
+windows/.vs/
+windows/src/DmxMoney.Interop/Generated/
+windows/src/DmxMoney.Interop/runtimes/
+*.user
+
+# Linux
+linux/**/flatpak-build/
+linux/**/.flatpak-builder/
+*.AppImage
+
+# PWA (client web)
+pwa/node_modules/
+pwa/dist/
+pwa/dist-ssr/
+*.local
+*.log
+
+# Cloudflare
+cloudflare/managed-bridge/wrangler.local.toml
+.wrangler/
+
+# Artefacts locaux
+/dist/
+*.sqlite-journal
+
+# Signature et secrets locaux (jamais versionnés)
+apple/Config/Signing.local.xcconfig
+*.p12
+*.mobileprovision
+*.provisionprofile
+.env
+.env.*
+
+# Données utilisateur (bases et sauvegardes)
+*.db
+*.db-shm
+*.db-wal
+*.dmx

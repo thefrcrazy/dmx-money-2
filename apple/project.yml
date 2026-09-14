@@ -1,0 +1,130 @@
+name: DmxMoney
+
+options:
+  bundleIdPrefix: com.dmxmoney
+  createIntermediateGroups: true
+  developmentLanguage: fr
+  deploymentTarget:
+    macOS: "10.15"
+    iOS: "17.0"
+
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
+
+settings:
+  base:
+    MARKETING_VERSION: "2.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+
+packages:
+  DmxKit:
+    path: Packages/DmxKit
+
+targets:
+  # Variante legacy : coquille AppKit, Intel, macOS 10.15 Catalina.
+  DmxMoney-macOS:
+    type: application
+    platform: macOS
+    deploymentTarget: "10.15"
+    sources:
+      - path: DmxMoney-macOS
+      - path: DmxMoney-macOS-Shared
+      # Client PWA servi par le pont local (construit par scripts/build-pwa.sh).
+      - path: ../pwa/dist
+        name: pwa
+        type: folder
+        optional: true
+        buildPhase: resources
+    dependencies:
+      - package: DmxKit
+    settings:
+      base:
+        PRODUCT_NAME: DmxMoney
+        PRODUCT_BUNDLE_IDENTIFIER: com.dmxmoney.app
+        INFOPLIST_FILE: DmxMoney-macOS/Info.plist
+        CODE_SIGN_ENTITLEMENTS: DmxMoney-macOS/DmxMoney$(DMX_ENTITLEMENTS_SUFFIX).entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_HARDENED_RUNTIME: YES
+        COMBINE_HIDPI_IMAGES: YES
+      configs:
+        Release:
+          ARCHS: "arm64 x86_64"
+          ONLY_ACTIVE_ARCH: NO
+
+  # Variante modern : application SwiftUI native, Apple Silicon, macOS 26 Tahoe.
+  DmxMoney-macOS-Modern:
+    type: application
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: DmxMoney-macOS-Modern
+      - path: DmxMoney-macOS-Shared
+      - path: DmxMoney-macOS/Assets.xcassets
+      # Client PWA servi par le pont local (construit par scripts/build-pwa.sh).
+      - path: ../pwa/dist
+        name: pwa
+        type: folder
+        optional: true
+        buildPhase: resources
+    dependencies:
+      - package: DmxKit
+    settings:
+      base:
+        PRODUCT_NAME: DmxMoney
+        PRODUCT_BUNDLE_IDENTIFIER: com.dmxmoney.app
+        INFOPLIST_FILE: DmxMoney-macOS/Info.plist
+        CODE_SIGN_ENTITLEMENTS: DmxMoney-macOS/DmxMoney$(DMX_ENTITLEMENTS_SUFFIX).entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_HARDENED_RUNTIME: YES
+        COMBINE_HIDPI_IMAGES: YES
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: NO
+
+  DmxMoney-iOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: DmxMoney-iOS
+    dependencies:
+      - package: DmxKit
+    settings:
+      base:
+        PRODUCT_NAME: DmxMoney
+        PRODUCT_BUNDLE_IDENTIFIER: com.dmxmoney.app
+        INFOPLIST_FILE: DmxMoney-iOS/Info.plist
+        CODE_SIGN_ENTITLEMENTS: DmxMoney-iOS/DmxMoney$(DMX_ENTITLEMENTS_SUFFIX).entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+
+schemes:
+  DmxMoney-macOS:
+    build:
+      targets:
+        DmxMoney-macOS: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  DmxMoney-macOS-Modern:
+    build:
+      targets:
+        DmxMoney-macOS-Modern: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  DmxMoney-iOS:
+    build:
+      targets:
+        DmxMoney-iOS: all
+    run:
+      config: Debug
+    archive:
+      config: Release

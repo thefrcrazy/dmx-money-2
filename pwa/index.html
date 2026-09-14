@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/png" href="./logo.png" />
+  <link rel="apple-touch-icon" href="./pwa-192.png" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#f9fafb" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="DmxMoney" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>DmxMoney</title>
+  <style>
+    html {
+      touch-action: manipulation;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    :root {
+      --bg: #ffffff;
+      --primary: #6366f1;
+      --text: #1f2937;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000000;
+        --text: #f9fafb;
+      }
+    }
+
+    body {
+      margin: 0;
+      background-color: var(--bg);
+      overflow: hidden;
+      overscroll-behavior: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    button,
+    a,
+    [role="button"] {
+      touch-action: manipulation;
+    }
+
+    input,
+    textarea,
+    select {
+      font-size: 16px;
+    }
+
+    #splash-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background-color: var(--bg);
+      z-index: 9999;
+      border-radius: 24px;
+      /* Professional rounded corners */
+    }
+
+    .logo-container {
+      margin-bottom: 2rem;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(99, 102, 241, 0.1);
+      border-radius: 50%;
+      border-top-color: var(--primary);
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .loading-text {
+      margin-top: 1rem;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 500;
+      opacity: 0.7;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root">
+    <div id="splash-screen">
+      <div class="logo-container">
+        <img src="./logo.png" alt="DmxMoney Logo"
+          style="width: 120px; height: 120px; filter: drop-shadow(0 10px 15px rgba(0,0,0,0.1));" />
+      </div>
+      <div class="spinner" style="width: 30px; height: 30px; border-width: 2px;"></div>
+      <div class="loading-text">DmxMoney se prépare...</div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>

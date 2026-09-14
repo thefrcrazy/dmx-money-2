@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>DmxMoney.Interop</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Code généré par uniffi-bindgen-cs : pas d'avertissements de style ni de nullabilité. -->
+    <NoWarn>$(NoWarn);CS1591;CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8625;CS0108;CS0114;CS0168;CS0169;CS0219;CS0414;CS0649</NoWarn>
+  </PropertyGroup>
+
+  <!-- Bibliothèque native du noyau Rust (scripts/gen-csharp-bindings.sh ou build-windows.ps1). -->
+  <ItemGroup>
+    <None Include="runtimes\**\native\*" CopyToOutputDirectory="PreserveNewest" LinkBase="runtimes" Link="runtimes\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,1199 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: var(--color-primary-custom);
+  --color-primary-rgb: var(--color-primary-rgb-custom);
+  
+  --color-primary-50: color-mix(in srgb, var(--color-primary-custom), white 95%);
+  --color-primary-100: color-mix(in srgb, var(--color-primary-custom), white 90%);
+  --color-primary-200: color-mix(in srgb, var(--color-primary-custom), white 80%);
+  --color-primary-300: color-mix(in srgb, var(--color-primary-custom), white 70%);
+  --color-primary-400: color-mix(in srgb, var(--color-primary-custom), white 50%);
+  --color-primary-500: var(--color-primary-custom);
+  --color-primary-600: color-mix(in srgb, var(--color-primary-custom), black 10%);
+  --color-primary-700: color-mix(in srgb, var(--color-primary-custom), black 30%);
+  --color-primary-800: color-mix(in srgb, var(--color-primary-custom), black 50%);
+  --color-primary-900: color-mix(in srgb, var(--color-primary-custom), black 70%);
+  --color-primary-950: color-mix(in srgb, var(--color-primary-custom), black 85%);
+
+  --color-bg-primary: var(--color-bg-primary);
+  --color-bg-secondary: var(--color-bg-secondary);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-border: var(--color-border);
+  
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-serif: "New York", "Times New Roman", serif;
+  --font-mono: "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+  
+  --card-radius: 12px;
+}
+
+:root {
+    --color-primary-custom: #007AFF;
+    --color-primary-rgb-custom: 0, 122, 255;
+    
+    --color-bg-primary: #FFFFFF;
+    --color-bg-secondary: #F5F5F7;
+    --color-bg-tertiary: #F9FAFB;
+    --color-bg-card: #FFFFFF;
+    --color-text-primary: #000000;
+    --color-text-secondary: #86868B;
+    --color-border: rgba(0, 0, 0, 0.05);
+}
+
+/* On utilise une variable differente pour eviter la recursion infinie dans @theme */
+:root {
+    --color-primary: var(--color-primary-custom);
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+.dark {
+    --color-primary-custom: #3b82f6;
+    --color-primary-rgb-custom: 59, 130, 246;
+    --color-bg-primary: #000000;
+    --color-bg-secondary: #000000;
+    --color-bg-tertiary: #000000;
+    --color-bg-card: #121212;
+    --color-text-primary: #ffffff;
+    --color-text-secondary: #a1a1aa;
+    --color-border: rgba(255, 255, 255, 0.1);
+}
+
+/* Overrides Mobile (style Apple iOS 26 / Gemini) */
+@media (max-width: 768px) {
+  :root {
+    --card-radius: 24px;
+    --color-primary-custom: #6366f1;
+    --color-primary-rgb-custom: 99, 102, 241;
+    --color-bg-card: rgba(255, 255, 255, 0.72);
+    --color-text-secondary: #6E6E73;
+  }
+  
+  .dark {
+    --color-primary-custom: #8b5cf6;
+    --color-primary-rgb-custom: 139, 92, 246;
+    --color-bg-card: rgba(12, 12, 12, 0.68);
+    --color-text-secondary: #8E8E93;
+    --color-border: rgba(255, 255, 255, 0.08);
+  }
+}
+
+/* Base Styles */
+* {
+  @apply outline-none!;
+}
+
+html {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
+  transition: background-color 0.1s ease, color 0.1s ease;
+  overscroll-behavior: none;
+}
+
+button,
+a,
+[role="button"] {
+  touch-action: manipulation;
+}
+
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Custom View Transitions animation duration */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.15s;
+}
+
+/* Components (Default: Desktop) */
+.app-card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--card-radius);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.app-input {
+  width: 100%;
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+}
+
+.app-selector-bg {
+  background-color: var(--color-bg-card) !important;
+  border: 1px solid var(--color-border);
+  border-radius: var(--card-radius);
+  overflow: hidden;
+}
+
+/* Overrides Mobile (style Apple iOS 26 / Gemini) */
+@media (max-width: 768px) {
+  .app-card {
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.04);
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  }
+  
+  .dark .app-card {
+    box-shadow: 0 15px 45px -12px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  
+  .app-input {
+    border-radius: 12px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  
+  .app-selector-bg {
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.06);
+  }
+}
+
+.dark .select-header {
+  background-color: var(--color-bg-card) !important;
+}
+
+/* Gemini Irisations & Glows */
+.gemini-gradient {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 45%, #ec4899 100%);
+}
+
+.gemini-glow {
+  box-shadow: 0 0 25px 0 rgba(124, 58, 237, 0.35);
+}
+
+.dark .gemini-glow {
+  box-shadow: 0 0 35px 2px rgba(139, 92, 246, 0.25);
+}
+
+
+.app-icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+  background: rgba(0, 0, 0, 0.02);
+  color: #374151; /* gray-700 */
+  transition: all 0.2s;
+}
+
+.dark .app-icon-button {
+  background: rgba(255, 255, 255, 0.05);
+  color: #d1d5db; /* gray-300 */
+}
+
+.app-icon-button:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #111827; /* gray-900 */
+}
+
+.dark .app-icon-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f3f4f6; /* gray-100 */
+}
+
+.app-icon-button.selected {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+/* Utilities */
+/* Scrollbars */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.1); border-radius: 10px; }
+.dark ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); }
+
+[data-tauri-drag-region] { -webkit-app-region: drag; }
+button, a, input, [role="button"] { -webkit-app-region: no-drag; }
+
+.pwa-demo {
+  position: relative;
+  min-height: 210px;
+  overflow: hidden;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(0, 122, 255, 0.12), transparent 30%),
+    linear-gradient(135deg, rgba(16, 185, 129, 0.10), rgba(59, 130, 246, 0.08) 52%, rgba(17, 24, 39, 0.04));
+}
+
+.dark .pwa-demo {
+  background:
+    radial-gradient(circle at 20% 18%, rgba(59, 130, 246, 0.24), transparent 32%),
+    linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(59, 130, 246, 0.12) 50%, rgba(255, 255, 255, 0.04));
+}
+
+.pwa-install-browser {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  width: 150px;
+  height: 126px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.14);
+  animation: pwa-install-browser 9.6s ease-in-out infinite;
+}
+
+.dark .pwa-install-browser {
+  background: rgba(17, 24, 39, 0.94);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.42);
+}
+
+.pwa-install-address {
+  height: 16px;
+  margin: 12px;
+  border-radius: 999px;
+  background: rgba(107, 114, 128, 0.16);
+}
+
+.dark .pwa-install-address {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.pwa-install-page {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 12px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(0, 122, 255, 0.08);
+}
+
+.dark .pwa-install-page {
+  background: rgba(59, 130, 246, 0.16);
+}
+
+.pwa-install-page-lines {
+  display: grid;
+  flex: 1;
+  gap: 6px;
+}
+
+.pwa-install-page-lines span {
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(107, 114, 128, 0.24);
+}
+
+.pwa-install-page-lines span:last-child {
+  width: 62%;
+}
+
+.dark .pwa-install-page-lines span {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.pwa-install-toolbar {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  display: flex;
+  gap: 10px;
+  color: var(--color-primary-custom);
+}
+
+.pwa-install-lookdown,
+.pwa-install-scroll {
+  position: absolute;
+  left: 86px;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+}
+
+.pwa-install-lookdown {
+  width: 34px;
+  height: 34px;
+  color: #ffffff;
+  background: var(--color-primary-custom);
+  box-shadow: 0 12px 24px rgba(0, 122, 255, 0.22);
+  animation: pwa-install-lookdown 9.6s ease-in-out infinite;
+}
+
+.pwa-install-scroll {
+  gap: 6px;
+  padding: 8px 10px;
+  color: #111827;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.14);
+  font-size: 12px;
+  font-weight: 800;
+  animation: pwa-install-scroll 9.6s ease-in-out infinite;
+}
+
+.pwa-install-sheet {
+  position: absolute;
+  left: 20px;
+  bottom: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  color: #111827;
+  background: #ffffff;
+  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.16);
+  font-size: 12px;
+  font-weight: 800;
+  animation: pwa-install-sheet 9.6s ease-in-out infinite;
+}
+
+.pwa-install-menu {
+  position: absolute;
+  left: 30px;
+  bottom: 24px;
+  width: 118px;
+  padding: 8px;
+  border-radius: 18px;
+  color: #111827;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.18);
+  animation: pwa-install-menu 9.6s ease-in-out infinite;
+}
+
+.pwa-install-menu div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border-radius: 12px;
+  background: rgba(0, 122, 255, 0.08);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.dark .pwa-install-menu {
+  color: #ffffff;
+  background: rgba(31, 41, 55, 0.96);
+}
+
+.dark .pwa-install-menu div {
+  background: rgba(59, 130, 246, 0.16);
+}
+
+.dark .pwa-install-sheet {
+  color: #ffffff;
+  background: #1f2937;
+}
+
+.pwa-install-home {
+  position: absolute;
+  right: 22px;
+  bottom: 18px;
+  width: 98px;
+  height: 148px;
+  border: 6px solid #111827;
+  border-radius: 24px;
+  background: linear-gradient(160deg, rgba(0, 122, 255, 0.16), rgba(16, 185, 129, 0.12));
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.16);
+  animation: pwa-install-home 9.6s ease-in-out infinite;
+}
+
+.dark .pwa-install-home {
+  border-color: #f9fafb;
+  background: linear-gradient(160deg, rgba(59, 130, 246, 0.22), rgba(16, 185, 129, 0.14));
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.42);
+}
+
+.pwa-install-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  padding: 18px 16px;
+}
+
+.pwa-install-grid span {
+  aspect-ratio: 1;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.dark .pwa-install-grid span {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.pwa-install-app-icon {
+  position: absolute;
+  right: 16px;
+  bottom: 18px;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.18);
+  animation: pwa-install-icon 9.6s ease-in-out infinite;
+}
+
+.pwa-install-app-icon img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.pwa-pairing-hero {
+  position: relative;
+  min-height: 252px;
+  overflow: hidden;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 28% 18%, rgba(0, 122, 255, 0.16), transparent 32%),
+    linear-gradient(145deg, rgba(16, 185, 129, 0.11), rgba(59, 130, 246, 0.08) 54%, rgba(255, 255, 255, 0.8));
+}
+
+.dark .pwa-pairing-hero {
+  background:
+    radial-gradient(circle at 28% 18%, rgba(59, 130, 246, 0.22), transparent 34%),
+    linear-gradient(145deg, rgba(16, 185, 129, 0.13), rgba(59, 130, 246, 0.14) 54%, rgba(255, 255, 255, 0.04));
+}
+
+.pwa-pairing-phone {
+  position: absolute;
+  left: 50%;
+  top: 22px;
+  width: 128px;
+  height: 210px;
+  transform: translateX(-50%);
+  border: 6px solid #111827;
+  border-radius: 30px;
+  background: #ffffff;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.16);
+}
+
+.dark .pwa-pairing-phone {
+  border-color: #f9fafb;
+  background: #111827;
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.42);
+}
+
+.pwa-pairing-speaker {
+  position: absolute;
+  left: 50%;
+  top: 13px;
+  width: 36px;
+  height: 5px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.16);
+}
+
+.dark .pwa-pairing-speaker {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.pwa-pairing-app-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 34px 16px 0;
+}
+
+.pwa-pairing-app-row img {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+}
+
+.pwa-pairing-app-row div {
+  display: grid;
+  flex: 1;
+  gap: 6px;
+}
+
+.pwa-pairing-app-row span {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(107, 114, 128, 0.24);
+}
+
+.pwa-pairing-app-row span:last-child {
+  width: 68%;
+}
+
+.dark .pwa-pairing-app-row span {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.pwa-pairing-qr-frame {
+  display: flex;
+  width: 84px;
+  height: 84px;
+  align-items: center;
+  justify-content: center;
+  margin: 17px auto 0;
+  border: 2px solid rgba(17, 24, 39, 0.74);
+  border-radius: 18px;
+  color: #111827;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 7px rgba(249, 250, 251, 0.96);
+}
+
+.dark .pwa-pairing-qr-frame {
+  border-color: rgba(255, 255, 255, 0.74);
+  color: #ffffff;
+  background: #0f172a;
+  box-shadow: inset 0 0 0 7px rgba(17, 24, 39, 0.94);
+}
+
+.pwa-pairing-phone p {
+  margin-top: 7px;
+  text-align: center;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #111827;
+}
+
+.dark .pwa-pairing-phone p {
+  color: #ffffff;
+}
+
+.pwa-pairing-corners::before,
+.pwa-pairing-corners::after {
+  position: absolute;
+  left: 50%;
+  top: 116px;
+  width: 104px;
+  height: 104px;
+  content: "";
+  border-radius: 18px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.pwa-pairing-corners::before {
+  border-top: 3px solid rgba(0, 122, 255, 0.6);
+  border-left: 3px solid rgba(0, 122, 255, 0.6);
+  clip-path: polygon(0 0, 42% 0, 42% 14%, 14% 14%, 14% 42%, 0 42%);
+}
+
+.pwa-pairing-corners::after {
+  border-right: 3px solid rgba(0, 122, 255, 0.6);
+  border-bottom: 3px solid rgba(0, 122, 255, 0.6);
+  clip-path: polygon(58% 86%, 86% 86%, 86% 58%, 100% 58%, 100% 100%, 58% 100%);
+}
+
+.pwa-demo-phone {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  width: 128px;
+  height: 174px;
+  transform: translateX(-50%);
+  border: 7px solid #111827;
+  border-radius: 26px;
+  background: #ffffff;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.16);
+  animation: pwa-phone-intro 4.8s ease-in-out infinite;
+}
+
+.dark .pwa-demo-phone {
+  border-color: #f9fafb;
+  background: #111827;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+.pwa-demo-status {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: 34px;
+  height: 4px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.18);
+}
+
+.dark .pwa-demo-status {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.pwa-demo-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 22px 10px 0;
+}
+
+.pwa-demo-line {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(107, 114, 128, 0.25);
+}
+
+.dark .pwa-demo-line {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.pwa-demo-balance {
+  margin: 14px 10px 0;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(0, 122, 255, 0.08);
+}
+
+.dark .pwa-demo-balance {
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.pwa-demo-balance span,
+.pwa-demo-balance small {
+  display: block;
+}
+
+.pwa-demo-balance span {
+  font-size: 20px;
+  font-weight: 800;
+  color: #111827;
+  letter-spacing: 0;
+}
+
+.dark .pwa-demo-balance span {
+  color: #ffffff;
+}
+
+.pwa-demo-balance small {
+  margin-top: 2px;
+  color: #10b981;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.pwa-demo-list {
+  display: grid;
+  gap: 6px;
+  margin: 10px;
+}
+
+.pwa-demo-list span {
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(107, 114, 128, 0.14);
+}
+
+.dark .pwa-demo-list span {
+  background: rgba(255, 255, 255, 0.10);
+}
+
+.pwa-demo-nav {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  left: 10px;
+  display: flex;
+  justify-content: space-around;
+  padding: 7px;
+  border-radius: 14px;
+  color: var(--color-primary-custom);
+  background: rgba(249, 250, 251, 0.94);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+}
+
+.dark .pwa-demo-nav {
+  background: rgba(17, 24, 39, 0.94);
+}
+
+.pwa-demo-qr {
+  position: absolute;
+  top: 30px;
+  left: 18px;
+  display: flex;
+  width: 64px;
+  height: 64px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  color: #111827;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+  animation: pwa-qr-float 4.8s ease-in-out infinite;
+}
+
+.dark .pwa-demo-qr {
+  color: #ffffff;
+  background: #1f2937;
+}
+
+.pwa-demo-scan {
+  position: absolute;
+  top: 30px;
+  left: 18px;
+  width: 64px;
+  height: 2px;
+  border-radius: 999px;
+  background: #10b981;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.75);
+  animation: pwa-scan-line 4.8s ease-in-out infinite;
+}
+
+@keyframes pwa-phone-intro {
+  0%, 14% { transform: translateX(-50%) translateY(16px) scale(0.94); opacity: 0.72; }
+  28%, 78% { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; }
+  100% { transform: translateX(-50%) translateY(16px) scale(0.94); opacity: 0.72; }
+}
+
+@keyframes pwa-qr-float {
+  0%, 16% { transform: translateY(6px) scale(0.92); opacity: 0; }
+  26%, 72% { transform: translateY(0) scale(1); opacity: 1; }
+  88%, 100% { transform: translateY(-4px) scale(0.96); opacity: 0; }
+}
+
+@keyframes pwa-scan-line {
+  0%, 28% { transform: translateY(0); opacity: 0; }
+  36% { opacity: 1; }
+  54% { transform: translateY(62px); opacity: 1; }
+  66%, 100% { transform: translateY(62px); opacity: 0; }
+}
+
+@keyframes pwa-install-browser {
+  0%, 22% { transform: translateY(8px); opacity: 0.72; }
+  34%, 88% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(8px); opacity: 0.72; }
+}
+
+@keyframes pwa-install-lookdown {
+  0%, 18% { transform: translateY(-6px); opacity: 0; }
+  28%, 42% { transform: translateY(0); opacity: 1; }
+  50% { transform: translateY(8px); opacity: 1; }
+  60%, 100% { transform: translateY(12px); opacity: 0; }
+}
+
+@keyframes pwa-install-scroll {
+  0%, 54% { transform: translateY(-8px); opacity: 0; }
+  64%, 74% { transform: translateY(0); opacity: 1; }
+  84%, 100% { transform: translateY(14px); opacity: 0; }
+}
+
+@keyframes pwa-install-sheet {
+  0%, 72% { transform: translateY(22px); opacity: 0; }
+  82%, 92% { transform: translateY(0); opacity: 1; }
+  94%, 100% { transform: translateY(14px); opacity: 0; }
+}
+
+@keyframes pwa-install-menu {
+  0%, 28% { transform: translateY(22px); opacity: 0; }
+  40%, 52% { transform: translateY(0); opacity: 1; }
+  62%, 100% { transform: translateY(10px); opacity: 0; }
+}
+
+@keyframes pwa-install-home {
+  0%, 66% { transform: translateY(10px) scale(0.96); opacity: 0.72; }
+  78%, 100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@keyframes pwa-install-icon {
+  0%, 72% { transform: translate(-54px, 58px) scale(0.72); opacity: 0; }
+  82% { transform: translate(-20px, 20px) scale(0.9); opacity: 1; }
+  92%, 100% { transform: translate(0, 0) scale(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pwa-demo-phone,
+  .pwa-demo-qr,
+  .pwa-demo-scan,
+  .pwa-install-browser,
+  .pwa-install-lookdown,
+  .pwa-install-scroll,
+  .pwa-install-menu,
+  .pwa-install-sheet,
+  .pwa-install-home,
+  .pwa-install-app-icon {
+    animation: none;
+  }
+}
+
+/* Styles utilitaires et animations pour l'expérience mobile premium */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes bottom-sheet-slide-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes backdrop-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes form-popup-backdrop-in {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+    -webkit-backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+}
+
+@keyframes form-popup-backdrop-out {
+  from {
+    opacity: 1;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  to {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+    -webkit-backdrop-filter: blur(0px);
+  }
+}
+
+@keyframes form-popup-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes form-popup-panel-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+@keyframes form-popup-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes form-popup-sheet-out {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+.animate-bottom-sheet-slide-in {
+  animation: bottom-sheet-slide-in 0.32s cubic-bezier(0.32, 0.94, 0.6, 1) forwards;
+}
+
+.animate-backdrop-fade-in {
+  animation: backdrop-fade-in 0.25s ease-out forwards;
+}
+
+.app-form-popup-overlay--enter {
+  animation: form-popup-backdrop-in 180ms ease-out both;
+}
+
+.app-form-popup-overlay--exit {
+  animation: form-popup-backdrop-out 180ms ease-in both;
+}
+
+.app-form-popup-content--enter {
+  animation: form-popup-panel-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: center;
+}
+
+.app-form-popup-content--exit {
+  animation: form-popup-panel-out 180ms ease-in both;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-form-popup-overlay--enter,
+  .app-form-popup-overlay--exit,
+  .app-form-popup-content--enter,
+  .app-form-popup-content--exit {
+    animation: none !important;
+  }
+
+  .app-form-popup-content {
+    transform: translateY(0) scale(1) !important;
+  }
+}
+
+.tap-bounce {
+  transition: transform 0.12s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.12s ease;
+}
+
+.tap-bounce:active {
+  transform: scale(0.95);
+  opacity: 0.85;
+}
+
+/* Overrides Globales Mobile Premium (iOS 26 / Gemini) */
+@media (max-width: 768px) {
+  /* 1. Surcharges des Angles des Cartes */
+  .rounded-2xl, .rounded-xl, .rounded-3xl {
+    border-radius: 24px !important;
+  }
+  
+  /* 2. Métamorphose Translucide Satinée de toutes les Cartes */
+  div[class*="rounded-"].bg-white, 
+  section[class*="rounded-"].bg-white, 
+  article[class*="rounded-"].bg-white,
+  div[class*="rounded-"].bg-\[\#121212\], 
+  section[class*="rounded-"].bg-\[\#121212\], 
+  article[class*="rounded-"].bg-\[\#121212\] {
+    background-color: rgba(255, 255, 255, 0.72) !important;
+    backdrop-filter: blur(24px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+    border: 1px solid rgba(0, 0, 0, 0.04) !important;
+    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.04) !important;
+  }
+
+  .dark div[class*="rounded-"].bg-white, 
+  .dark section[class*="rounded-"].bg-white, 
+  .dark article[class*="rounded-"].bg-white,
+  .dark div[class*="rounded-"].bg-\[\#121212\], 
+  .dark section[class*="rounded-"].bg-\[\#121212\], 
+  .dark article[class*="rounded-"].bg-\[\#121212\],
+  .dark div[class*="rounded-"].bg-neutral-900, 
+  .dark section[class*="neutral-900"].bg-neutral-900, 
+  .dark article[class*="neutral-900"].bg-neutral-900,
+  .dark div[class*="rounded-"].bg-neutral-950, 
+  .dark section[class*="rounded-"].bg-neutral-950, 
+  .dark article[class*="rounded-"].bg-neutral-950 {
+    background-color: rgba(12, 12, 12, 0.68) !important;
+    backdrop-filter: blur(24px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 15px 45px -12px rgba(0, 0, 0, 0.5) !important;
+  }
+
+  /* 3. Transformation des Modaux en Bottom Sheets style iOS */
+  .app-modal-overlay {
+    align-items: flex-end !important;
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 90 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    padding: 0 !important;
+    background-color: rgba(0, 0, 0, 0.4) !important;
+  }
+  
+  .app-modal-content {
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+    border-top-left-radius: 32px !important;
+    border-top-right-radius: 32px !important;
+    max-width: 100% !important;
+    margin-bottom: 0 !important;
+    animation: bottom-sheet-slide-in 0.32s cubic-bezier(0.32, 0.94, 0.6, 1) forwards !important;
+    max-height: calc(100dvh - env(safe-area-inset-top) - 12px) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    box-shadow: 0 -15px 50px rgba(0, 0, 0, 0.2) !important;
+    background-color: rgba(255, 255, 255, 0.9) !important;
+    backdrop-filter: blur(30px) saturate(190%) !important;
+    -webkit-backdrop-filter: blur(30px) saturate(190%) !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    border-bottom: none !important;
+  }
+
+  .app-form-popup-overlay {
+    z-index: 120 !important;
+  }
+
+  .app-form-popup-content {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    margin: 0 !important;
+    width: 100vw !important;
+    max-height: calc(100dvh - env(safe-area-inset-top) - 12px) !important;
+    background-color: rgba(255, 255, 255, 0.98) !important;
+    z-index: 121 !important;
+  }
+
+  .mobile-bottom-nav {
+    height: calc(62px + env(safe-area-inset-bottom)) !important;
+    padding-top: 0.375rem !important;
+    padding-bottom: max(calc(env(safe-area-inset-bottom) - 12px), 0px) !important;
+  }
+
+  .app-form-popup-content--enter {
+    animation: form-popup-sheet-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+  }
+
+  .app-form-popup-content--exit {
+    animation: form-popup-sheet-out 0.24s cubic-bezier(0.4, 0, 1, 1) both !important;
+  }
+
+  .dark .app-modal-content {
+    background-color: rgba(14, 14, 16, 0.88) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-bottom: none !important;
+  }
+
+  .dark .app-form-popup-content {
+    background-color: rgba(14, 14, 16, 0.98) !important;
+  }
+
+  /* Ajustements du corps et en-tête modal mobile */
+  .app-modal-header {
+    padding: 1.25rem 1.5rem 0.75rem 1.5rem !important;
+    border-bottom: none !important;
+  }
+  
+  .app-modal-body {
+    padding: 0.5rem 1.5rem 1.5rem 1.5rem !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom)) !important;
+  }
+
+  /* 4. Optimisation des Champs de Saisie (Inputs) iOS */
+  input[type="text"], 
+  input[type="number"], 
+  input[type="date"], 
+  input[type="password"], 
+  input[type="email"], 
+  select, 
+  textarea {
+    border-radius: 14px !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    background-color: rgba(0, 0, 0, 0.02) !important;
+    color: #000000 !important;
+    padding: 0.75rem 1rem !important;
+    font-size: 15px !important;
+    font-weight: 500 !important;
+    box-shadow: none !important;
+    transition: all 0.2s ease !important;
+  }
+
+  input[type="text"]:focus, 
+  input[type="number"]:focus, 
+  input[type="date"]:focus, 
+  select:focus, 
+  textarea:focus {
+    border-color: var(--color-primary-custom) !important;
+    background-color: #ffffff !important;
+  }
+
+  .dark input[type="text"], 
+  .dark input[type="number"], 
+  .dark input[type="date"], 
+  .dark input[type="password"], 
+  .dark input[type="email"], 
+  .dark select, 
+  .dark textarea {
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    background-color: rgba(255, 255, 255, 0.04) !important;
+    color: #ffffff !important;
+  }
+
+  .dark input[type="text"]:focus, 
+  .dark input[type="number"]:focus, 
+  .dark input[type="date"]:focus, 
+  .dark select:focus, 
+  .dark textarea:focus {
+    border-color: var(--color-primary-custom) !important;
+    background-color: rgba(0, 0, 0, 0.4) !important;
+  }
+
+  /* 5. Agrandissement et Rapprochement des Checkboxes */
+  input[type="checkbox"] {
+    width: 1.25rem !important;
+    height: 1.25rem !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    border: 1px solid rgba(0, 0, 0, 0.15) !important;
+    margin-top: 0.25rem !important;
+  }
+
+  .dark input[type="checkbox"] {
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    background-color: rgba(0, 0, 0, 0.2) !important;
+  }
+
+  /* 6. Spacings plus denses et plus élégants sur mobile */
+  .space-y-6 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 1rem !important;
+  }
+
+  .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 0.75rem !important;
+  }
+
+  /* 7. Boutons tactiles et aérés */
+  .flex.shrink-0.flex-col.items-center.gap-1 button {
+    width: 34px !important;
+    height: 34px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 50% !important;
+    background-color: rgba(0, 0, 0, 0.03) !important;
+    border: 1px solid rgba(0, 0, 0, 0.02) !important;
+  }
+  
+  .dark .flex.shrink-0.flex-col.items-center.gap-1 button {
+    background-color: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid rgba(255, 255, 255, 0.02) !important;
+  }
+}
+
+@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+  .app-form-popup-content--enter,
+  .app-form-popup-content--exit {
+    animation: none !important;
+    transform: translateY(0) !important;
+  }
+}

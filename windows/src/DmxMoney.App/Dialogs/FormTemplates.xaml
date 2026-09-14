@@ -1,0 +1,570 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ResourceDictionary
+    x:Class="DmxMoney.App.FormTemplates"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:DmxMoney.App"
+    xmlns:vm="using:DmxMoney.ViewModels"
+    xmlns:interop="using:DmxMoney.Interop">
+
+    <!-- Compte -->
+    <DataTemplate x:Key="AccountFormTemplate" x:DataType="vm:AccountFormViewModel">
+        <StackPanel Spacing="14" Width="460">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Nom du compte" Style="{StaticResource DmxCaption}" />
+                <TextBox PlaceholderText="Ex: Compte Courant" Text="{x:Bind Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </StackPanel>
+            <Grid ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Text="Type" Style="{StaticResource DmxCaption}" />
+                    <ComboBox HorizontalAlignment="Stretch" ItemsSource="{x:Bind AccountTypes}" SelectedItem="{x:Bind AccountType, Mode=TwoWay}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Text="Solde initial" Style="{StaticResource DmxCaption}" />
+                    <TextBox PlaceholderText="0,00" Text="{x:Bind AmountText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </StackPanel>
+            </Grid>
+            <StackPanel Spacing="4">
+                <TextBlock Text="Groupe" Style="{StaticResource DmxCaption}" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ComboBox MinWidth="240" PlaceholderText="Aucun groupe" ItemsSource="{x:Bind Groups}" SelectedItem="{x:Bind Group, Mode=TwoWay}" />
+                    <Button Content="Aucun groupe" Click="OnClearAccountGroup" />
+                </StackPanel>
+            </StackPanel>
+            <StackPanel Spacing="6">
+                <TextBlock Text="Couleur" Style="{StaticResource DmxCaption}" />
+                <GridView
+                    ItemsSource="{x:Bind Colors}"
+                    SelectedItem="{x:Bind Color, Mode=TwoWay}"
+                    SelectionMode="Single"
+                    MaxHeight="150">
+                    <GridView.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                            <Ellipse Width="20" Height="20" Fill="{x:Bind local:Format.Brush((x:String))}" />
+                        </DataTemplate>
+                    </GridView.ItemTemplate>
+                </GridView>
+            </StackPanel>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Groupes de comptes -->
+    <DataTemplate x:Key="AccountGroupsTemplate" x:DataType="vm:AccountGroupsViewModel">
+        <StackPanel Spacing="12" Width="420">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBox PlaceholderText="Nouveau groupe..." Width="300" Text="{x:Bind NewGroup, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <Button Style="{StaticResource AccentButtonStyle}" Command="{x:Bind AddCommand}">
+                    <local:LucideIcon Glyph="Plus" Size="14" Stroke="White" />
+                </Button>
+            </StackPanel>
+            <ItemsControl ItemsSource="{x:Bind Groups, Mode=OneWay}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="x:String">
+                        <Border CornerRadius="8" Padding="10,6" Margin="0,0,0,6" Background="{ThemeResource DmxSubtleBackground}">
+                            <Grid>
+                                <TextBlock Text="{x:Bind}" FontSize="13" FontWeight="Medium" VerticalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind}" Click="OnMoveGroupUp" ToolTipService.ToolTip="Monter">
+                                        <local:LucideIcon Glyph="ChevronUp" Size="14" />
+                                    </Button>
+                                    <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind}" Click="OnMoveGroupDown" ToolTipService.ToolTip="Descendre">
+                                        <local:LucideIcon Glyph="ChevronDown" Size="14" />
+                                    </Button>
+                                    <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind}" Click="OnRenameGroup" ToolTipService.ToolTip="Renommer">
+                                        <local:LucideIcon Glyph="Edit2" Size="14" />
+                                    </Button>
+                                    <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind}" Click="OnDeleteGroup" ToolTipService.ToolTip="Supprimer">
+                                        <local:LucideIcon Glyph="Trash2" Size="14" Stroke="{ThemeResource DmxExpense}" />
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock
+                Text="Les comptes sans groupe apparaissent dans « Non groupés »."
+                Style="{StaticResource DmxCaption}"
+                FontSize="11" />
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Catégorie -->
+    <DataTemplate x:Key="CategoryFormTemplate" x:DataType="vm:CategoryFormViewModel">
+        <StackPanel Spacing="14" Width="480">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Width="44" Height="44" CornerRadius="12" Background="{x:Bind local:Format.Brush(Color), Mode=OneWay}">
+                    <local:LucideIcon Glyph="{x:Bind Icon, Mode=OneWay}" Size="22" Stroke="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Text="Nom" Style="{StaticResource DmxCaption}" />
+                    <TextBox PlaceholderText="Ex: Loisirs" Text="{x:Bind Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </StackPanel>
+            </Grid>
+            <StackPanel Spacing="6">
+                <TextBlock Text="Icône" Style="{StaticResource DmxCaption}" />
+                <GridView ItemsSource="{x:Bind Icons}" SelectedItem="{x:Bind Icon, Mode=TwoWay}" SelectionMode="Single" MaxHeight="170">
+                    <GridView.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                            <local:LucideIcon Glyph="{x:Bind}" Size="18" Margin="4" />
+                        </DataTemplate>
+                    </GridView.ItemTemplate>
+                </GridView>
+            </StackPanel>
+            <StackPanel Spacing="6">
+                <TextBlock Text="Couleur" Style="{StaticResource DmxCaption}" />
+                <GridView ItemsSource="{x:Bind Colors}" SelectedItem="{x:Bind Color, Mode=TwoWay}" SelectionMode="Single" MaxHeight="150">
+                    <GridView.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                            <Ellipse Width="20" Height="20" Fill="{x:Bind local:Format.Brush((x:String))}" />
+                        </DataTemplate>
+                    </GridView.ItemTemplate>
+                </GridView>
+            </StackPanel>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Transaction -->
+    <DataTemplate x:Key="TransactionFormTemplate" x:DataType="vm:TransactionFormViewModel">
+        <StackPanel Spacing="14" Width="460">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Type" Style="{StaticResource DmxCaption}" />
+                <ComboBox HorizontalAlignment="Stretch" ItemsSource="{x:Bind Kinds}" SelectedItem="{x:Bind SelectedKind, Mode=TwoWay}" DisplayMemberPath="Label" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+                <TextBlock Text="Description" Style="{StaticResource DmxCaption}" />
+                <TextBox PlaceholderText="Ex: Loyer" Text="{x:Bind Description, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </StackPanel>
+            <Grid ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Text="Montant" Style="{StaticResource DmxCaption}" />
+                    <TextBox PlaceholderText="0,00" Text="{x:Bind AmountText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Text="Date" Style="{StaticResource DmxCaption}" />
+                    <CalendarDatePicker HorizontalAlignment="Stretch" Date="{x:Bind DatePicked, Mode=TwoWay}" />
+                </StackPanel>
+            </Grid>
+            <StackPanel Spacing="4">
+                <TextBlock Text="{x:Bind AccountLabel, Mode=OneWay}" Style="{StaticResource DmxCaption}" />
+                <ComboBox
+                    HorizontalAlignment="Stretch"
+                    PlaceholderText="Sélectionner un compte"
+                    ItemsSource="{x:Bind Accounts}"
+                    SelectedValue="{x:Bind AccountId, Mode=TwoWay}"
+                    SelectedValuePath="Id"
+                    DisplayMemberPath="Name" />
+            </StackPanel>
+            <StackPanel Spacing="4" Visibility="{x:Bind local:Format.Visible(IsTransfer), Mode=OneWay}">
+                <TextBlock Text="Compte destination" Style="{StaticResource DmxCaption}" />
+                <ComboBox
+                    HorizontalAlignment="Stretch"
+                    PlaceholderText="Sélectionner un compte"
+                    ItemsSource="{x:Bind Accounts}"
+                    SelectedValue="{x:Bind ToAccountId, Mode=TwoWay}"
+                    SelectedValuePath="Id"
+                    DisplayMemberPath="Name" />
+            </StackPanel>
+            <StackPanel Spacing="4" Visibility="{x:Bind local:Format.Hidden(IsTransfer), Mode=OneWay}">
+                <TextBlock Text="Catégorie" Style="{StaticResource DmxCaption}" />
+                <ComboBox
+                    HorizontalAlignment="Stretch"
+                    PlaceholderText="Sélectionner une catégorie"
+                    ItemsSource="{x:Bind Categories}"
+                    SelectedValue="{x:Bind CategoryId, Mode=TwoWay}"
+                    SelectedValuePath="Id"
+                    DisplayMemberPath="Name" />
+            </StackPanel>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Budget -->
+    <DataTemplate x:Key="BudgetFormTemplate" x:DataType="vm:BudgetFormViewModel">
+        <StackPanel Spacing="14" Width="460">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Nom" Style="{StaticResource DmxCaption}" />
+                <TextBox PlaceholderText="Ex: Courses, Essence, Loisirs" Text="{x:Bind Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+                <TextBlock Text="Montant mensuel" Style="{StaticResource DmxCaption}" />
+                <TextBox PlaceholderText="0,00" Text="{x:Bind AmountText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+                <TextBlock Text="Catégorie" Style="{StaticResource DmxCaption}" />
+                <ComboBox
+                    HorizontalAlignment="Stretch"
+                    PlaceholderText="Sélectionner"
+                    ItemsSource="{x:Bind Categories}"
+                    SelectedValue="{x:Bind CategoryId, Mode=TwoWay}"
+                    SelectedValuePath="Id"
+                    DisplayMemberPath="Name" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+                <TextBlock Text="Compte" Style="{StaticResource DmxCaption}" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ComboBox
+                        MinWidth="240"
+                        PlaceholderText="Tous les comptes"
+                        ItemsSource="{x:Bind Accounts}"
+                        SelectedValue="{x:Bind AccountId, Mode=TwoWay}"
+                        SelectedValuePath="Id"
+                        DisplayMemberPath="Name" />
+                    <Button Content="Tous les comptes" Click="OnClearBudgetAccount" />
+                </StackPanel>
+            </StackPanel>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Échéance -->
+    <DataTemplate x:Key="ScheduledFormTemplate" x:DataType="vm:ScheduledFormViewModel">
+        <StackPanel Spacing="14" Width="480">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Type" Style="{StaticResource DmxCaption}" />
+                <ComboBox HorizontalAlignment="Stretch" ItemsSource="{x:Bind Kinds}" SelectedItem="{x:Bind SelectedKind, Mode=TwoWay}" DisplayMemberPath="Label" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+                <TextBlock Text="Description" Style="{StaticResource DmxCaption}" />
+                <TextBox PlaceholderText="Ex: Loyer" Text="{x:Bind Description, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </StackPanel>
+            <Grid ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Text="Montant" Style="{StaticResource DmxCaption}" />
+                    <TextBox PlaceholderText="0,00" Text="{x:Bind AmountText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Text="Fréquence" Style="{StaticResource DmxCaption}" />
+                    <ComboBox HorizontalAlignment="Stretch" ItemsSource="{x:Bind Frequencies}" SelectedItem="{x:Bind SelectedFrequency, Mode=TwoWay}" DisplayMemberPath="Label" />
+                </StackPanel>
+            </Grid>
+            <Grid ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Text="Date de début" Style="{StaticResource DmxCaption}" />
+                    <CalendarDatePicker HorizontalAlignment="Stretch" Date="{x:Bind NextDatePicked, Mode=TwoWay}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Text="Date de fin (optionnel)" Style="{StaticResource DmxCaption}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ToggleSwitch IsOn="{x:Bind HasEndDate, Mode=TwoWay}" OnContent="" OffContent="" MinWidth="0" />
+                        <CalendarDatePicker
+                            Date="{x:Bind EndDatePicked, Mode=TwoWay}"
+                            Visibility="{x:Bind local:Format.Visible(HasEndDate), Mode=OneWay}" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+            <StackPanel Spacing="4" Visibility="{x:Bind local:Format.Visible(CanLinkBudget), Mode=OneWay}">
+                <TextBlock Text="Budget lié" Style="{StaticResource DmxCaption}" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ComboBox
+                        MinWidth="240"
+                        PlaceholderText="Hors budget"
+                        ItemsSource="{x:Bind Budgets}"
+                        SelectedValue="{x:Bind BudgetId, Mode=TwoWay}"
+                        SelectedValuePath="Id"
+                        DisplayMemberPath="Name" />
+                    <Button Content="Hors budget" Click="OnClearScheduledBudget" />
+                </StackPanel>
+            </StackPanel>
+            <StackPanel Spacing="4">
+                <TextBlock Text="Compte" Style="{StaticResource DmxCaption}" />
+                <ComboBox
+                    HorizontalAlignment="Stretch"
+                    PlaceholderText="Sélectionner un compte"
+                    ItemsSource="{x:Bind Accounts}"
+                    SelectedValue="{x:Bind AccountId, Mode=TwoWay}"
+                    SelectedValuePath="Id"
+                    DisplayMemberPath="Name" />
+            </StackPanel>
+            <StackPanel Spacing="4" Visibility="{x:Bind local:Format.Visible(IsTransfer), Mode=OneWay}">
+                <TextBlock Text="Compte destination" Style="{StaticResource DmxCaption}" />
+                <ComboBox
+                    HorizontalAlignment="Stretch"
+                    PlaceholderText="Sélectionner un compte"
+                    ItemsSource="{x:Bind Accounts}"
+                    SelectedValue="{x:Bind ToAccountId, Mode=TwoWay}"
+                    SelectedValuePath="Id"
+                    DisplayMemberPath="Name" />
+            </StackPanel>
+            <StackPanel Spacing="4" Visibility="{x:Bind local:Format.Hidden(IsTransfer), Mode=OneWay}">
+                <TextBlock Text="Catégorie" Style="{StaticResource DmxCaption}" />
+                <ComboBox
+                    HorizontalAlignment="Stretch"
+                    PlaceholderText="Sélectionner une catégorie"
+                    ItemsSource="{x:Bind Categories}"
+                    SelectedValue="{x:Bind CategoryId, Mode=TwoWay}"
+                    SelectedValuePath="Id"
+                    DisplayMemberPath="Name" />
+            </StackPanel>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Transaction fictive -->
+    <DataTemplate x:Key="FakeTransactionFormTemplate" x:DataType="vm:FakeTransactionFormViewModel">
+        <StackPanel Spacing="14" Width="460">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Type" Style="{StaticResource DmxCaption}" />
+                <ComboBox HorizontalAlignment="Stretch" ItemsSource="{x:Bind Kinds}" SelectedItem="{x:Bind SelectedKind, Mode=TwoWay}" DisplayMemberPath="Label" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+                <TextBlock Text="Description" Style="{StaticResource DmxCaption}" />
+                <TextBox PlaceholderText="Ex: Réparation voiture" Text="{x:Bind Description, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </StackPanel>
+            <Grid ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Text="Montant" Style="{StaticResource DmxCaption}" />
+                    <TextBox PlaceholderText="0,00" Text="{x:Bind AmountText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Text="Date" Style="{StaticResource DmxCaption}" />
+                    <CalendarDatePicker HorizontalAlignment="Stretch" Date="{x:Bind DatePicked, Mode=TwoWay}" />
+                </StackPanel>
+            </Grid>
+            <StackPanel Spacing="4">
+                <TextBlock Text="Compte" Style="{StaticResource DmxCaption}" />
+                <ComboBox
+                    HorizontalAlignment="Stretch"
+                    PlaceholderText="Sélectionner un compte"
+                    ItemsSource="{x:Bind Accounts}"
+                    SelectedValue="{x:Bind AccountId, Mode=TwoWay}"
+                    SelectedValuePath="Id"
+                    DisplayMemberPath="Name" />
+            </StackPanel>
+            <StackPanel Spacing="4" Visibility="{x:Bind local:Format.Visible(IsTransfer), Mode=OneWay}">
+                <TextBlock Text="Compte destination" Style="{StaticResource DmxCaption}" />
+                <ComboBox
+                    HorizontalAlignment="Stretch"
+                    ItemsSource="{x:Bind Accounts}"
+                    SelectedValue="{x:Bind ToAccountId, Mode=TwoWay}"
+                    SelectedValuePath="Id"
+                    DisplayMemberPath="Name" />
+            </StackPanel>
+            <StackPanel Spacing="4" Visibility="{x:Bind local:Format.Hidden(IsTransfer), Mode=OneWay}">
+                <TextBlock Text="Catégorie" Style="{StaticResource DmxCaption}" />
+                <ComboBox
+                    HorizontalAlignment="Stretch"
+                    ItemsSource="{x:Bind Categories}"
+                    SelectedValue="{x:Bind CategoryId, Mode=TwoWay}"
+                    SelectedValuePath="Id"
+                    DisplayMemberPath="Name" />
+            </StackPanel>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Suggestions de budgets -->
+    <DataTemplate x:Key="BudgetSuggestionsTemplate" x:DataType="vm:BudgetSuggestionsViewModel">
+        <StackPanel Spacing="8" Width="620">
+            <ItemsControl ItemsSource="{x:Bind Suggestions, Mode=OneWay}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="interop:BudgetSuggestion">
+                        <Border CornerRadius="12" Padding="12" Margin="0,0,0,8" Background="{ThemeResource DmxSubtleBackground}">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Width="40" Height="40" CornerRadius="12" Background="{x:Bind local:Format.Tint(Category.Color)}">
+                                    <local:LucideIcon Glyph="{x:Bind Category.Icon}" Size="18" Stroke="{x:Bind local:Format.Brush(Category.Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="{x:Bind Name}" FontSize="13" FontWeight="SemiBold" />
+                                    <TextBlock Text="{x:Bind local:Format.SuggestionDetails(AccountName, MonthCount, CurrentMonthSpent)}" Style="{StaticResource DmxCaption}" FontSize="11" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="2" Text="{x:Bind local:Format.Money(Amount)}" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource DmxAccent}" VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6">
+                                    <Button Tag="{x:Bind}" Click="OnAcceptBudgetSuggestion">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <local:LucideIcon Glyph="Plus" Size="12" />
+                                            <TextBlock Text="Ajouter" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Background="Transparent" BorderThickness="0" Tag="{x:Bind}" Click="OnDismissBudgetSuggestion">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <local:LucideIcon Glyph="Trash2" Size="12" Stroke="{ThemeResource DmxExpense}" />
+                                            <TextBlock Text="Supprimer" Foreground="{ThemeResource DmxExpense}" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Suggestions d'échéances -->
+    <DataTemplate x:Key="ScheduledSuggestionsTemplate" x:DataType="vm:ScheduledSuggestionsViewModel">
+        <StackPanel Spacing="8" Width="620">
+            <ItemsControl ItemsSource="{x:Bind Suggestions, Mode=OneWay}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="interop:ScheduledSuggestion">
+                        <Border CornerRadius="12" Padding="12" Margin="0,0,0,8" Background="{ThemeResource DmxSubtleBackground}">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Width="40" Height="40" CornerRadius="12" Background="{x:Bind local:Format.Tint(Category.Color)}">
+                                    <local:LucideIcon Glyph="{x:Bind Category.Icon}" Size="18" Stroke="{x:Bind local:Format.Brush(Category.Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="{x:Bind Description}" FontSize="13" FontWeight="SemiBold" />
+                                    <TextBlock Text="{x:Bind local:Format.ScheduledSuggestionDetails(AccountName, Frequency, OccurrenceCount, NextDate)}" Style="{StaticResource DmxCaption}" FontSize="11" />
+                                </StackPanel>
+                                <TextBlock
+                                    Grid.Column="2"
+                                    Text="{x:Bind local:Format.Signed(Amount, TransactionType)}"
+                                    Foreground="{x:Bind local:Format.KindBrush(TransactionType)}"
+                                    FontSize="13"
+                                    FontWeight="SemiBold"
+                                    VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6">
+                                    <Button Tag="{x:Bind}" Click="OnAcceptScheduledSuggestion">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <local:LucideIcon Glyph="Plus" Size="12" />
+                                            <TextBlock Text="Ajouter" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Background="Transparent" BorderThickness="0" Tag="{x:Bind}" Click="OnDismissScheduledSuggestion">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <local:LucideIcon Glyph="Trash2" Size="12" Stroke="{ThemeResource DmxExpense}" />
+                                            <TextBlock Text="Supprimer" Foreground="{ThemeResource DmxExpense}" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Restauration d'une sauvegarde -->
+    <DataTemplate x:Key="RestoreBackupTemplate" x:DataType="vm:RestoreBackupViewModel">
+        <StackPanel Spacing="14" Width="460">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Border Width="40" Height="40" CornerRadius="12" Background="{ThemeResource DmxSubtleBackground}">
+                    <local:LucideIcon Glyph="Database" Size="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="{x:Bind FileName}" FontSize="13" FontWeight="SemiBold" />
+                    <TextBlock Text="{x:Bind local:Format.BackupDate(BackupDate)}" Style="{StaticResource DmxCaption}" />
+                </StackPanel>
+            </StackPanel>
+            <local:BackupSummaryView Summary="{x:Bind Summary}" />
+            <StackPanel Spacing="6">
+                <TextBlock Text="Mode d'import" Style="{StaticResource DmxCaption}" />
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <RadioButton Content="Remplacer" GroupName="RestoreMode" Tag="replace" Checked="OnRestoreModeChecked" IsChecked="True" />
+                    <RadioButton Content="Fusionner" GroupName="RestoreMode" Tag="merge" Checked="OnRestoreModeChecked" />
+                </StackPanel>
+            </StackPanel>
+            <TextBlock Text="{x:Bind ModeDetail, Mode=OneWay}" Style="{StaticResource DmxCaption}" TextWrapping="Wrap" />
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Assistant d'import de relevé -->
+    <DataTemplate x:Key="StatementImportTemplate" x:DataType="vm:StatementImportViewModel">
+        <StackPanel Spacing="14" Width="640">
+            <TextBlock Text="{x:Bind FileName}" Style="{StaticResource DmxCaption}" />
+
+            <StackPanel Spacing="10" Visibility="{x:Bind local:Format.Visible(IsColumnsStep), Mode=OneWay}">
+                <StackPanel Orientation="Horizontal" Spacing="16">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Séparateur" Style="{StaticResource DmxCaption}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <RadioButton Content="Point-virgule (;)" GroupName="Separator" Tag=";" Checked="OnSeparatorChecked" />
+                            <RadioButton Content="Virgule (,)" GroupName="Separator" Tag="," Checked="OnSeparatorChecked" />
+                            <RadioButton Content="Tabulation" GroupName="Separator" Tag="tab" Checked="OnSeparatorChecked" />
+                        </StackPanel>
+                    </StackPanel>
+                    <CheckBox Content="La première ligne est un en-tête" IsChecked="{x:Bind HasHeader, Mode=TwoWay}" VerticalAlignment="Bottom" />
+                </StackPanel>
+                <local:CsvMappingTable Wizard="{x:Bind}" />
+                <TextBlock Text="Assignez les colonnes en utilisant les listes déroulantes ci-dessus." Style="{StaticResource DmxCaption}" FontSize="11" />
+            </StackPanel>
+
+            <StackPanel Spacing="8" Visibility="{x:Bind local:Format.Visible(IsAccountStep), Mode=OneWay}">
+                <TextBlock Text="Vers quel compte importer ?" FontSize="13" FontWeight="Medium" />
+                <local:StatementAccountPicker Wizard="{x:Bind}" />
+            </StackPanel>
+
+            <StackPanel Spacing="8" Visibility="{x:Bind local:Format.Visible(IsCategoriesStep), Mode=OneWay}">
+                <TextBlock Text="Associez les catégories du fichier à vos catégories existantes." Style="{StaticResource DmxCaption}" />
+                <local:StatementCategoryTable Wizard="{x:Bind}" />
+            </StackPanel>
+
+            <StackPanel Spacing="10" Visibility="{x:Bind local:Format.Visible(IsConfirmStep), Mode=OneWay}" HorizontalAlignment="Center">
+                <Border Width="56" Height="56" CornerRadius="28" Background="{ThemeResource DmxSubtleBackground}" HorizontalAlignment="Center">
+                    <local:LucideIcon Glyph="Check" Size="26" Stroke="{ThemeResource DmxIncome}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="Prêt à importer" FontSize="17" FontWeight="Bold" HorizontalAlignment="Center" />
+                <TextBlock Text="{x:Bind ConfirmSummary, Mode=OneWay}" Style="{StaticResource DmxCaption}" TextAlignment="Center" TextWrapping="Wrap" />
+                <Border
+                    CornerRadius="8"
+                    Padding="12"
+                    Background="{ThemeResource DmxSubtleBackground}"
+                    Visibility="{x:Bind local:Format.Visible(MissingCategoryColumn), Mode=OneWay}">
+                    <TextBlock
+                        Text="Aucune colonne catégorie n'a été sélectionnée. Toutes les transactions seront classées dans « Divers »."
+                        Style="{StaticResource DmxCaption}"
+                        TextWrapping="Wrap" />
+                </Border>
+            </StackPanel>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Nouveautés -->
+    <DataTemplate x:Key="WhatsNewTemplate" x:DataType="vm:WhatsNewViewModel">
+        <StackPanel Spacing="14" Width="460">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Border Width="44" Height="44" CornerRadius="12" Background="{ThemeResource DmxAccent}">
+                    <local:LucideIcon Glyph="Sparkles" Size="22" Stroke="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Nouveautés" FontSize="16" FontWeight="SemiBold" />
+                    <TextBlock Text="{x:Bind local:Format.VersionLabel(Version)}" Style="{StaticResource DmxCaption}" />
+                </StackPanel>
+            </StackPanel>
+            <ItemsControl ItemsSource="{x:Bind Notes}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="x:String">
+                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,0,0,10">
+                            <local:LucideIcon Glyph="CheckCircle2" Size="14" Stroke="{ThemeResource DmxAccent}" VerticalAlignment="Top" />
+                            <TextBlock Text="{x:Bind}" FontSize="13" TextWrapping="Wrap" MaxWidth="380" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </DataTemplate>
+
+</ResourceDictionary>

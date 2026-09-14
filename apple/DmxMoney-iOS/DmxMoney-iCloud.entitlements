@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Activé par Config/Signing.local.xcconfig (DMX_ENTITLEMENTS_SUFFIX = -iCloud). -->
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>$(DMX_ICLOUD_CONTAINER)</string>
+	</array>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudKit</string>
+	</array>
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

@@ -1,0 +1,10 @@
+// Réglages communs. Pour signer (iCloud, distribution), créer Config/Signing.local.xcconfig :
+//   DEVELOPMENT_TEAM = XXXXXXXXXX
+//   DMX_ENTITLEMENTS_SUFFIX = -iCloud
+#include? "Signing.local.xcconfig"
+
+DMX_ENTITLEMENTS_SUFFIX =
+// Conteneur CloudKit (ex. iCloud.com.dmxmoney.app) : vide = synchronisation iCloud indisponible.
+DMX_ICLOUD_CONTAINER =
+// Flux de mise à jour (JSON publié à côté du DMG) : vide = aucune recherche (build local).
+DMX_UPDATE_FEED_URL =

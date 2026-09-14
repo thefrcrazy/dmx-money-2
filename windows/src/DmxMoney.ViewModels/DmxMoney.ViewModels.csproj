@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>DmxMoney.ViewModels</RootNamespace>
+    <!-- Aucune dépendance WinUI : ces modèles de vue sont testables sur macOS et Linux. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DmxMoney.Interop\DmxMoney.Interop.csproj" />
+  </ItemGroup>
+
+</Project>

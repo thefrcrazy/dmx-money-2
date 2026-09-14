@@ -1,0 +1,100 @@
+/* =========================================
+   BASE STYLES - Neutral Dark Theme
+   ========================================= */
+
+:root {
+    --color-primary: #007AFF;
+    --color-primary-rgb: 0, 122, 255;
+    --color-bg-primary: #FFFFFF;
+    --color-bg-secondary: #F5F5F7;
+    --color-text-primary: #000000;
+    --color-text-secondary: #86868B;
+    --color-border: #D1D1D6;
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    --font-serif: "New York", "Times New Roman", serif;
+    --font-mono: "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+    --card-radius: 12px;
+}
+
+:root.dark {
+    color-scheme: dark;
+    --color-primary: #3b82f6;
+    --color-primary-rgb: 59, 130, 246;
+    --color-bg-primary: #000000;
+    --color-bg-secondary: #000000;
+    --color-text-primary: #ffffff;
+    --color-text-secondary: #a1a1aa;
+    --color-border: #444444;
+
+    /* RGB Variables for Legacy Tailwind v3 opacity support */
+    --color-neutral-50-rgb: 250 250 250;
+    --color-neutral-100-rgb: 245 245 245;
+    --color-neutral-200-rgb: 229 229 229;
+    --color-neutral-300-rgb: 212 212 212;
+    --color-neutral-400-rgb: 163 163 163;
+    --color-neutral-500-rgb: 115 115 115;
+    --color-neutral-600-rgb: 82 82 82;
+    --color-neutral-700-rgb: 64 64 64;
+    --color-neutral-800-rgb: 38 38 38;
+    --color-neutral-900-rgb: 23 23 23;
+    --color-neutral-950-rgb: 10 10 10;
+}
+
+* {
+    outline: none !important;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: var(--color-bg-secondary);
+    color: var(--color-text-primary);
+    -webkit-font-smoothing: antialiased;
+}
+
+.app-card {
+    background: var(--color-bg-primary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--card-radius);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.dark .app-card {
+    background: #121212;
+    border: 1px solid var(--color-border);
+}
+
+.app-input {
+    width: 100%;
+    padding: 0.5rem;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-primary);
+    color: var(--color-text-primary);
+}
+
+.dark .app-input {
+    background: #121212;
+    border: 1px solid var(--color-border);
+}
+
+.app-selector-bg {
+    background-color: var(--color-bg-primary) !important;
+    border: 1px solid var(--color-border);
+}
+
+.dark .app-selector-bg {
+    background-color: #121212 !important;
+    border: 1px solid var(--color-border);
+}
+
+.dark .select-header {
+    background-color: #121212 !important;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.1); border-radius: 10px; }
+.dark ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); }
+
+[data-tauri-drag-region] { -webkit-app-region: drag; }
+button, a, input, [role="button"] { -webkit-app-region: no-drag; }

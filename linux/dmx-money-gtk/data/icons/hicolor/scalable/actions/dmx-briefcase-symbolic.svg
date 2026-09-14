@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <path class="foreground-fill" fill="#000000" d="M15 20 L15 4 Q15 3 14 3 L10 3 Q9 3 9 4 L9 20 Q9 20.41 8.71 20.71 Q8.41 21 8 21 Q7.59 21 7.29 20.71 Q7 20.41 7 20 L7 4 Q7 1 10 1 L14 1 Q17 1 17 4 L17 20 Q17 20.41 16.71 20.71 Q16.41 21 16 21 Q15.59 21 15.29 20.71 Q15 20.41 15 20 Z"/>
+  <path class="foreground-fill" fill="#000000" d="M4 5 L20 5 Q23 5 23 8 L23 18 Q23 21 20 21 L4 21 Q1 21 1 18 L1 8 Q1 5 4 5 Z M4 7 Q3 7 3 8 L3 18 Q3 19 4 19 L20 19 Q21 19 21 18 L21 8 Q21 7 20 7 L4 7 Z"/>
+</svg>

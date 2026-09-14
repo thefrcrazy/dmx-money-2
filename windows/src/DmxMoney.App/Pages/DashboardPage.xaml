@@ -1,0 +1,292 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="DmxMoney.App.DashboardPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:DmxMoney.App"
+    xmlns:interop="using:DmxMoney.Interop">
+
+    <ScrollViewer Padding="24">
+        <StackPanel Spacing="20" MaxWidth="1280">
+            <TextBlock Text="Tableau de Bord" Style="{StaticResource DmxPageTitle}" />
+
+            <Grid ColumnSpacing="20" RowSpacing="20">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Échéances -->
+                <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource DmxCard}">
+                    <StackPanel Spacing="12">
+                        <Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <local:LucideIcon Glyph="CalendarClock" Size="15" Stroke="{ThemeResource DmxAccent}" />
+                                <TextBlock Text="Échéances" Style="{StaticResource DmxCardTitle}" />
+                            </StackPanel>
+                            <HyperlinkButton Content="Tout voir" HorizontalAlignment="Right" Padding="4,0" Command="{x:Bind ViewModel.OpenScheduledCommand}" />
+                        </Grid>
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.View.Upcoming, Mode=OneWay}" MinHeight="132">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="interop:UpcomingScheduled">
+                                    <Grid Margin="0,0,0,12" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0" Width="32" Height="32" CornerRadius="16" Background="{ThemeResource DmxSubtleBackground}">
+                                            <local:LucideIcon Glyph="Clock" Size="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{x:Bind Description}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{x:Bind local:Format.Relative(DaysUntil)}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="2" Text="{x:Bind local:Format.Money(Amount)}" Style="{StaticResource DmxAmount}" VerticalAlignment="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock
+                            Text="Aucune échéance à venir"
+                            Style="{StaticResource DmxCaption}"
+                            HorizontalAlignment="Center"
+                            Visibility="{x:Bind local:Format.VisibleIfNone(ViewModel.View.Upcoming.Length), Mode=OneWay}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Opérations du mois -->
+                <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource DmxCard}">
+                    <StackPanel Spacing="8">
+                        <Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <local:LucideIcon Glyph="ArrowRightLeft" Size="15" Stroke="{ThemeResource DmxAccent}" />
+                                <TextBlock Text="Opérations" Style="{StaticResource DmxCardTitle}" />
+                            </StackPanel>
+                            <Border HorizontalAlignment="Right" CornerRadius="10" Padding="8,2" Background="{ThemeResource DmxSubtleBackground}">
+                                <TextBlock Text="Ce mois-ci" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Border>
+                        </Grid>
+                        <StackPanel HorizontalAlignment="Center" Spacing="2" Margin="0,8,0,0">
+                            <TextBlock Text="REVENUS - DÉPENSES" Style="{StaticResource DmxSectionLabel}" HorizontalAlignment="Center" />
+                            <TextBlock
+                                Text="{x:Bind local:Format.Rounded(ViewModel.View.Month.Saved), Mode=OneWay}"
+                                FontSize="32"
+                                FontWeight="Bold"
+                                HorizontalAlignment="Center"
+                                Foreground="{x:Bind local:Format.PositiveBrush(ViewModel.View.Month.Saved), Mode=OneWay}" />
+                        </StackPanel>
+                        <Border Height="1" Background="{ThemeResource DmxSeparator}" Margin="0,8" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" HorizontalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                                    <local:LucideIcon Glyph="TrendingUp" Size="11" Stroke="{ThemeResource DmxIncome}" />
+                                    <TextBlock Text="Revenus" Style="{StaticResource DmxCaption}" FontSize="10" />
+                                </StackPanel>
+                                <TextBlock Text="{x:Bind local:Format.Rounded(ViewModel.View.Month.Income), Mode=OneWay}" FontSize="12" FontWeight="Bold" HorizontalAlignment="Center" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" HorizontalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                                    <local:LucideIcon Glyph="TrendingDown" Size="11" Stroke="{ThemeResource DmxExpense}" />
+                                    <TextBlock Text="Dépenses" Style="{StaticResource DmxCaption}" FontSize="10" />
+                                </StackPanel>
+                                <TextBlock Text="{x:Bind local:Format.Rounded(ViewModel.View.Month.Expenses), Mode=OneWay}" FontSize="12" FontWeight="Bold" HorizontalAlignment="Center" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" HorizontalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                                    <local:LucideIcon Glyph="Wallet" Size="11" Stroke="{ThemeResource DmxAccent}" />
+                                    <TextBlock Text="Épargné" Style="{StaticResource DmxCaption}" FontSize="10" />
+                                </StackPanel>
+                                <TextBlock
+                                    Text="{x:Bind local:Format.Rounded(ViewModel.View.Month.Saved), Mode=OneWay}"
+                                    FontSize="12"
+                                    FontWeight="Bold"
+                                    HorizontalAlignment="Center"
+                                    Foreground="{x:Bind local:Format.PositiveBrush(ViewModel.View.Month.Saved), Mode=OneWay}" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Catégories -->
+                <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource DmxCard}">
+                    <StackPanel Spacing="12">
+                        <Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <local:LucideIcon Glyph="Tag" Size="15" Stroke="{ThemeResource DmxAccent}" />
+                                <TextBlock Text="Catégories" Style="{StaticResource DmxCardTitle}" />
+                            </StackPanel>
+                            <Border HorizontalAlignment="Right" CornerRadius="10" Padding="8,2" Background="{ThemeResource DmxSubtleBackground}">
+                                <TextBlock Text="Ce mois-ci" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Border>
+                        </Grid>
+                        <ItemsControl x:Name="TopCategories" MinHeight="132">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="interop:CategoryShare">
+                                    <Grid Margin="0,0,0,10" ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center" Fill="{x:Bind local:Format.Brush(Category.Color)}" />
+                                        <TextBlock Grid.Column="1" Text="{x:Bind Category.Name}" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="2" Text="{x:Bind local:Format.PercentTight(Percentage)}" FontSize="13" FontWeight="SemiBold" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock
+                            Text="Aucune dépense ce mois-ci"
+                            Style="{StaticResource DmxCaption}"
+                            HorizontalAlignment="Center"
+                            Visibility="{x:Bind local:Format.VisibleIfNone(ViewModel.View.TopCategories.Length), Mode=OneWay}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Mes Comptes -->
+                <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource DmxCard}" Padding="0">
+                    <StackPanel>
+                        <Grid Padding="16,14,16,10">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <local:LucideIcon Glyph="Wallet" Size="15" Stroke="{ThemeResource DmxAccent}" />
+                                <TextBlock Text="Mes Comptes" Style="{StaticResource DmxCardTitle}" />
+                            </StackPanel>
+                            <Button
+                                HorizontalAlignment="Right"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Padding="6"
+                                Command="{x:Bind ViewModel.NewAccountCommand}"
+                                ToolTipService.ToolTip="Ajouter un compte">
+                                <local:LucideIcon Glyph="Plus" Size="15" Stroke="{ThemeResource DmxAccent}" />
+                            </Button>
+                        </Grid>
+                        <ListView
+                            x:Name="AccountsList"
+                            SelectionMode="None"
+                            IsItemClickEnabled="True"
+                            ItemClick="OnAccountClicked"
+                            MinHeight="170">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="interop:DashboardAccount">
+                                    <Grid ColumnSpacing="12" Padding="0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0" Width="32" Height="32" CornerRadius="9" Background="{x:Bind local:Format.Tint(Account.Color)}">
+                                            <local:LucideIcon Glyph="{x:Bind Account.Icon}" Size="16" Stroke="{x:Bind local:Format.Brush(Account.Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <TextBlock Grid.Column="1" Text="{x:Bind Account.Name}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="2" Text="{x:Bind local:Format.Money(Balance)}" Foreground="{x:Bind local:Format.AmountBrush(Balance)}" Style="{StaticResource DmxAmount}" VerticalAlignment="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                        <Border Height="1" Background="{ThemeResource DmxSeparator}" />
+                        <Grid Padding="16,12">
+                            <TextBlock Text="TOTAL" Style="{StaticResource DmxSectionLabel}" VerticalAlignment="Center" />
+                            <TextBlock
+                                HorizontalAlignment="Right"
+                                Text="{x:Bind local:Format.Money(ViewModel.View.AccountsTotal), Mode=OneWay}"
+                                FontSize="17"
+                                FontWeight="Bold"
+                                Foreground="{ThemeResource DmxAccent}" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Dernières opérations -->
+                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource DmxCard}" Padding="0">
+                    <StackPanel>
+                        <Grid Padding="16,14,16,10">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <local:LucideIcon Glyph="Receipt" Size="15" Stroke="{ThemeResource DmxAccent}" />
+                                <TextBlock Text="Dernières" Style="{StaticResource DmxCardTitle}" />
+                            </StackPanel>
+                            <HyperlinkButton Content="Tout voir" HorizontalAlignment="Right" Padding="4,0" Command="{x:Bind ViewModel.OpenJournalCommand}" />
+                        </Grid>
+                        <ItemsControl x:Name="RecentList" MinHeight="200">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="interop:RecentTransaction">
+                                    <Grid ColumnSpacing="12" Padding="16,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0" Width="32" Height="32" CornerRadius="16" Background="{x:Bind local:Format.Tint(Category.Color)}">
+                                            <local:LucideIcon Glyph="{x:Bind Category.Icon}" Size="15" Stroke="{x:Bind local:Format.Brush(Category.Color)}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{x:Bind Transaction.Description}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{x:Bind local:Format.Short(Transaction.Date)}" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                        <TextBlock
+                                            Grid.Column="2"
+                                            Text="{x:Bind local:Format.SignedIncomeOnly(Transaction.Amount, Transaction.TransactionType)}"
+                                            Foreground="{x:Bind local:Format.KindBrush(Transaction.TransactionType)}"
+                                            Style="{StaticResource DmxAmount}"
+                                            VerticalAlignment="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <!-- Budget -->
+                <Border Grid.Row="1" Grid.Column="2" Style="{StaticResource DmxCard}">
+                    <StackPanel Spacing="14">
+                        <Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <local:LucideIcon Glyph="DollarSign" Size="15" Stroke="{ThemeResource DmxAccent}" />
+                                <TextBlock Text="Budget" Style="{StaticResource DmxCardTitle}" />
+                            </StackPanel>
+                            <Border HorizontalAlignment="Right" CornerRadius="10" Padding="8,2" Background="{ThemeResource DmxSubtleBackground}">
+                                <TextBlock Text="Ce mois-ci" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Border>
+                        </Grid>
+                        <local:DonutChartView x:Name="BudgetDonut" Height="150" Thickness="14" />
+                        <Grid ColumnSpacing="4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" HorizontalAlignment="Center">
+                                <TextBlock Text="RESTANT" Style="{StaticResource DmxSectionLabel}" HorizontalAlignment="Center" />
+                                <TextBlock
+                                    Text="{x:Bind local:Format.Rounded(ViewModel.View.Budget.Remaining), Mode=OneWay}"
+                                    Foreground="{x:Bind local:Format.AmountBrush(ViewModel.View.Budget.Remaining), Mode=OneWay}"
+                                    FontSize="12"
+                                    FontWeight="Bold"
+                                    HorizontalAlignment="Center" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" HorizontalAlignment="Center">
+                                <TextBlock Text="DÉPENSES" Style="{StaticResource DmxSectionLabel}" HorizontalAlignment="Center" />
+                                <TextBlock Text="{x:Bind local:Format.Rounded(ViewModel.View.Budget.Spent), Mode=OneWay}" FontSize="12" FontWeight="Bold" Foreground="{ThemeResource DmxIncome}" HorizontalAlignment="Center" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" HorizontalAlignment="Center">
+                                <TextBlock Text="PRÉVU" Style="{StaticResource DmxSectionLabel}" HorizontalAlignment="Center" />
+                                <TextBlock Text="{x:Bind local:Format.Rounded(ViewModel.View.Budget.TotalBudgeted), Mode=OneWay}" FontSize="12" FontWeight="Bold" HorizontalAlignment="Center" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

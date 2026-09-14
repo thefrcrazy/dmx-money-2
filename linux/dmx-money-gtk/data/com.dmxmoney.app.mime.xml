@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sauvegardes DmxMoney : JSON encodé en base64, compatible 1.x. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-dmxmoney-backup">
+    <comment>Sauvegarde DmxMoney</comment>
+    <comment xml:lang="en">DmxMoney backup</comment>
+    <icon name="com.dmxmoney.app"/>
+    <glob pattern="*.dmx"/>
+  </mime-type>
+</mime-info>

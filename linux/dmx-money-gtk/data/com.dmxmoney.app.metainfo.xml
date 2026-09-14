@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.dmxmoney.app</id>
+  <name>DmxMoney</name>
+  <summary>Gestion financière personnelle, locale et privée</summary>
+  <summary xml:lang="en">Local, private personal finance</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="com.dmxmoney">
+    <name>Maxim Collignon</name>
+  </developer>
+
+  <description>
+    <p>
+      DmxMoney gère vos comptes, votre journal d'opérations, vos budgets, votre échéancier,
+      vos analyses et vos prédictions de trésorerie. Toutes les données restent sur votre
+      machine, dans une base SQLite locale.
+    </p>
+    <p>Fonctions principales :</p>
+    <ul>
+      <li>Comptes groupés, soldes pointé et actuel, filtre global par compte</li>
+      <li>Journal éditable en ligne, virements liés, recherche et filtres</li>
+      <li>Budgets mensuels avec rythme de consommation et suggestions issues du journal</li>
+      <li>Échéancier à 13 périodicités, avec date de fin et lien vers un budget</li>
+      <li>Analyses (historique des soldes, répartitions) et prédictions avec transactions fictives</li>
+      <li>Imports CSV, QIF et OFX, sauvegardes <code>.dmx</code> (remplacement ou fusion)</li>
+      <li>Compagnon mobile : pont HTTPS local sécurisé par passkeys, appairage par QR</li>
+    </ul>
+    <p>
+      Le même noyau Rust calcule les montants sous Linux, macOS et Windows : les résultats sont
+      identiques d'une plateforme à l'autre.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">com.dmxmoney.app.desktop</launchable>
+  <provides>
+    <binary>dmxmoney</binary>
+    <mediatype>application/x-dmxmoney-backup</mediatype>
+  </provides>
+
+  <categories>
+    <category>Office</category>
+    <category>Finance</category>
+  </categories>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="2.0.0" date="2026-09-12">
+      <description>
+        <p>Première version native : GTK4 et libadwaita sur le noyau Rust partagé.</p>
+      </description>
+    </release>
+  </releases>
+</component>

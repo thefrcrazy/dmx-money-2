@@ -1,0 +1,15 @@
+[package]
+name = "uniffi-bindgen"
+description = "Génération des bindings Swift de dmx-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/main.rs"
+
+[dependencies]
+uniffi = { version = "0.31", features = ["cli"] }

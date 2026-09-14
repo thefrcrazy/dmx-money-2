@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="DmxMoney.App.JournalPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:DmxMoney.App"
+    xmlns:interop="using:DmxMoney.Interop">
+
+    <Grid Padding="24,20,24,0" RowSpacing="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+            <TextBlock Text="Journal" Style="{StaticResource DmxPageTitle}" VerticalAlignment="Center" />
+            <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
+                <TextBlock x:Name="Summary" Style="{StaticResource DmxCaption}" VerticalAlignment="Center" />
+                <Button Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.NewTransactionCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <local:LucideIcon Glyph="Plus" Size="14" Stroke="White" />
+                        <TextBlock Text="Nouvelle transaction" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10">
+            <TextBox
+                PlaceholderText="Rechercher dans toutes les colonnes..."
+                Width="300"
+                Text="{x:Bind ViewModel.Search, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            <DropDownButton x:Name="CategoriesButton" Content="Toutes les catégories" MinWidth="170">
+                <DropDownButton.Flyout>
+                    <Flyout>
+                        <ListView x:Name="CategoriesList" SelectionMode="Multiple" Width="240" MaxHeight="360" SelectionChanged="OnCategoriesChanged" DisplayMemberPath="Name" />
+                    </Flyout>
+                </DropDownButton.Flyout>
+            </DropDownButton>
+            <DropDownButton x:Name="TypesButton" Content="Tous les types" MinWidth="140">
+                <DropDownButton.Flyout>
+                    <Flyout>
+                        <ListView x:Name="TypesList" SelectionMode="Multiple" Width="180" SelectionChanged="OnTypesChanged" DisplayMemberPath="Label" />
+                    </Flyout>
+                </DropDownButton.Flyout>
+            </DropDownButton>
+            <DropDownButton x:Name="StatusesButton" Content="Tous les états" MinWidth="140">
+                <DropDownButton.Flyout>
+                    <Flyout>
+                        <ListView x:Name="StatusesList" SelectionMode="Multiple" Width="180" SelectionChanged="OnStatusesChanged" DisplayMemberPath="Label" />
+                    </Flyout>
+                </DropDownButton.Flyout>
+            </DropDownButton>
+            <DropDownButton x:Name="BudgetsButton" Content="Tous les budgets" MinWidth="150">
+                <DropDownButton.Flyout>
+                    <Flyout>
+                        <ListView x:Name="BudgetsList" SelectionMode="Multiple" Width="180" SelectionChanged="OnBudgetsChanged" DisplayMemberPath="Label" />
+                    </Flyout>
+                </DropDownButton.Flyout>
+            </DropDownButton>
+        </StackPanel>
+
+        <!-- Barre de sélection multiple -->
+        <Border
+            Grid.Row="2"
+            x:Name="SelectionBar"
+            Visibility="Collapsed"
+            CornerRadius="10"
+            Padding="14,8"
+            Background="{ThemeResource DmxSubtleBackground}">
+            <Grid>
+                <StackPanel Orientation="Horizontal" Spacing="14">
+                    <TextBlock x:Name="SelectionLabel" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Button Background="Transparent" BorderThickness="0" Command="{x:Bind ViewModel.ToggleCheckedSelectionCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <local:LucideIcon Glyph="CheckCircle2" Size="14" />
+                            <TextBlock Text="Pointer/Dépointer" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                    <Button Content="Annuler" Click="OnClearSelection" />
+                    <Button Command="{x:Bind ViewModel.DeleteSelectionCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <local:LucideIcon Glyph="Trash2" Size="14" Stroke="{ThemeResource DmxExpense}" />
+                            <TextBlock Text="Supprimer" Foreground="{ThemeResource DmxExpense}" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- En-têtes de colonnes -->
+        <Grid Grid.Row="3" Padding="16,8" Background="{ThemeResource DmxSubtleBackground}" CornerRadius="8,8,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="150" />
+                <ColumnDefinition Width="90" />
+                <ColumnDefinition Width="160" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="120" />
+                <ColumnDefinition Width="120" />
+                <ColumnDefinition Width="60" />
+                <ColumnDefinition Width="120" />
+                <ColumnDefinition Width="80" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="COMPTE" Style="{StaticResource DmxSectionLabel}" />
+            <TextBlock Grid.Column="1" Text="DATE" Style="{StaticResource DmxSectionLabel}" />
+            <TextBlock Grid.Column="2" Text="CATÉGORIE" Style="{StaticResource DmxSectionLabel}" />
+            <TextBlock Grid.Column="3" Text="DESCRIPTION" Style="{StaticResource DmxSectionLabel}" />
+            <TextBlock Grid.Column="4" Text="MONTANT" Style="{StaticResource DmxSectionLabel}" TextAlignment="Right" />
+            <TextBlock Grid.Column="5" Text="BUDGET RESTANT" Style="{StaticResource DmxSectionLabel}" TextAlignment="Right" />
+            <TextBlock Grid.Column="6" Text="ÉTAT" Style="{StaticResource DmxSectionLabel}" TextAlignment="Center" />
+            <TextBlock Grid.Column="7" Text="SOLDE" Style="{StaticResource DmxSectionLabel}" TextAlignment="Right" />
+        </Grid>
+
+        <ListView
+            Grid.Row="4"
+            x:Name="Rows"
+            SelectionMode="Extended"
+            SelectionChanged="OnSelectionChanged"
+            DoubleTapped="OnRowDoubleTapped"
+            Margin="0,0,0,0">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="Padding" Value="16,2" />
+                    <Setter Property="MinHeight" Value="40" />
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="interop:JournalRow">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="150" />
+                            <ColumnDefinition Width="90" />
+                            <ColumnDefinition Width="160" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="120" />
+                            <ColumnDefinition Width="120" />
+                            <ColumnDefinition Width="60" />
+                            <ColumnDefinition Width="120" />
+                            <ColumnDefinition Width="80" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Rectangle Width="4" Height="16" RadiusX="2" RadiusY="2" Fill="{x:Bind local:Format.Brush(AccountColor)}" />
+                            <TextBlock Text="{x:Bind AccountName}" FontSize="13" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+
+                        <TextBlock Grid.Column="1" Text="{x:Bind local:Format.Short(Transaction.Date)}" Style="{StaticResource DmxCaption}" VerticalAlignment="Center" />
+
+                        <Border Grid.Column="2" CornerRadius="9" Padding="8,2" VerticalAlignment="Center" HorizontalAlignment="Left" Background="{x:Bind local:Format.Tint(Category.Color)}">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <local:LucideIcon Glyph="{x:Bind Category.Icon}" Size="11" Stroke="{x:Bind local:Format.Brush(Category.Color)}" />
+                                <TextBlock Text="{x:Bind local:Format.Upper(Category.Name)}" FontSize="10" FontWeight="Bold" Foreground="{x:Bind local:Format.Brush(Category.Color)}" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Border>
+
+                        <local:EditableCell Grid.Column="3" Row="{x:Bind}" Field="description" VerticalAlignment="Center" />
+                        <local:EditableCell Grid.Column="4" Row="{x:Bind}" Field="amount" VerticalAlignment="Center" />
+
+                        <local:BudgetChip Grid.Column="5" Row="{x:Bind}" VerticalAlignment="Center" />
+
+                        <Button
+                            Grid.Column="6"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Padding="4"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Tag="{x:Bind Transaction.Id}"
+                            Click="OnToggleChecked">
+                            <local:LucideIcon Glyph="{x:Bind local:Format.CheckGlyph(Transaction.Checked)}" Size="18" Stroke="{x:Bind local:Format.CheckBrush(Transaction.Checked)}" />
+                        </Button>
+
+                        <TextBlock Grid.Column="7" Text="{x:Bind local:Format.Money(Balance)}" Style="{StaticResource DmxCaption}" TextAlignment="Right" VerticalAlignment="Center" Opacity="0.7" />
+
+                        <StackPanel Grid.Column="8" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                            <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind Transaction.Id}" Click="OnEdit" ToolTipService.ToolTip="Modifier">
+                                <local:LucideIcon Glyph="Edit2" Size="14" />
+                            </Button>
+                            <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind Transaction.Id}" Click="OnDelete" ToolTipService.ToolTip="Supprimer">
+                                <local:LucideIcon Glyph="Trash2" Size="14" Stroke="{ThemeResource DmxExpense}" />
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <StackPanel Grid.Row="4" x:Name="EmptyState" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="Collapsed">
+            <TextBlock Text="Aucune transaction" FontSize="17" FontWeight="Bold" HorizontalAlignment="Center" />
+            <TextBlock x:Name="EmptyMessage" Style="{StaticResource DmxCaption}" HorizontalAlignment="Center" />
+            <Button x:Name="EmptyAction" Content="Ajouter une transaction" HorizontalAlignment="Center" Command="{x:Bind ViewModel.NewTransactionCommand}" />
+        </StackPanel>
+    </Grid>
+</Page>

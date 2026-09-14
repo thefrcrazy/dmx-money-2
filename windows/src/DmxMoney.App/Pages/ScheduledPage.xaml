@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="DmxMoney.App.ScheduledPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:DmxMoney.App"
+    xmlns:interop="using:DmxMoney.Interop">
+
+    <Grid Padding="24,20,24,0" RowSpacing="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+            <TextBlock Text="Transactions Récurrentes" Style="{StaticResource DmxPageTitle}" VerticalAlignment="Center" />
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                <Button x:Name="SuggestionsButton" Command="{x:Bind ViewModel.ShowSuggestionsCommand}" Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <local:LucideIcon Glyph="Sparkles" Size="14" />
+                        <TextBlock x:Name="SuggestionsLabel" />
+                    </StackPanel>
+                </Button>
+                <Button Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.NewScheduledCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <local:LucideIcon Glyph="Plus" Size="14" Stroke="White" />
+                        <TextBlock Text="Nouvelle transaction" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10">
+            <ComboBox
+                x:Name="RangeBox"
+                MinWidth="170"
+                DisplayMemberPath="Label"
+                SelectionChanged="OnRangeChanged" />
+            <TextBox
+                PlaceholderText="Rechercher dans l'échéancier..."
+                Width="280"
+                Text="{x:Bind ViewModel.Search, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            <DropDownButton x:Name="CategoriesButton" Content="Toutes les catégories" MinWidth="170">
+                <DropDownButton.Flyout>
+                    <Flyout>
+                        <ListView x:Name="CategoriesList" SelectionMode="Multiple" Width="240" MaxHeight="360" DisplayMemberPath="Name" SelectionChanged="OnCategoriesChanged" />
+                    </Flyout>
+                </DropDownButton.Flyout>
+            </DropDownButton>
+            <DropDownButton x:Name="FrequenciesButton" Content="Toutes les fréquences" MinWidth="180">
+                <DropDownButton.Flyout>
+                    <Flyout>
+                        <ListView x:Name="FrequenciesList" SelectionMode="Multiple" Width="220" MaxHeight="360" DisplayMemberPath="Label" SelectionChanged="OnFrequenciesChanged" />
+                    </Flyout>
+                </DropDownButton.Flyout>
+            </DropDownButton>
+        </StackPanel>
+
+        <Grid Grid.Row="2" Padding="16,8" Background="{ThemeResource DmxSubtleBackground}" CornerRadius="8,8,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="160" />
+                <ColumnDefinition Width="180" />
+                <ColumnDefinition Width="150" />
+                <ColumnDefinition Width="170" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="120" />
+                <ColumnDefinition Width="80" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="COMPTE" Style="{StaticResource DmxSectionLabel}" />
+            <TextBlock Grid.Column="1" Text="ÉCHÉANCE" Style="{StaticResource DmxSectionLabel}" />
+            <TextBlock Grid.Column="2" Text="FRÉQUENCE" Style="{StaticResource DmxSectionLabel}" />
+            <TextBlock Grid.Column="3" Text="CATÉGORIE" Style="{StaticResource DmxSectionLabel}" />
+            <TextBlock Grid.Column="4" Text="DESCRIPTION" Style="{StaticResource DmxSectionLabel}" />
+            <TextBlock Grid.Column="5" Text="MONTANT" Style="{StaticResource DmxSectionLabel}" TextAlignment="Right" />
+            <TextBlock Grid.Column="6" Text="ACTIONS" Style="{StaticResource DmxSectionLabel}" TextAlignment="Right" />
+        </Grid>
+
+        <ListView Grid.Row="3" x:Name="Rows" SelectionMode="None">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="Padding" Value="16,6" />
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="interop:ScheduledRow">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160" />
+                            <ColumnDefinition Width="180" />
+                            <ColumnDefinition Width="150" />
+                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="120" />
+                            <ColumnDefinition Width="80" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Rectangle Width="4" Height="18" RadiusX="2" RadiusY="2" Fill="{x:Bind local:Format.Brush(AccountColor)}" />
+                            <StackPanel>
+                                <TextBlock Text="{x:Bind AccountName}" FontSize="13" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{x:Bind ToAccountName}" Style="{StaticResource DmxCaption}" FontSize="11" Visibility="{x:Bind local:Format.VisibleIfText(ToAccountName)}" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <local:LucideIcon Glyph="Calendar" Size="13" Stroke="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock Text="{x:Bind local:Format.Medium(Scheduled.NextDate)}" FontSize="12" />
+                            </StackPanel>
+                            <local:ScheduledBadge Row="{x:Bind}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <local:LucideIcon Glyph="Clock" Size="13" Stroke="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <TextBlock Text="{x:Bind FrequencyLabel}" Style="{StaticResource DmxCaption}" />
+                        </StackPanel>
+
+                        <Border Grid.Column="3" CornerRadius="9" Padding="8,2" VerticalAlignment="Center" HorizontalAlignment="Left" Background="{x:Bind local:Format.Tint(Category.Color)}">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <local:LucideIcon Glyph="{x:Bind Category.Icon}" Size="11" Stroke="{x:Bind local:Format.Brush(Category.Color)}" />
+                                <TextBlock Text="{x:Bind Category.Name}" FontSize="11" FontWeight="Medium" Foreground="{x:Bind local:Format.Brush(Category.Color)}" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Border>
+
+                        <StackPanel Grid.Column="4" VerticalAlignment="Center">
+                            <TextBlock Text="{x:Bind Scheduled.Description}" FontSize="13" TextTrimming="CharacterEllipsis" />
+                            <StackPanel Orientation="Horizontal" Spacing="4" Visibility="{x:Bind local:Format.VisibleIfText(BudgetName)}">
+                                <local:LucideIcon Glyph="Tag" Size="11" Stroke="{ThemeResource DmxIncome}" />
+                                <TextBlock Text="{x:Bind BudgetName}" FontSize="11" Foreground="{ThemeResource DmxIncome}" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <TextBlock
+                            Grid.Column="5"
+                            Text="{x:Bind local:Format.Signed(Scheduled.Amount, Scheduled.TransactionType)}"
+                            Foreground="{x:Bind local:Format.KindBrush(Scheduled.TransactionType)}"
+                            Style="{StaticResource DmxAmount}"
+                            VerticalAlignment="Center" />
+
+                        <StackPanel Grid.Column="6" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                            <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind Scheduled.Id}" Click="OnEdit" ToolTipService.ToolTip="Modifier">
+                                <local:LucideIcon Glyph="Edit2" Size="14" />
+                            </Button>
+                            <Button Background="Transparent" BorderThickness="0" Padding="5" Tag="{x:Bind Scheduled.Id}" Click="OnDelete" ToolTipService.ToolTip="Supprimer">
+                                <local:LucideIcon Glyph="Trash2" Size="14" Stroke="{ThemeResource DmxExpense}" />
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <StackPanel Grid.Row="3" x:Name="EmptyState" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="Collapsed">
+            <TextBlock x:Name="EmptyTitle" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" />
+            <TextBlock x:Name="EmptyMessage" Style="{StaticResource DmxCaption}" HorizontalAlignment="Center" />
+        </StackPanel>
+    </Grid>
+</Page>

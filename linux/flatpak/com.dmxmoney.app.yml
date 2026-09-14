@@ -1,0 +1,47 @@
+# Manifeste Flatpak de DmxMoney (GTK4 / libadwaita).
+#
+# Build local :
+#   flatpak install -y flathub org.gnome.Platform//47 org.gnome.Sdk//47 \
+#       org.freedesktop.Sdk.Extension.rust-stable//24.08
+#   flatpak-builder --user --install --force-clean build linux/flatpak/com.dmxmoney.app.yml
+#
+# Le build télécharge les dépendances Cargo (--share=network). Pour Flathub, générer
+# `cargo-sources.json` avec flatpak-builder-tools/cargo et remplacer ce réglage.
+app-id: com.dmxmoney.app
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: dmxmoney
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  build-args:
+    - --share=network
+  env:
+    CARGO_HOME: /run/build/dmx-money/cargo
+
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  # Pont compagnon mobile : serveur HTTPS local, DNS et ACME.
+  - --share=network
+  # Trousseau système pour les secrets du pont (service « DmxMoney Secure Bridge »).
+  - --talk-name=org.freedesktop.secrets
+  # Icône de zone de notification (protocole StatusNotifierItem).
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=org.freedesktop.Notifications
+  # Les imports et exports passent par le portail de fichiers : aucun accès disque direct.
+
+modules:
+  - name: dmx-money
+    buildsystem: simple
+    sources:
+      - type: dir
+        path: ../..
+    build-commands:
+      - cargo build --release -p dmx-money-gtk --offline || cargo build --release -p dmx-money-gtk
+      - bash scripts/install-linux.sh /app target/release/dmx-money-gtk

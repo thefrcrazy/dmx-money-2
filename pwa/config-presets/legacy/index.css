@@ -1,0 +1,203 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================
+   PRIMARY COLOR PALETTE WITH RGB (for opacity modifiers)
+   ========================================= */
+:root {
+    --color-primary-50: #e6f2ff;
+    --color-primary-50-rgb: 230 242 255;
+    --color-primary-100: #cce5ff;
+    --color-primary-100-rgb: 204 229 255;
+    --color-primary-200: #99ccff;
+    --color-primary-200-rgb: 153 204 255;
+    --color-primary-300: #66b3ff;
+    --color-primary-300-rgb: 102 179 255;
+    --color-primary-400: #3399ff;
+    --color-primary-400-rgb: 51 153 255;
+    --color-primary-500: #1a8cff;
+    --color-primary-500-rgb: 26 140 255;
+    --color-primary-600: #007AFF;
+    --color-primary-600-rgb: 0 122 255;
+    --color-primary-700: #006ee6;
+    --color-primary-700-rgb: 0 110 230;
+    --color-primary-800: #0055b3;
+    --color-primary-800-rgb: 0 85 179;
+    --color-primary-900: #003d80;
+    --color-primary-900-rgb: 0 61 128;
+    --color-primary-950: #002654;
+    --color-primary-950-rgb: 0 38 84;
+
+    --color-gray-50-rgb: 249 250 251;
+    --color-gray-100-rgb: 243 244 246;
+    --color-gray-200-rgb: 229 231 235;
+    --color-gray-300-rgb: 209 213 219;
+    --color-gray-400-rgb: 156 163 175;
+    --color-gray-500-rgb: 107 114 128;
+    --color-gray-600-rgb: 75 85 99;
+    --color-gray-700-rgb: 55 65 81;
+    --color-gray-800-rgb: 31 41 55;
+    --color-gray-900-rgb: 17 24 39;
+    --color-gray-950-rgb: 3 7 18;
+
+    --color-neutral-50-rgb: 250 250 250;
+    --color-neutral-100-rgb: 245 245 245;
+    --color-neutral-200-rgb: 229 229 229;
+    --color-neutral-300-rgb: 212 212 212;
+    --color-neutral-400-rgb: 163 163 163;
+    --color-neutral-500-rgb: 115 115 115;
+    --color-neutral-600-rgb: 82 82 82;
+    --color-neutral-700-rgb: 64 64 64;
+    --color-neutral-800-rgb: 38 38 38;
+    --color-neutral-900-rgb: 23 23 23;
+    --color-neutral-950-rgb: 10 10 10;
+}
+
+/* =========================================
+   BASE VARIABLES & DEFAULTS
+   ========================================= */
+:root {
+    --color-primary: #007AFF;
+    --color-primary-rgb: 0 122 255;
+    --color-bg-primary: #FFFFFF;
+    --color-bg-secondary: #F5F5F7;
+    --color-bg-tertiary: #F9FAFB;
+    --color-bg-card: #FFFFFF;
+    --color-text-primary: #000000;
+    --color-text-secondary: #86868B;
+    --color-border: rgba(0, 0, 0, 0.05);
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-serif: "New York", "Times New Roman", serif;
+    --font-mono: "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+
+    /* Semantic Layout Colors */
+    --color-shell-bg: var(--color-bg-secondary);
+    --color-main-bg: var(--color-bg-primary);
+
+    --card-radius: 12px;
+}
+
+.dark {
+    color-scheme: dark;
+    --color-primary: #3b82f6;
+    --color-primary-rgb: 59 130 246;
+    --color-bg-primary: #000000;
+    --color-bg-secondary: #000000;
+    --color-bg-tertiary: #000000;
+    --color-bg-card: #121212;
+    --color-text-primary: #ffffff;
+    --color-text-secondary: #a1a1aa;
+    --color-border: rgba(255, 255, 255, 0.1);
+}
+
+@layer base {
+    * {
+        outline: none !important;
+    }
+
+    body {
+        font-family: var(--font-sans);
+        background-color: var(--color-bg-secondary);
+        color: var(--color-text-primary);
+        transition: background-color 0.1s ease, color 0.1s ease;
+        -webkit-font-smoothing: antialiased;
+        font-feature-settings: "tnum";
+        font-variant-numeric: tabular-nums;
+    }
+}
+
+@layer components {
+    .app-card {
+        background: var(--color-bg-card);
+        border: 1px solid var(--color-border);
+        border-radius: var(--card-radius);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+
+    .app-button {
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+
+    .app-input {
+        width: 100%;
+        padding: 0.5rem;
+        border-radius: 8px;
+        border: 1px solid var(--color-border);
+        background: var(--color-bg-card);
+        color: var(--color-text-primary);
+    }
+
+    .app-selector-bg {
+        background-color: var(--color-bg-card) !important;
+        border: 1px solid var(--color-border);
+        border-radius: var(--card-radius);
+        overflow: hidden;
+    }
+
+    .dark .select-header {
+        background-color: var(--color-bg-card) !important;
+    }
+
+    .app-icon-button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.5rem;
+        border-radius: 0.5rem;
+        border: 1px solid var(--color-border);
+        background: rgba(0, 0, 0, 0.02);
+        color: #374151; /* gray-700 */
+        transition: all 0.2s;
+    }
+
+    .dark .app-icon-button {
+        background: rgba(255, 255, 255, 0.05);
+        color: #d1d5db; /* gray-300 */
+    }
+
+    .app-icon-button:hover {
+        background: rgba(0, 0, 0, 0.05);
+        color: #111827; /* gray-900 */
+    }
+
+    .dark .app-icon-button:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #f3f4f6; /* gray-100 */
+    }
+
+    .app-icon-button.selected {
+        background: var(--color-primary);
+        color: white;
+        border-color: var(--color-primary);
+    }
+}
+
+@layer utilities {
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.1); border-radius: 10px; }
+    .dark ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); }
+
+    [data-tauri-drag-region] { -webkit-app-region: drag; }
+    button, a, input, [role="button"] { -webkit-app-region: no-drag; }
+    
+    /* Chrome/Safari fix for date input on older WebKit */
+    input[type="date"]::-webkit-calendar-picker-indicator {
+        display: block;
+        background: transparent;
+        bottom: 0;
+        color: transparent;
+        cursor: pointer;
+        height: auto;
+        left: 0;
+        position: absolute;
+        right: 0;
+        top: 0;
+        width: auto;
+    }
+}

@@ -1,0 +1,112 @@
+/* DmxMoney — styles partagés avec les autres plateformes (cartes, pastilles, couleurs). */
+
+.dmx-card {
+  background-color: var(--card-bg-color, @card_bg_color);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.dmx-card-flat {
+  background-color: @card_bg_color;
+  border-radius: 14px;
+}
+
+.dmx-badge {
+  border-radius: 10px;
+}
+
+.dmx-chip {
+  border-radius: 10px;
+  padding: 2px 9px;
+  font-size: 10pt;
+}
+
+.dmx-section-label {
+  font-size: 9pt;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  opacity: 0.65;
+  text-transform: uppercase;
+}
+
+.dmx-page-title {
+  font-size: 20pt;
+  font-weight: 800;
+}
+
+.dmx-card-title {
+  font-size: 13pt;
+  font-weight: 700;
+}
+
+.dmx-amount {
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+
+.dmx-big-amount {
+  font-size: 24pt;
+  font-weight: 800;
+}
+
+.dmx-income {
+  color: #10b981;
+}
+
+.dmx-expense {
+  color: #ef4444;
+}
+
+.dmx-transfer {
+  color: #6366f1;
+}
+
+.dmx-warning {
+  color: #f97316;
+}
+
+.dmx-muted {
+  opacity: 0.6;
+}
+
+.dmx-table-header {
+  font-size: 9pt;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+  text-transform: uppercase;
+}
+
+.dmx-row-ended {
+  background-color: alpha(#ef4444, 0.06);
+}
+
+.dmx-progress trough {
+  min-height: 10px;
+  border-radius: 6px;
+}
+
+.dmx-progress progress {
+  min-height: 10px;
+  border-radius: 6px;
+}
+
+.dmx-progress-over progress {
+  background-color: #ef4444;
+}
+
+.dmx-progress-ok progress {
+  background-color: #10b981;
+}
+
+.dmx-dashed {
+  border: 1px dashed alpha(currentColor, 0.3);
+  border-radius: 12px;
+}
+
+/* Entrée active du pied de page (Catégories, Paramètres). */
+.dmx-active {
+  background-color: alpha(@accent_bg_color, 0.14);
+  color: @accent_color;
+  font-weight: 600;
+}

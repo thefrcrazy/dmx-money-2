@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  core:
+    name: Noyau Rust
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Dépendances système (trousseau du pont)
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy -p dmx-core -p dmx-bridge -p dmx-ffi --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test -p dmx-core -p dmx-bridge -p dmx-ffi
+
+  linux:
+    name: Linux (GTK4 / libadwaita)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Dépendances système
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libdbus-1-dev \
+                                  desktop-file-utils appstream
+      - name: Icônes symboliques
+        run: ./scripts/gen-linux-icons.sh
+      - name: Les icônes versionnées sont à jour
+        run: git diff --exit-code -- linux/dmx-money-gtk/data/icons
+      - name: Clippy
+        run: cargo clippy -p dmx-money-gtk --all-targets -- -D warnings
+      - name: Build release
+        run: cargo build --release -p dmx-money-gtk
+      - name: Installation dans un préfixe de test
+        run: ./scripts/install-linux.sh "$PWD/target/prefix" target/release/dmx-money-gtk
+      - name: Validation des métadonnées de bureau
+        run: |
+          desktop-file-validate target/prefix/share/applications/com.dmxmoney.app.desktop
+          appstreamcli validate --no-net target/prefix/share/metainfo/com.dmxmoney.app.metainfo.xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmx-money-gtk-linux-x64
+          path: target/prefix
+          if-no-files-found: error
+
+  apple:
+    name: Apple (macOS, iOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cibles Rust Apple
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim
+      - name: XcodeGen
+        run: brew install xcodegen
+      - name: Noyau et bindings Swift
+        run: ./scripts/build-apple-xcframework.sh
+      - name: Tests DmxKit
+        run: swift test --package-path apple/Packages/DmxKit
+      - name: Projet Xcode
+        run: cd apple && xcodegen generate
+      - name: macOS modern (Apple Silicon, macOS 11+)
+        run: SKIP_CORE=1 ./scripts/build-macos.sh modern
+      - name: macOS legacy (Intel, macOS 10.15 Catalina)
+        run: SKIP_CORE=1 ./scripts/build-macos.sh legacy
+      - name: iOS (simulateur arm64)
+        run: |
+          xcodebuild -project apple/DmxMoney.xcodeproj -scheme DmxMoney-iOS \
+            -configuration Debug -destination 'generic/platform=iOS Simulator' \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
+
+  windows:
+    name: Windows (WinUI 3)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: uniffi-bindgen-cs
+        run: cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.11.0+v0.31.0 --locked
+      - name: Noyau, bindings et application
+        run: pwsh scripts/build-windows.ps1 -Rid win-x64 -SkipInstaller
+      - name: Tests (noyau et modèles de vue)
+        run: dotnet test windows/tests/DmxMoney.Tests/DmxMoney.Tests.csproj --configuration Release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmxmoney-win-x64
+          path: target/windows/win-x64
+          if-no-files-found: error

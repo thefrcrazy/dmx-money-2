@@ -1,0 +1,41 @@
+[package]
+name = "dmx-bridge"
+description = "Pont compagnon mobile de DmxMoney : API HTTPS locale, passkeys et provisionnement managé"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+dmx-core = { path = "../dmx-core" }
+base64.workspace = true
+chrono.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+instant-acme = "0.7"
+passkey-auth = "0.1.3"
+rand = "0.8"
+rcgen = "0.14"
+reqwest = { version = "0.13", features = ["json", "query"] }
+rustls = { version = "0.23", features = ["ring"] }
+rustls-pemfile = "2.2"
+sha2 = "0.10"
+subtle = "2.6"
+url = "2.5"
+
+# keyring 3.x n'embarque aucun stockage par défaut : sans fonctionnalité de plateforme il
+# retombe sur une maquette en mémoire et le secret du pont serait perdu à chaque redémarrage.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6", features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6", features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6", features = ["sync-secret-service", "crypto-rust"] }

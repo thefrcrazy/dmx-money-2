@@ -1,0 +1,10 @@
+[bindings.swift]
+module_name = "DmxCore"
+ffi_module_name = "DmxCoreFFI"
+ffi_module_filename = "DmxCoreFFI"
+generate_module_map = true
+
+[bindings.csharp]
+namespace = "DmxMoney.Interop"
+cdylib_name = "dmx_ffi"
+access_modifier = "public"

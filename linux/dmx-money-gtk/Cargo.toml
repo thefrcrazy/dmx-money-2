@@ -1,0 +1,24 @@
+[package]
+name = "dmx-money-gtk"
+version = "2.0.0"
+edition = "2021"
+rust-version = "1.88"
+description = "DmxMoney pour Linux (GTK4 / libadwaita)"
+license = "MIT"
+
+[dependencies]
+dmx-core = { path = "../../core/crates/dmx-core" }
+dmx-bridge = { path = "../../core/crates/dmx-bridge" }
+gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
+adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
+cairo-rs = "0.20"
+async-channel = "2"
+qrcode = "0.14"
+chrono = { workspace = true }
+log = { workspace = true }
+env_logger = "0.11"
+dirs = { workspace = true }
+
+# L'icône de zone de notification suit le protocole SNI, propre à Linux.
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = "0.2"

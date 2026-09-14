@@ -1,0 +1,12 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Cross-Origin-Opener-Policy: same-origin
+
+/sw.js
+  Service-Worker-Allowed: /
+  Cache-Control: no-cache
+
+/manifest.webmanifest
+  Cache-Control: no-cache

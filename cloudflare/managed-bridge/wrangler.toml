@@ -1,0 +1,16 @@
+name = "dmxmoney-managed-bridge"
+main = "src/index.ts"
+compatibility_date = "2026-05-27"
+
+kv_namespaces = [
+  { binding = "DEVICES", id = "replace-with-production-devices-kv-id" },
+  { binding = "ASSETS", id = "replace-with-production-assets-kv-id" }
+]
+
+[vars]
+BRIDGE_DOMAIN = "develop-max.com"
+# Required: deploying without it drops the live value and breaks DNS + ACME.
+CLOUDFLARE_ZONE_ID = "replace-with-production-zone-id"
+PWA_URL = "https://dmxmoney.develop-max.com/mobile"
+DEVICE_PREFIX = "dmx"
+REGISTRATION_LIMIT_PER_HOUR = "20"
