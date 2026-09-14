@@ -11,13 +11,31 @@ namespace DmxMoney.App;
 internal static class CrashReport
 {
     private const uint MessageBoxIconError = 0x10;
+    private const int TrailLength = 20;
 
+    private static readonly Queue<string> Trail = new();
     private static int reported;
 
     public static string LogPath { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DmxMoney", "crash.log");
 
-    public static void Show(Exception error)
+    /// <summary>
+    /// Note une étape (page ouverte, formulaire…). Les erreurs natives de WinUI arrivent souvent sans
+    /// message ni pile d'appels : ces étapes disent où elles se sont produites.
+    /// </summary>
+    public static void Note(string step)
+    {
+        lock (Trail)
+        {
+            Trail.Enqueue($"{DateTime.Now:HH:mm:ss} {step}");
+            while (Trail.Count > TrailLength)
+            {
+                Trail.Dequeue();
+            }
+        }
+    }
+
+    public static void Show(Exception error, string? detail = null)
     {
         // Une même panne peut remonter par plusieurs chemins : un seul rapport.
         if (Interlocked.Exchange(ref reported, 1) == 1)
@@ -26,8 +44,17 @@ internal static class CrashReport
         }
         try
         {
+            string steps;
+            lock (Trail)
+            {
+                steps = string.Join("\n  ", Trail);
+            }
             Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
-            File.AppendAllText(LogPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] DmxMoney {AppInfo.Version}\n{error}\n\n");
+            File.AppendAllText(
+                LogPath,
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] DmxMoney {AppInfo.Version}\n"
+                + (string.IsNullOrWhiteSpace(detail) ? string.Empty : $"Message WinUI : {detail}\n")
+                + $"{error}\nHRESULT : 0x{error.HResult:X8}\nDernières étapes :\n  {steps}\n\n");
         }
         catch (Exception)
         {
@@ -36,9 +63,10 @@ internal static class CrashReport
         // La CI lance l'application sans personne pour fermer une boîte de dialogue.
         if (Environment.GetEnvironmentVariable("DMXMONEY_NO_DIALOG") != "1")
         {
+            var summary = string.IsNullOrWhiteSpace(detail) ? error.Message : detail;
             MessageBoxW(
                 IntPtr.Zero,
-                $"DmxMoney a rencontré une erreur et doit fermer.\n\n{error.GetType().Name} : {error.Message}\n\nDétails : {LogPath}",
+                $"DmxMoney a rencontré une erreur et doit fermer.\n\n{error.GetType().Name} : {summary}\n\nDétails : {LogPath}",
                 "DmxMoney",
                 MessageBoxIconError);
         }

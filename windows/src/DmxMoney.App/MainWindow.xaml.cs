@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using DmxMoney.Interop;
 using DmxMoney.ViewModels;
 using Microsoft.UI;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -82,6 +83,35 @@ public sealed partial class MainWindow : Window
         UpdateAccountFilter();
         UpdateHeader();
         Navigate(viewModel.Route);
+        if (Environment.GetEnvironmentVariable("DMXMONEY_SELF_TEST") == "1")
+        {
+            StartSelfTest();
+        }
+    }
+
+    // --- Auto-test (CI) ---
+
+    private DispatcherQueueTimer? selfTestTimer;
+
+    /// <summary>Ouvre chaque page tour à tour puis quitte (code 0) : la CI y détecte une page qui plante.</summary>
+    private void StartSelfTest()
+    {
+        var routes = Enum.GetValues<AppRoute>();
+        var index = 0;
+        selfTestTimer = DispatcherQueue.CreateTimer();
+        selfTestTimer.Interval = TimeSpan.FromMilliseconds(1500);
+        selfTestTimer.Tick += (timer, args) =>
+        {
+            if (index < routes.Length && shell is not null)
+            {
+                shell.Route = routes[index++];
+                return;
+            }
+            timer.Stop();
+            CrashReport.Note("auto-test terminé");
+            Environment.Exit(0);
+        };
+        selfTestTimer.Start();
     }
 
     // --- Navigation ---
@@ -128,6 +158,7 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
+        CrashReport.Note($"page {route}");
         if (navigationItems.TryGetValue(route, out var item))
         {
             Nav.SelectedItem = item;
@@ -277,6 +308,7 @@ public sealed partial class MainWindow : Window
             return;
         }
         CloseOpenDialog();
+        CrashReport.Note($"formulaire {request.GetType().Name}");
         var model = FormFactory.Create(shell.Store, request);
         if (model is null)
         {

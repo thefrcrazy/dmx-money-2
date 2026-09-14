@@ -14,9 +14,11 @@ public partial class App : Application
 
     public App()
     {
-        // Abonné avant InitializeComponent, pour couvrir aussi le chargement du XAML.
-        UnhandledException += (sender, args) => CrashReport.Show(args.Exception);
+        // Abonné avant InitializeComponent, pour couvrir aussi le chargement du XAML. Le message de
+        // WinUI (args.Message) dit souvent ce que l'exception native ne dit pas.
+        UnhandledException += (sender, args) => CrashReport.Show(args.Exception, args.Message);
         InitializeComponent();
+        DebugSettings.XamlResourceReferenceFailed += (sender, args) => CrashReport.Note($"ressource XAML introuvable : {args.Message}");
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
