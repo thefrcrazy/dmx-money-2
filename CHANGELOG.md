@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1 - 2026-09-14
+
+### Corrections
+
+- Windows : l'application se fermait dès son lancement, sans fenêtre ni message, avec l'installeur comme avec la version portable. Le fichier `resources.pri`, qui contient le XAML compilé de l'app, manquait à la publication.
+- Windows : une erreur fatale affiche désormais une boîte de dialogue et laisse son détail dans `%LOCALAPPDATA%\DmxMoney\crash.log`.
+
 ## 2.0.0 - 2026-09-14
 
 ### Applications natives
