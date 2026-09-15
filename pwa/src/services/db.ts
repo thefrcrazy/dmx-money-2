@@ -632,7 +632,7 @@ export class DatabaseService {
         }
 
         if (name === 'SecurityError') {
-            return new Error('Passkey refusée par le navigateur. Vérifie que la PWA est ouverte en HTTPS sur dmxmoney.develop-max.com.');
+            return new Error('Passkey refusée par le navigateur. Ouvre la PWA depuis le QR code de l’application desktop, en HTTPS.');
         }
 
         return error instanceof Error ? error : new Error(message);

@@ -47,6 +47,7 @@ const Button: React.FC<ButtonProps> = ({
         <button
             className={cn(
                 "inline-flex items-center justify-center rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500/20 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 cursor-pointer",
+                "app-btn", `app-btn-${variant}`,
                 variants[variant],
                 sizes[size],
                 fullWidth && "w-full",

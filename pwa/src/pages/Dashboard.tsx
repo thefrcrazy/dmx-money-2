@@ -132,7 +132,7 @@ const Dashboard: React.FC = () => {
                             upcomingScheduled.map(s => (
                                 <div key={s.id} className="flex items-center justify-between">
                                     <div className="flex items-center gap-3 overflow-hidden">
-                                        <div className={`p-2 rounded-full ${s.diffDays < 0 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                                        <div className={`p-2 rounded-full ${s.diffDays < 0 ? 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-400' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400'}`}>
                                             {s.diffDays < 0 ? <AlertCircle className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
                                         </div>
                                         <div className="flex flex-col truncate">
@@ -160,7 +160,7 @@ const Dashboard: React.FC = () => {
                 <Card 
                     title="Opérations" 
                     icon={ArrowRightLeft}
-                    action={<span className="text-[10px] bg-gray-100 dark:bg-neutral-700 px-2 py-0.5 rounded-full text-gray-500">Ce mois-ci</span>}
+                    action={<span className="text-[10px] bg-gray-100 dark:bg-neutral-800 px-2 py-0.5 rounded-full text-gray-500 dark:text-neutral-300">Ce mois-ci</span>}
                 >
                     <div className="flex flex-col items-center justify-center min-h-[128px] md:min-h-[140px]">
                         <div className="text-[10px] text-gray-400 uppercase font-bold tracking-widest mb-1">Revenus - Dépenses</div>
@@ -194,18 +194,23 @@ const Dashboard: React.FC = () => {
                 <Card 
                     title="Catégories" 
                     icon={Tag}
-                    action={<span className="text-[10px] bg-gray-100 dark:bg-neutral-700 px-2 py-0.5 rounded-full text-gray-500">Ce mois-ci</span>}
+                    action={<span className="text-[10px] bg-gray-100 dark:bg-neutral-800 px-2 py-0.5 rounded-full text-gray-500 dark:text-neutral-300">Ce mois-ci</span>}
                 >
                     <div className="min-h-[128px] md:min-h-[140px] flex items-center justify-center text-gray-400 text-xs text-center">
                         {topCategories.length > 0 ? (
                             <div className="w-full space-y-3">
                                 {topCategories.slice(0, 3).map(cat => (
-                                    <div key={cat.id} className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }} />
-                                            <span className="text-gray-700 dark:text-gray-300">{cat.name}</span>
+                                    <div key={cat.id}>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="flex min-w-0 items-center gap-2">
+                                                <div className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: cat.color }} />
+                                                <span className="truncate text-[15px] text-gray-700 dark:text-gray-300 md:text-xs">{cat.name}</span>
+                                            </div>
+                                            <span className="text-[15px] font-semibold tabular-nums text-gray-900 dark:text-gray-100 md:text-xs">{Math.round(cat.percentage)}%</span>
                                         </div>
-                                        <span className="font-semibold text-gray-900 dark:text-gray-100">{Math.round(cat.percentage)}%</span>
+                                        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/10">
+                                            <div className="h-full rounded-full" style={{ width: `${Math.min(100, cat.percentage)}%`, backgroundColor: cat.color }} />
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -274,7 +279,7 @@ const Dashboard: React.FC = () => {
                 </Card>
 
                 {/* 6. Budget */}
-                <Card title="Budget" icon={DollarSign} action={<span className="text-[10px] bg-gray-100 dark:bg-neutral-700 px-2 py-0.5 rounded-full text-gray-500">Ce mois-ci</span>}>
+                <Card title="Budget" icon={DollarSign} action={<span className="text-[10px] bg-gray-100 dark:bg-neutral-800 px-2 py-0.5 rounded-full text-gray-500 dark:text-neutral-300">Ce mois-ci</span>}>
                     <div className="min-h-[200px] flex flex-col items-center justify-center">
                         <div className="relative w-28 h-28 flex items-center justify-center mb-4">
                             <ResponsiveContainer width="100%" height="100%" minWidth={0}>

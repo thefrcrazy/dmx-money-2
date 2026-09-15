@@ -13,8 +13,6 @@ import '@formatjs/intl-locale/polyfill';
 import '@formatjs/intl-numberformat/polyfill';
 import '@formatjs/intl-numberformat/locale-data/fr';
 
-initializeMobileCompanionToken();
-
 const registerPwaServiceWorker = () => {
   if (hasTauriRuntime() || !('serviceWorker' in navigator)) return;
 
@@ -27,10 +25,19 @@ const registerPwaServiceWorker = () => {
   });
 };
 
-registerPwaServiceWorker();
+const render = () => {
+  initializeMobileCompanionToken();
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+};
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+// Aperçu de l'interface avec des données fictives (`/mobile/?apercu`), en développement seulement.
+if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('apercu')) {
+  void import('./dev/apercu').then(({ installPreview }) => installPreview()).finally(render);
+} else {
+  registerPwaServiceWorker();
+  render();
+}

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { Plus, Search, Trash2, Edit2, CheckCircle2, ArrowRightLeft, Tag, Circle } from 'lucide-react';
+import { Plus, Search, Trash2, Edit2, CheckCircle2, ArrowRightLeft, Tag, Circle, Check } from 'lucide-react';
 import Button from '../components/ui/Button';
 import { useBank } from '../context/BankContext';
 import { useToast } from '../context/ToastContext';
@@ -70,6 +70,7 @@ const Transactions: React.FC = () => {
     
     // Selection state
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [isSelecting, setIsSelecting] = useState(false);
     const [isGroupDeleteModalOpen, setIsGroupDeleteModalOpen] = useState(false);
 
     const [formData, setFormData] = useState({
@@ -381,6 +382,61 @@ const Transactions: React.FC = () => {
         }
     };
 
+    const handleSubmitTransaction = async (e: React.FormEvent) => {
+        e.preventDefault();
+        try {
+            const amount = parseFloat(formData.amount);
+            const isTransfer = formData.type === 'transfer';
+            if (editingTransaction) {
+                const transactionData = {
+                    date: formData.date,
+                    amount,
+                    description: formData.description,
+                    category: isTransfer ? 'transfer' : formData.categoryId,
+                    accountId: editingTransaction.type === 'income' && isTransfer ? (formData.toAccountId || formData.accountId) : formData.accountId,
+                    type: isTransfer ? editingTransaction.type : formData.type as 'income' | 'expense',
+                };
+                await updateTransaction({ ...editingTransaction, ...transactionData });
+                
+                // Mettre à jour la transaction liée si elle existe
+                if (isTransfer && editingTransaction.linkedTransactionId) {
+                    const linkedTx = transactions.find(t => t.id === editingTransaction.linkedTransactionId);
+                    if (linkedTx) {
+                        await updateTransaction({
+                            ...linkedTx,
+                            date: formData.date,
+                            amount,
+                            description: formData.description,
+                            accountId: formData.toAccountId || linkedTx.accountId,
+                        });
+                    }
+                }
+                
+                showToast("Transaction mise à jour", "success");
+            } else {
+                if (isTransfer && formData.toAccountId) {
+                    await addTransfer(formData.accountId, formData.toAccountId, amount, formData.date, formData.description);
+                    showToast("Virement ajouté", "success");
+                } else {
+                    const transactionData = {
+                        date: formData.date,
+                        amount,
+                        description: formData.description,
+                        category: formData.categoryId,
+                        accountId: formData.accountId,
+                        type: formData.type as 'income' | 'expense',
+                        checked: false
+                    };
+                    await addTransaction(transactionData);
+                    showToast("Transaction ajoutée", "success");
+                }
+            }
+            setIsModalOpen(false);
+        } catch (err) {
+            showToast("Une erreur est survenue", "error");
+        }
+    };
+
     const renderCategoryIcon = (iconName: string, className: string = "w-4 h-4") => {
         if (iconName === 'ArrowRightLeft') return <ArrowRightLeft className={className} />;
         const Icon = ICONS[iconName] || Tag;
@@ -391,34 +447,25 @@ const Transactions: React.FC = () => {
         <div className="flex-1 flex flex-col min-h-0 space-y-4 md:space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1 flex-none w-full">
                 <h2 className="hidden md:block text-2xl font-bold text-gray-900 dark:text-gray-200">Journal</h2>
-                <Button 
-                    onClick={() => handleOpenModal()} 
-                    size="sm" 
-                    icon={Plus}
-                    className="w-full sm:w-auto"
-                >
-                    Nouvelle transaction
-                </Button>
+                <div className="flex w-full gap-2 sm:w-auto">
+                    <Button onClick={() => handleOpenModal()} size="sm" icon={Plus} className="flex-1 sm:flex-none">
+                        Nouvelle transaction
+                    </Button>
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                            if (isSelecting) setSelectedIds(new Set());
+                            setIsSelecting(value => !value);
+                        }}
+                        className="md:hidden"
+                    >
+                        {isSelecting ? 'OK' : 'Sélectionner'}
+                    </Button>
+                </div>
             </div>
 
             <div className="md:hidden space-y-3">
-                <div className="grid grid-cols-3 gap-2">
-                    <div className="rounded-2xl border border-black/[0.05] dark:border-white/10 bg-white dark:bg-[#121212] p-3">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Lignes</div>
-                        <div className="mt-1 text-lg font-bold text-gray-950 dark:text-white">{displayTransactions.length}</div>
-                    </div>
-                    <div className="rounded-2xl border border-black/[0.05] dark:border-white/10 bg-white dark:bg-[#121212] p-3">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Filtres</div>
-                        <div className="mt-1 text-lg font-bold text-gray-950 dark:text-white">{activeFilterCount}</div>
-                    </div>
-                    <div className="rounded-2xl border border-black/[0.05] dark:border-white/10 bg-white dark:bg-[#121212] p-3">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Net</div>
-                        <div className={`mt-1 text-lg font-bold truncate ${mobileVisibleNet >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                            {mobileVisibleNet >= 0 ? '+' : ''}{formatCurrency(mobileVisibleNet)}
-                        </div>
-                    </div>
-                </div>
-
                 <Input
                     placeholder="Rechercher..."
                     value={searchTerm}
@@ -460,6 +507,15 @@ const Transactions: React.FC = () => {
                         size="sm"
                     />
                 </div>
+
+                <p className="px-1 text-[13px] text-[var(--color-text-secondary)]">
+                    {displayTransactions.length} opération{displayTransactions.length > 1 ? 's' : ''}
+                    {activeFilterCount > 0 ? ` · ${activeFilterCount} filtre${activeFilterCount > 1 ? 's' : ''}` : ''}
+                    {' · '}
+                    <span className={`font-semibold tabular-nums ${mobileVisibleNet >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {mobileVisibleNet >= 0 ? '+' : ''}{formatCurrency(mobileVisibleNet)}
+                    </span>
+                </p>
             </div>
 
             <div className="hidden md:flex flex-col xl:flex-row gap-3 px-1 flex-none">
@@ -670,112 +726,84 @@ const Transactions: React.FC = () => {
                 />
             </div>
 
-            <div className="md:hidden space-y-3 pb-4">
+            <div className="md:hidden space-y-5 pb-4">
                 {displayTransactions.length > 0 ? (
                     mobileGroupedTransactions.map(group => (
-                        <section key={group.date} className="rounded-2xl border border-black/[0.05] dark:border-white/10 bg-white dark:bg-[#121212] shadow-sm overflow-hidden">
-                            <div className="px-4 py-2.5 bg-gray-50 dark:bg-white/[0.03] border-b border-black/[0.04] dark:border-white/10">
-                                <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400 dark:text-neutral-500 capitalize">{group.label}</h3>
-                            </div>
-                            <div className="divide-y divide-gray-100 dark:divide-neutral-800">
-                                {group.items.map(transaction => {
+                        <section key={group.date}>
+                            <h3 className="px-4 pb-1.5 text-[13px] font-medium text-[var(--color-text-secondary)] first-letter:uppercase">
+                                {group.label}
+                            </h3>
+                            <div className="app-card overflow-hidden">
+                                {group.items.map((transaction, index) => {
                                     const account = accountMap.get(transaction.accountId);
                                     const category = getCategoryDetails(transaction.category);
                                     const budgetRemaining = getTransactionBudgetRemaining(transaction);
                                     const isIncome = transaction.type === 'income';
                                     const isSelected = selectedIds.has(transaction.id);
+                                    const details = [
+                                        account?.name || 'Compte',
+                                        category.name,
+                                        budgetRemaining ? `${formatCurrency(budgetRemaining.remaining)} restant` : null,
+                                    ].filter(Boolean).join(' · ');
 
                                     return (
-                                        <article key={transaction.id} className={`p-3 transition-colors ${isSelected ? 'bg-primary-50/60 dark:bg-primary-500/10' : ''}`}>
-                                            <div className="flex items-start gap-3">
-                                                <input
-                                                    type="checkbox"
-                                                    aria-label={`Sélectionner ${transaction.description}`}
-                                                    className="mt-4 w-4 h-4 rounded border-gray-300 dark:border-neutral-700 text-primary-600 focus:ring-primary-500 bg-white dark:bg-neutral-900"
-                                                    checked={isSelected}
-                                                    onChange={() => handleToggleSelect(transaction.id)}
-                                                />
-
+                                        <div key={transaction.id} className={`flex items-center gap-3 pl-4 transition-colors ${isSelected ? 'bg-primary-500/10' : ''}`}>
+                                            {isSelecting && (
                                                 <button
                                                     type="button"
-                                                    onClick={() => handleOpenModal(transaction)}
-                                                    className="min-w-0 flex-1 text-left"
+                                                    onClick={() => handleToggleSelect(transaction.id)}
+                                                    className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors ${isSelected ? 'border-primary-500 bg-primary-500 text-white' : 'border-[var(--ios-tertiary-label)]'}`}
+                                                    aria-label={`${isSelected ? 'Désélectionner' : 'Sélectionner'} ${transaction.description}`}
+                                                    aria-pressed={isSelected}
                                                 >
-                                                    <div className="flex items-start gap-3">
-                                                        <div
-                                                            className="mt-0.5 h-10 w-10 shrink-0 rounded-2xl flex items-center justify-center"
-                                                            style={{ backgroundColor: `${category.color}16`, color: category.color }}
-                                                        >
-                                                            {renderCategoryIcon(category.icon, 'w-5 h-5')}
-                                                        </div>
-                                                        <div className="min-w-0 flex-1">
-                                                            <div className="flex items-start justify-between gap-2">
-                                                                <p className="text-[15px] font-semibold leading-tight text-gray-950 dark:text-white truncate">
-                                                                    {transaction.description || category.name}
-                                                                </p>
-                                                                <p className={`shrink-0 text-[15px] font-bold tabular-nums ${isIncome ? 'text-emerald-600' : 'text-red-600'}`}>
-                                                                    {isIncome ? '+' : '-'}{formatCurrency(transaction.amount)}
-                                                                </p>
-                                                            </div>
-                                                            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-gray-500 dark:text-neutral-400">
-                                                                <span className="truncate max-w-[120px]">{account?.name || 'Compte'}</span>
-                                                                <span className="h-1 w-1 rounded-full bg-gray-300 dark:bg-neutral-700" />
-                                                                <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-tight" style={{ backgroundColor: `${category.color}14`, color: category.color }}>
-                                                                    {category.name}
-                                                                </span>
-                                                                {budgetRemaining && (
-                                                                    <span className="text-[11px] font-semibold text-indigo-500">
-                                                                        {formatCurrency(budgetRemaining.remaining)} restant
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    </div>
+                                                    {isSelected && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
                                                 </button>
-
-                                                <div className="flex shrink-0 flex-col items-center gap-1">
+                                            )}
+                                            <span
+                                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+                                                style={{ backgroundColor: `${category.color}1f`, color: category.color }}
+                                            >
+                                                {renderCategoryIcon(category.icon, 'h-[18px] w-[18px]')}
+                                            </span>
+                                            <div className={`flex min-w-0 flex-1 items-center gap-2 py-2.5 pr-2 ${index > 0 ? 'border-t-[0.5px] border-[var(--ios-separator)]' : ''}`}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => (isSelecting ? handleToggleSelect(transaction.id) : handleOpenModal(transaction))}
+                                                    className="min-w-0 flex-1 text-left active:opacity-60"
+                                                >
+                                                    <span className="block truncate text-[17px] leading-snug text-[var(--ios-label)]">
+                                                        {transaction.description || category.name}
+                                                    </span>
+                                                    <span className="mt-0.5 block truncate text-[13px] text-[var(--color-text-secondary)]">{details}</span>
+                                                </button>
+                                                <span className={`shrink-0 text-[17px] font-semibold tabular-nums ${isIncome ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--ios-label)]'}`}>
+                                                    {isIncome ? '+' : '-'}{formatCurrency(transaction.amount)}
+                                                </span>
+                                                {!isSelecting && (
                                                     <button
                                                         type="button"
                                                         onClick={() => toggleTransactionCheck(transaction.id)}
-                                                        className={`rounded-full p-1.5 transition-colors ${transaction.checked ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10' : 'text-gray-300 dark:text-neutral-600 bg-gray-50 dark:bg-white/[0.04]'}`}
+                                                        className="flex h-9 w-9 shrink-0 items-center justify-center"
                                                         aria-label={transaction.checked ? 'Dépointer' : 'Pointer'}
+                                                        aria-pressed={transaction.checked}
                                                     >
-                                                        {transaction.checked ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
+                                                        {transaction.checked
+                                                            ? <CheckCircle2 className="h-[22px] w-[22px] text-emerald-500" />
+                                                            : <Circle className="h-[22px] w-[22px] text-[var(--ios-tertiary-label)]" />}
                                                     </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleOpenModal(transaction)}
-                                                        className="rounded-full p-1.5 text-gray-400 bg-gray-50 dark:bg-white/[0.04] dark:text-neutral-500"
-                                                        aria-label="Modifier"
-                                                    >
-                                                        <Edit2 className="w-4 h-4" />
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setTransactionToDelete(transaction.id);
-                                                            setIsDeleteModalOpen(true);
-                                                        }}
-                                                        className="rounded-full p-1.5 text-red-500 bg-red-50 dark:bg-red-500/10"
-                                                        aria-label="Supprimer"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                </div>
+                                                )}
                                             </div>
-                                        </article>
+                                        </div>
                                     );
                                 })}
                             </div>
                         </section>
                     ))
                 ) : (
-                    <div className="rounded-2xl border border-black/[0.05] dark:border-white/10 bg-white dark:bg-[#121212] p-8 text-center shadow-sm">
-                        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-50 dark:bg-neutral-900">
-                            <Search className="h-8 w-8 text-gray-300 dark:text-neutral-700" />
-                        </div>
-                        <p className="text-base font-bold text-gray-950 dark:text-white">Aucune transaction</p>
-                        <p className="mt-1 text-sm text-gray-500 dark:text-neutral-400">
+                    <div className="app-card px-6 py-10 text-center">
+                        <Search className="mx-auto mb-3 h-10 w-10 text-[var(--ios-tertiary-label)]" />
+                        <p className="text-[17px] font-semibold text-[var(--ios-label)]">Aucune transaction</p>
+                        <p className="mt-1 text-[15px] text-[var(--color-text-secondary)]">
                             {searchTerm || activeFilterCount > 0
                                 ? 'Aucun résultat pour les filtres actuels.'
                                 : 'Ajoute une transaction pour commencer.'}
@@ -784,134 +812,93 @@ const Transactions: React.FC = () => {
                 )}
             </div>
 
-            <FormPopup isOpen={isModalOpen} onClose={() => setIsModalOpen(false)}>
-                <form onSubmit={async (e) => {
-                    e.preventDefault();
-                    try {
-                        const amount = parseFloat(formData.amount);
-                        const isTransfer = formData.type === 'transfer';
-                        if (editingTransaction) {
-                            const transactionData = {
-                                date: formData.date,
-                                amount,
-                                description: formData.description,
-                                category: isTransfer ? 'transfer' : formData.categoryId,
-                                accountId: editingTransaction.type === 'income' && isTransfer ? (formData.toAccountId || formData.accountId) : formData.accountId,
-                                type: isTransfer ? editingTransaction.type : formData.type as 'income' | 'expense',
-                            };
-                            await updateTransaction({ ...editingTransaction, ...transactionData });
-                            
-                            // Mettre à jour la transaction liée si elle existe
-                            if (isTransfer && editingTransaction.linkedTransactionId) {
-                                const linkedTx = transactions.find(t => t.id === editingTransaction.linkedTransactionId);
-                                if (linkedTx) {
-                                    await updateTransaction({
-                                        ...linkedTx,
-                                        date: formData.date,
-                                        amount,
-                                        description: formData.description,
-                                        accountId: formData.toAccountId || linkedTx.accountId,
-                                    });
-                                }
-                            }
-                            
-                            showToast("Transaction mise à jour", "success");
-                        } else {
-                            if (isTransfer && formData.toAccountId) {
-                                await addTransfer(formData.accountId, formData.toAccountId, amount, formData.date, formData.description);
-                                showToast("Virement ajouté", "success");
-                            } else {
-                                const transactionData = {
-                                    date: formData.date,
-                                    amount,
-                                    description: formData.description,
-                                    category: formData.categoryId,
-                                    accountId: formData.accountId,
-                                    type: formData.type as 'income' | 'expense',
-                                    checked: false
-                                };
-                                await addTransaction(transactionData);
-                                showToast("Transaction ajoutée", "success");
-                            }
-                        }
-                        setIsModalOpen(false);
-                    } catch (err) {
-                        showToast("Une erreur est survenue", "error");
-                    }
-                }} className="p-6 space-y-6">
-                    <h3 className="text-lg font-semibold">{editingTransaction ? "Modifier" : "Nouvelle"} transaction</h3>
-                    <div className="space-y-4">
-                        <Input label="Description" required value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder="Ex: Loyer" />
-                        
-                        <div className="grid grid-cols-2 gap-4">
-                            <Input label="Montant" type="number" step="0.01" required value={formData.amount} onChange={e => setFormData({ ...formData, amount: e.target.value })} rightElement="€" placeholder="0.00" />
+            <FormPopup
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                title={editingTransaction ? 'Modifier' : 'Nouvelle transaction'}
+                onSubmit={handleSubmitTransaction}
+                submitLabel={editingTransaction ? 'OK' : 'Ajouter'}
+            >
+                <div className="space-y-4">
+                    <Input label="Description" required value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder="Ex: Loyer" />
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                        <Input label="Montant" type="number" step="0.01" required value={formData.amount} onChange={e => setFormData({ ...formData, amount: e.target.value })} rightElement="€" placeholder="0.00" />
+                        <SearchableSelect
+                            label="Type"
+                            value={formData.type}
+                            onChange={(value) => setFormData({ ...formData, type: value })}
+                            options={[
+                                { id: 'expense', label: 'Dépense', icon: 'TrendingDown', color: '#ef4444' },
+                                { id: 'income', label: 'Revenu', icon: 'TrendingUp', color: '#10b981' },
+                                { id: 'transfer', label: 'Virement', icon: 'ArrowRightLeft', color: '#6366f1' }
+                            ]}
+                            placeholder="Sélectionner un type"
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                {formData.type === 'transfer' ? 'Compte source' : 'Compte'}
+                            </label>
                             <SearchableSelect
-                                label="Type"
-                                value={formData.type}
-                                onChange={(value) => setFormData({ ...formData, type: value })}
-                                options={[
-                                    { id: 'expense', label: 'Dépense', icon: 'TrendingDown', color: '#ef4444' },
-                                    { id: 'income', label: 'Revenu', icon: 'TrendingUp', color: '#10b981' },
-                                    { id: 'transfer', label: 'Virement', icon: 'ArrowRightLeft', color: '#6366f1' }
-                                ]}
-                                placeholder="Sélectionner un type"
+                                value={formData.accountId}
+                                onChange={(value) => setFormData({ ...formData, accountId: value })}
+                                options={accounts.map(acc => ({
+                                    id: acc.id,
+                                    label: acc.name,
+                                    icon: acc.icon || 'Wallet',
+                                    color: acc.color
+                                }))}
+                                placeholder="Sélectionner un compte"
                             />
                         </div>
+                        <Input label="Date" type="date" required value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} />
+                    </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                    {formData.type === 'transfer' ? 'Compte source' : 'Compte'}
-                                </label>
+                    <div>
+                        {formData.type === 'transfer' ? (
+                            <>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Compte destination</label>
                                 <SearchableSelect
-                                    value={formData.accountId}
-                                    onChange={(value) => setFormData({ ...formData, accountId: value })}
-                                    options={accounts.map(acc => ({
-                                        id: acc.id,
-                                        label: acc.name,
-                                        icon: acc.icon || 'Wallet',
-                                        color: acc.color
-                                    }))}
+                                    value={formData.toAccountId || ''}
+                                    onChange={(value) => setFormData({ ...formData, toAccountId: value })}
+                                    options={accounts
+                                        .filter(acc => acc.id !== formData.accountId)
+                                        .map(acc => ({
+                                            id: acc.id,
+                                            label: acc.name,
+                                            icon: acc.icon || 'Wallet',
+                                            color: acc.color
+                                        }))}
                                     placeholder="Sélectionner un compte"
                                 />
-                            </div>
-                            <Input label="Date" type="date" required value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} />
-                        </div>
-
-                        <div>
-                            {formData.type === 'transfer' ? (
-                                <>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Compte destination</label>
-                                    <SearchableSelect
-                                        value={formData.toAccountId || ''}
-                                        onChange={(value) => setFormData({ ...formData, toAccountId: value })}
-                                        options={accounts
-                                            .filter(acc => acc.id !== formData.accountId)
-                                            .map(acc => ({
-                                                id: acc.id,
-                                                label: acc.name,
-                                                icon: acc.icon || 'Wallet',
-                                                color: acc.color
-                                            }))}
-                                        placeholder="Sélectionner un compte"
-                                    />
-                                </>
-                            ) : (
-                                <SearchableSelect 
-                                    label="Catégorie" 
-                                    value={formData.categoryId} 
-                                    onChange={val => setFormData({ ...formData, categoryId: val })} 
-                                    options={categories.filter(c => c.id !== 'transfer').map(c => ({ id: c.id, label: c.name, icon: c.icon, color: c.color }))} 
-                                />
-                            )}
-                        </div>
-
-                        <div className="flex gap-3 pt-4">
-                            <Button type="button" variant="secondary" fullWidth onClick={() => setIsModalOpen(false)}>Annuler</Button>
-                            <Button type="submit" fullWidth>Enregistrer</Button>
-                        </div>
+                            </>
+                        ) : (
+                            <SearchableSelect 
+                                label="Catégorie" 
+                                value={formData.categoryId} 
+                                onChange={val => setFormData({ ...formData, categoryId: val })} 
+                                options={categories.filter(c => c.id !== 'transfer').map(c => ({ id: c.id, label: c.name, icon: c.icon, color: c.color }))} 
+                            />
+                        )}
                     </div>
-                </form>
+
+                    {editingTransaction && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIsModalOpen(false);
+                                setTransactionToDelete(editingTransaction.id);
+                                setIsDeleteModalOpen(true);
+                            }}
+                            className="w-full rounded-xl bg-red-500/10 py-3 text-[17px] font-medium text-red-600 dark:text-red-400 md:hidden"
+                        >
+                            Supprimer la transaction
+                        </button>
+                    )}
+                </div>
             </FormPopup>
 
             <ConfirmModal

@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
-import { Sparkles, CornerDownLeft, AlertCircle } from 'lucide-react';
+import { Sparkles, ArrowUp, AlertCircle, Loader2 } from 'lucide-react';
 import Card from './ui/Card';
-import Input from './ui/Input';
-import Button from './ui/Button';
 import { dbService, type AssistantAnswer } from '../services/db';
 
 const EXAMPLES = [
@@ -46,30 +44,42 @@ const AssistantBar: React.FC = () => {
 
     return (
         <Card title="Assistant" icon={Sparkles} subtitle="Dictez une opération ou posez une question">
-            <div className="flex items-center gap-2">
-                <Input
+            {/* Champ de message, bouton d'envoi rond intégré comme dans Messages. */}
+            <form
+                className="relative"
+                onSubmit={event => {
+                    event.preventDefault();
+                    void ask(text);
+                }}
+            >
+                <input
+                    type="text"
                     value={text}
                     onChange={event => setText(event.target.value)}
-                    onKeyDown={event => {
-                        if (event.key === 'Enter') void ask(text);
-                    }}
-                    placeholder="ajoute 12,50 € en alimentation"
-                    containerClassName="flex-1"
+                    placeholder="Ajoute 12,50 € en alimentation"
+                    enterKeyHint="send"
                     disabled={isAsking}
+                    aria-label="Demande à l'assistant"
+                    className="app-input h-11 w-full !pr-12 text-sm"
                 />
-                <Button onClick={() => void ask(text)} disabled={isAsking || !text.trim()} icon={CornerDownLeft}>
-                    {isAsking ? 'Un instant…' : 'Envoyer'}
-                </Button>
-            </div>
+                <button
+                    type="submit"
+                    disabled={isAsking || !text.trim()}
+                    className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-primary-500 text-white transition-opacity disabled:opacity-30"
+                    aria-label="Envoyer"
+                >
+                    {isAsking ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" strokeWidth={2.5} />}
+                </button>
+            </form>
 
             {!answer && !error && (
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 scrollbar-hide md:mx-0 md:flex-wrap md:px-0" data-no-pull-refresh="true">
                     {EXAMPLES.map(example => (
                         <button
                             key={example}
                             type="button"
                             onClick={() => void ask(example)}
-                            className="rounded-full border border-gray-200 dark:border-gray-700 px-3 py-1 text-xs text-gray-600 dark:text-gray-300"
+                            className="shrink-0 rounded-full bg-primary-500/10 px-3 py-1.5 text-[13px] font-medium text-primary-600 dark:text-primary-400"
                         >
                             {example}
                         </button>

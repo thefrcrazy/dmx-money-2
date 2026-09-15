@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Wallet, LayoutDashboard, PieChart, TrendingUp, Settings, Receipt, CalendarClock, Tag, Calculator, ChevronLeft, ChevronRight, MoreHorizontal, X, RefreshCw, Wifi, WifiOff, Power } from 'lucide-react';
+import { Wallet, LayoutDashboard, PieChart, TrendingUp, Settings, Receipt, CalendarClock, Tag, Calculator, ChevronLeft, ChevronRight, MoreHorizontal, RefreshCw, Wifi, WifiOff, Power, CheckCircle2 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { useUpdater } from '../hooks/useUpdater';
 import MultiSelect from '../components/ui/MultiSelect';
@@ -7,7 +7,6 @@ import TitleBar from '../components/ui/TitleBar';
 import { useFinancialMetrics } from '../hooks/useFinancialMetrics';
 import { formatCurrency } from '../utils/format';
 import { hasTauriRuntime, isMobileCompanion } from '../utils/runtime';
-import { ICONS } from '../constants/icons';
 
 
 interface LayoutProps {
@@ -32,6 +31,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [sidebarTooltip, setSidebarTooltip] = useState<{ label: string; top: number } | null>(null);
+  const [isScrolled, setIsScrolled] = useState(false);
   const mainRef = React.useRef<HTMLElement>(null);
   const pullStartXRef = React.useRef(0);
   const pullStartYRef = React.useRef(0);
@@ -127,18 +127,39 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
     ...desktopFooterItems,
   ];
 
+  // Pastilles de couleur des réglages iOS pour les pages du menu « Plus ».
+  const mobileMoreColors: Record<string, string> = {
+    scheduled: '#FF9500',
+    analytics: '#AF52DE',
+    predictions: '#5856D6',
+    categories: '#FF2D55',
+    settings: '#8E8E93',
+  };
+
   const isMoreActive = mobileMoreItems.some(item => item.id === activePage);
   const pageTitle = [
     ...navGroups.flatMap(group => group.items),
     ...desktopFooterItems,
   ].find(item => item.id === activePage)?.label || 'DmxMoney';
-  const mobileSyncLabel = mobileConnectionState === 'offline' ? 'Offline' : 'Sync';
+  // Sur iPhone, le grand titre reprend le nom de l'onglet (« Accueil », « Comptes »…).
+  const mobileTitle = mobilePrimaryItems.find(item => item.id === activePage)?.label || pageTitle;
+  const mobileSyncLabel = mobileConnectionState === 'offline' ? 'Hors ligne' : 'Connecté';
   const MobileSyncIcon = mobileConnectionState === 'offline' ? WifiOff : Wifi;
 
   const navigateToPage = (page: string) => {
     setActivePage(page);
     setIsMobileMenuOpen(false);
   };
+
+  // Barre de navigation iOS : le petit titre apparaît quand le grand titre sort de l'écran.
+  const handleMainScroll = (event: React.UIEvent<HTMLElement>) => {
+    setIsScrolled(event.currentTarget.scrollTop > 40);
+  };
+
+  // Chaque page s'ouvre en haut, avec son grand titre.
+  React.useEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+  }, [activePage]);
 
   const handleQuitApp = React.useCallback(async () => {
     if (!hasTauriRuntime()) return;
@@ -293,9 +314,6 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
 
   return (
     <div className="relative flex h-[100dvh] w-screen flex-col md:flex-row text-gray-900 dark:text-gray-100 font-sans overflow-hidden bg-[var(--color-bg-primary)] dark:bg-[var(--color-bg-primary)]">
-      {/* Glow Orbs cosmiques d'arrière-plan Gemini (masqués sur desktop) */}
-      <div className="absolute top-[-15%] left-[-15%] w-[60%] aspect-square rounded-full bg-gradient-to-br from-indigo-500/10 via-purple-500/8 to-pink-500/5 dark:from-indigo-500/15 dark:via-purple-500/10 dark:to-transparent blur-[140px] pointer-events-none z-0 animate-pulse duration-[10s] md:hidden" />
-      <div className="absolute bottom-[-15%] right-[-15%] w-[60%] aspect-square rounded-full bg-gradient-to-br from-pink-500/5 via-cyan-500/8 to-indigo-500/10 dark:from-purple-500/8 dark:via-cyan-500/10 dark:to-transparent blur-[140px] pointer-events-none z-0 animate-pulse duration-[10s] md:hidden" />
 
       {showTitleBar && <TitleBar />}
 
@@ -455,107 +473,36 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
           </div>
         </header>
 
-        <header className={`md:hidden flex-shrink-0 bg-white/90 dark:bg-neutral-950/90 backdrop-blur-2xl border-b border-black/[0.05] dark:border-white/10 px-4 pt-[calc(env(safe-area-inset-top)+8px)] pb-3 z-40 transition-all duration-300 ${
-          hasAccountFilter ? '' : '!pb-1.5'
-        }`}>
-          {/* Barre de navigation style iOS avec titre centré */}
-          <div className="relative flex items-center justify-between min-h-[32px] w-full">
-            {/* Espace vide à gauche pour laisser la place aux contrôles Tauri sans aucun chevauchement */}
-            <div className="w-16 h-1 flex-shrink-0 z-20" />
-            
-            {/* Titre centré absolu de la barre de titre */}
-            <div className="absolute inset-x-0 flex flex-col items-center justify-center text-center pointer-events-none z-10">
-              <span className="text-[9px] font-extrabold uppercase tracking-[0.22em] text-gray-400 dark:text-neutral-500 leading-none">DmxMoney</span>
-              <h1 className="text-[16px] font-black tracking-tight text-gray-950 dark:text-white truncate leading-tight mt-0.5 pointer-events-auto">
-                {pageTitle}
-              </h1>
+        {/* Barre de navigation iOS : transparente en haut de page, en verre dépoli dès que la page défile. */}
+        <header
+          className={`md:hidden fixed inset-x-0 top-0 z-40 pt-[env(safe-area-inset-top)] transition-[background-color,box-shadow] duration-200 ${
+            isScrolled ? 'ios-material shadow-[inset_0_-0.5px_0_var(--ios-separator)]' : 'bg-transparent'
+          }`}
+        >
+          <div className="relative flex h-11 items-center justify-center px-28">
+            <div
+              className={`truncate text-[17px] font-semibold text-[var(--ios-label)] transition-opacity duration-200 ${isScrolled ? 'opacity-100' : 'opacity-0'}`}
+              aria-hidden="true"
+            >
+              {mobileTitle}
             </div>
-
-            {/* Badge de synchro positionné à l'extrême droite */}
-            <div className="z-20 min-w-16 flex justify-end">
-              {isMobileMode && (
-                <div className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider ${
-                  mobileConnectionState === 'offline'
-                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                }`}>
-                  <MobileSyncIcon className="h-2.5 w-2.5" />
-                  {mobileSyncLabel}
-                </div>
-              )}
-            </div>
+            {isMobileMode && (
+              <span className={`absolute right-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[13px] font-medium ${
+                mobileConnectionState === 'offline'
+                  ? 'bg-[#FF9500]/15 text-[#C93400] dark:text-[#FF9F0A]'
+                  : 'bg-[var(--ios-fill-tertiary)] text-[var(--ios-secondary-label)]'
+              }`}>
+                <MobileSyncIcon className="h-3.5 w-3.5" />
+                {mobileSyncLabel}
+              </span>
+            )}
           </div>
-
-          {/* Widget de solde unifié style iOS Wallet (uniquement Dashboard & Journal) */}
-          {hasBalanceWidget && (
-            <div className="mt-3 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-white/[0.01] dark:to-white/[0.03] rounded-2xl border border-black/[0.04] dark:border-white/[0.06] px-4 py-2.5 flex items-center justify-between shadow-sm relative overflow-hidden">
-              <div className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full bg-primary-500/5 blur-2xl pointer-events-none" />
-              <div>
-                <span className="text-[9px] font-extrabold uppercase tracking-[0.15em] text-gray-400 dark:text-neutral-500">Solde Actuel</span>
-                <div className="text-[20px] font-extrabold tracking-tight text-gray-950 dark:text-white leading-none mt-0.5">
-                  {formatCurrency(currentBalance)}
-                </div>
-              </div>
-              <div className="text-right flex flex-col items-end justify-center">
-                <div className="inline-flex items-center gap-1 bg-emerald-500/10 dark:bg-emerald-500/20 px-2 py-0.5 rounded-lg text-emerald-700 dark:text-emerald-400 border border-emerald-500/10">
-                  <span className="text-[7.5px] font-extrabold uppercase tracking-wider">Pointé</span>
-                  <span className="text-[11px] font-bold font-mono">
-                    {formatCurrency(checkedBalance)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Filtre horizontal des comptes tactile (Chips) */}
-          {hasAccountFilter && (
-            <div className="mt-3 -mx-4 px-4 overflow-x-auto whitespace-nowrap scrollbar-hide flex gap-1.5 py-0.5" data-no-pull-refresh="true">
-              <button
-                onClick={() => setFilterAccount([])}
-                className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-extrabold tracking-wider uppercase transition-all tap-bounce cursor-pointer ${
-                  filterAccount.length === 0
-                    ? 'bg-primary-500 text-white shadow-sm shadow-primary-500/20'
-                    : 'bg-gray-100 dark:bg-neutral-900 text-gray-600 dark:text-neutral-400 border border-black/[0.03] dark:border-white/[0.02]'
-                }`}
-              >
-                Tous
-              </button>
-              {accounts.map(acc => {
-                const isSelected = filterAccount.includes(acc.id);
-                const Icon = ICONS[acc.icon || 'Wallet'] || Wallet;
-                return (
-                  <button
-                    key={acc.id}
-                    onClick={() => {
-                      if (isSelected) {
-                        setFilterAccount(filterAccount.filter(id => id !== acc.id));
-                      } else {
-                        setFilterAccount([...filterAccount, acc.id]);
-                      }
-                    }}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-extrabold tracking-wider uppercase transition-all tap-bounce cursor-pointer border ${
-                      isSelected
-                        ? 'text-white shadow-sm'
-                        : 'bg-gray-100 dark:bg-neutral-900 text-gray-600 dark:text-neutral-400 border-black/[0.03] dark:border-white/[0.02]'
-                    }`}
-                    style={{
-                      backgroundColor: isSelected ? acc.color : undefined,
-                      borderColor: isSelected ? acc.color : undefined,
-                      boxShadow: isSelected ? `0 4px 10px ${acc.color}25` : undefined
-                    }}
-                  >
-                    <Icon className="w-3.5 h-3.5 shrink-0" />
-                    <span>{acc.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
         </header>
 
         <main
           ref={mainRef}
-          className="relative flex-1 overflow-y-auto overscroll-y-contain scrollbar-thin px-4 py-4 pb-[calc(96px+env(safe-area-inset-bottom))] md:px-8 md:py-4 md:pb-4"
+          onScroll={handleMainScroll}
+          className="relative flex-1 overflow-y-auto overscroll-y-contain scrollbar-thin px-4 pt-[calc(env(safe-area-inset-top)+44px)] pb-[calc(104px+env(safe-area-inset-bottom))] md:px-8 md:py-4 md:pb-4"
         >
           <div
             className="pointer-events-none sticky top-2 z-30 flex h-0 justify-center md:hidden"
@@ -563,14 +510,12 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
               opacity: isRefreshing || pullDistance > 8 ? 1 : 0,
               transform: `translateY(${Math.min(8, pullDistance * 0.08)}px)`,
             }}
+            aria-hidden={!isRefreshing}
           >
-            <div className="flex h-9 items-center gap-2 rounded-full border border-black/[0.06] dark:border-white/10 bg-white/95 dark:bg-neutral-950/95 px-3 text-[12px] font-semibold text-gray-500 dark:text-neutral-300 shadow-lg backdrop-blur">
-              <RefreshCw
-                className={`h-4 w-4 text-primary-500 ${isRefreshing ? 'animate-spin' : ''}`}
-                style={!isRefreshing ? { transform: `rotate(${Math.min(180, (pullDistance / pullThreshold) * 180)}deg)` } : undefined}
-              />
-              {isRefreshing ? 'Actualisation' : pullDistance >= pullThreshold ? 'Relâcher' : 'Tirer'}
-            </div>
+            <RefreshCw
+              className={`h-5 w-5 text-[var(--ios-secondary-label)] ${isRefreshing ? 'animate-spin' : ''}`}
+              style={!isRefreshing ? { transform: `rotate(${Math.min(180, (pullDistance / pullThreshold) * 180)}deg)` } : undefined}
+            />
           </div>
 
           <div
@@ -580,89 +525,132 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
               transition: isPulling ? 'none' : 'transform 200ms ease-out',
             }}
           >
+            {/* Grand titre iOS, solde et filtre des comptes : ils défilent avec la page. */}
+            <div className="md:hidden">
+              <h1 className="truncate pb-3 text-[34px] font-bold leading-[41px] tracking-[-0.022em] text-[var(--ios-label)]">
+                {mobileTitle}
+              </h1>
+
+              {hasBalanceWidget && (
+                <div className="mb-4 rounded-[22px] bg-[var(--ios-card)] px-4 py-3.5">
+                  <div className="text-[13px] font-medium text-[var(--ios-secondary-label)]">Solde actuel</div>
+                  <div className="mt-0.5 text-[34px] font-bold leading-[40px] tracking-[-0.022em] tabular-nums text-[var(--ios-label)]">
+                    {formatCurrency(currentBalance)}
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-1.5 text-[15px] text-[var(--ios-secondary-label)]">
+                    <CheckCircle2 className="h-4 w-4 text-[#34C759]" />
+                    <span>Pointé</span>
+                    <span className="font-semibold tabular-nums text-[var(--ios-label)]">{formatCurrency(checkedBalance)}</span>
+                  </div>
+                </div>
+              )}
+
+              {hasAccountFilter && accounts.length > 0 && (
+                <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-0.5 scrollbar-hide" data-no-pull-refresh="true">
+                  <button
+                    onClick={() => setFilterAccount([])}
+                    className={`shrink-0 rounded-full px-4 py-[7px] text-[15px] font-medium transition-colors cursor-pointer ${
+                      filterAccount.length === 0 ? 'bg-primary-500 text-white' : 'bg-[var(--ios-card)] text-[var(--ios-label)]'
+                    }`}
+                    aria-pressed={filterAccount.length === 0}
+                  >
+                    Tous
+                  </button>
+                  {accounts.map(acc => {
+                    const isSelected = filterAccount.includes(acc.id);
+                    return (
+                      <button
+                        key={acc.id}
+                        onClick={() => setFilterAccount(isSelected ? filterAccount.filter(id => id !== acc.id) : [...filterAccount, acc.id])}
+                        className={`inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-[7px] text-[15px] font-medium transition-colors cursor-pointer ${
+                          isSelected ? 'text-white' : 'bg-[var(--ios-card)] text-[var(--ios-label)]'
+                        }`}
+                        style={isSelected ? { backgroundColor: acc.color } : undefined}
+                        aria-pressed={isSelected}
+                      >
+                        {!isSelected && <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: acc.color }} />}
+                        {acc.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             {children}
           </div>
         </main>
       </div>
 
       {isMobileMenuOpen && (
-        <>
-          {/* Backdrop sombre flouté satiné interactif */}
+        <div className="fixed inset-0 z-[70] md:hidden">
           <button
-            className="fixed inset-0 z-[55] bg-black/35 backdrop-blur-[3px] md:hidden animate-backdrop-fade-in"
+            className="absolute inset-0 bg-black/30 animate-backdrop-fade-in"
             onClick={() => setIsMobileMenuOpen(false)}
             aria-label="Fermer le menu"
           />
-          
-          {/* Bottom Sheet coulissante */}
-          <div className="fixed inset-x-0 bottom-0 z-[65] md:hidden pb-[calc(env(safe-area-inset-bottom)+12px)] animate-bottom-sheet-slide-in">
-            <div className="mx-3 rounded-[32px] border border-black/[0.08] dark:border-white/[0.08] bg-white/80 dark:bg-neutral-950/80 backdrop-blur-2xl shadow-[0_-20px_50px_rgba(0,0,0,0.15)] dark:shadow-[0_-20px_50px_rgba(0,0,0,0.4)] overflow-hidden">
-              
-              {/* Drag Handle (tirette visuelle mobile) */}
-              <div className="flex justify-center py-2.5 cursor-pointer" onClick={() => setIsMobileMenuOpen(false)}>
-                <div className="w-12 h-1.5 rounded-full bg-gray-300 dark:bg-neutral-800" />
-              </div>
-
-              <div className="flex items-center justify-between px-6 pb-3 border-b border-black/[0.04] dark:border-white/[0.04]">
-                <span className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-gray-400 dark:text-neutral-500">Menu Plus</span>
+          <div className="absolute inset-x-0 bottom-0 rounded-t-[28px] bg-[var(--ios-grouped-bg)] pb-[calc(env(safe-area-inset-bottom)+20px)] shadow-[0_-10px_40px_rgba(0,0,0,0.12)] animate-bottom-sheet-slide-in">
+            <div className="flex justify-center pt-2">
+              <div className="h-[5px] w-9 rounded-full bg-[var(--ios-fill)]" />
+            </div>
+            <div className="relative flex h-12 items-center justify-center px-4">
+              <span className="text-[17px] font-semibold">Plus</span>
+              <button
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="absolute right-4 text-[17px] font-semibold text-primary-500 cursor-pointer"
+              >
+                OK
+              </button>
+            </div>
+            <div className="mx-4 mt-1 overflow-hidden rounded-[22px] bg-[var(--ios-card)]">
+              {mobileMoreItems.map((item, index) => {
+                const Icon = item.icon;
+                const isActive = activePage === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => navigateToPage(item.id)}
+                    className="flex w-full items-center gap-3 pl-4 text-left transition-colors active:bg-[var(--ios-fill-tertiary)] cursor-pointer"
+                    aria-current={isActive ? 'page' : undefined}
+                  >
+                    <span
+                      className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[8px] text-white"
+                      style={{ backgroundColor: mobileMoreColors[item.id] }}
+                    >
+                      <Icon className="h-[18px] w-[18px]" strokeWidth={2} />
+                    </span>
+                    <span className={`flex min-h-[52px] flex-1 items-center justify-between gap-2 pr-4 ${index > 0 ? 'border-t-[0.5px] border-[var(--ios-separator)]' : ''}`}>
+                      <span className={`text-[17px] ${isActive ? 'font-semibold text-primary-500' : 'text-[var(--ios-label)]'}`}>{item.label}</span>
+                      <span className="flex items-center gap-2">
+                        {item.id === 'settings' && updateAvailable && (
+                          <span className="rounded-full bg-[#FF3B30] px-2 py-0.5 text-[12px] font-semibold text-white">1</span>
+                        )}
+                        <ChevronRight className="h-[18px] w-[18px] text-[var(--ios-tertiary-label)]" />
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {showQuitAction && (
+              <div className="mx-4 mt-4 overflow-hidden rounded-[22px] bg-[var(--ios-card)]">
                 <button
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className="p-1.5 rounded-full bg-gray-100 dark:bg-neutral-900 text-gray-500 dark:text-neutral-400 hover:scale-95 transition-transform"
-                  aria-label="Fermer"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    void handleQuitApp();
+                  }}
+                  className="flex min-h-[52px] w-full items-center justify-center text-[17px] text-[#FF3B30] cursor-pointer"
                 >
-                  <X className="w-4 h-4" />
+                  Quitter
                 </button>
               </div>
-
-              {/* Présentation en Grille Moderne */}
-              <div className="grid grid-cols-3 gap-3 p-4">
-                {mobileMoreItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = activePage === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => navigateToPage(item.id)}
-                      className={`flex flex-col items-center justify-center aspect-square rounded-[22px] p-3 text-center transition-all tap-bounce cursor-pointer border ${
-                        isActive
-                          ? 'bg-primary-500 text-white border-primary-500 shadow-md shadow-primary-500/20'
-                          : 'bg-white/40 dark:bg-neutral-900/30 text-gray-700 dark:text-neutral-300 border-black/[0.03] dark:border-white/[0.02] hover:bg-white/60 dark:hover:bg-neutral-900/50'
-                      }`}
-                      aria-current={isActive ? 'page' : undefined}
-                    >
-                      <div className="relative p-2.5 rounded-2xl bg-black/[0.03] dark:bg-white/[0.03] mb-2">
-                        <Icon className="w-5 h-5 shrink-0" />
-                        {item.id === 'settings' && updateAvailable && (
-                          <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-neutral-950" />
-                        )}
-                      </div>
-                      <span className="w-full text-[11px] font-extrabold tracking-wide truncate">{item.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              {showQuitAction && (
-                <div className="px-4 pb-4">
-                  <button
-                    onClick={() => {
-                      setIsMobileMenuOpen(false);
-                      void handleQuitApp();
-                    }}
-                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-red-500/15 bg-red-500/10 px-4 py-3 text-sm font-extrabold text-red-600 dark:text-red-400 transition-all tap-bounce hover:bg-red-500/15"
-                    aria-label="Quitter"
-                  >
-                    <Power className="w-4 h-4 shrink-0" />
-                    Quitter
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
           </div>
-        </>
+        </div>
       )}
 
-      <nav className="mobile-bottom-nav md:hidden flex-shrink-0 h-[calc(68px+env(safe-area-inset-bottom))] border-t border-black/[0.06] dark:border-white/10 bg-white/90 dark:bg-neutral-950/90 backdrop-blur-2xl px-2 pt-2.5 pb-[env(safe-area-inset-bottom)] z-[60] shadow-[0_-12px_40px_rgba(0,0,0,0.06)] dark:shadow-[0_-12px_40px_rgba(0,0,0,0.3)]">
-        <div className="grid h-full grid-cols-5 gap-1.5">
+      <nav className="md:hidden fixed inset-x-0 bottom-0 z-[60] px-4 pb-[max(env(safe-area-inset-bottom),12px)] pointer-events-none" aria-label="Navigation principale">
+        <div className="ios-material pointer-events-auto mx-auto flex h-[62px] max-w-md items-stretch gap-0.5 rounded-full border border-[var(--ios-material-border)] p-[5px] shadow-[0_10px_30px_rgba(0,0,0,0.14)]">
           {mobilePrimaryItems.map((item) => {
             const Icon = item.icon;
             const isActive = activePage === item.id;
@@ -670,35 +658,31 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
               <button
                 key={item.id}
                 onClick={() => navigateToPage(item.id)}
-                className={`relative min-w-0 rounded-2xl flex flex-col items-center justify-center gap-1 text-[10px] font-extrabold tracking-wide transition-all tap-bounce cursor-pointer ${
-                  isActive
-                    ? 'text-primary-600 dark:text-primary-400 bg-primary-500/10 dark:bg-primary-500/15'
-                    : 'text-gray-500 dark:text-neutral-400 hover:bg-gray-50 dark:hover:bg-neutral-900/50'
+                className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-[3px] rounded-full text-[10.5px] font-medium leading-none transition-colors cursor-pointer ${
+                  isActive ? 'bg-[var(--ios-fill-tertiary)] text-primary-500' : 'text-[var(--ios-label)]'
                 }`}
                 aria-current={isActive ? 'page' : undefined}
               >
-                <Icon className="w-5 h-5 shrink-0" />
-                <span className="w-full px-1 truncate">{item.label}</span>
+                <Icon className="h-[22px] w-[22px] shrink-0" strokeWidth={isActive ? 2.2 : 1.8} />
+                <span className="w-full truncate px-0.5">{item.label}</span>
               </button>
             );
           })}
           <button
             onClick={() => setIsMobileMenuOpen(prev => !prev)}
-            className={`relative min-w-0 rounded-2xl flex flex-col items-center justify-center gap-1 text-[10px] font-extrabold tracking-wide transition-all tap-bounce cursor-pointer ${
-              isMoreActive || isMobileMenuOpen
-                ? 'text-primary-600 dark:text-primary-400 bg-primary-500/10 dark:bg-primary-500/15'
-                : 'text-gray-500 dark:text-neutral-400 hover:bg-gray-50 dark:hover:bg-neutral-900/50'
+            className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-[3px] rounded-full text-[10.5px] font-medium leading-none transition-colors cursor-pointer ${
+              isMoreActive || isMobileMenuOpen ? 'bg-[var(--ios-fill-tertiary)] text-primary-500' : 'text-[var(--ios-label)]'
             }`}
             aria-expanded={isMobileMenuOpen}
             aria-current={isMoreActive ? 'page' : undefined}
           >
-            <div className="relative">
-              <MoreHorizontal className="w-5 h-5 shrink-0" />
+            <span className="relative">
+              <MoreHorizontal className="h-[22px] w-[22px] shrink-0" strokeWidth={isMoreActive ? 2.2 : 1.8} />
               {updateAvailable && (
-                <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border border-white dark:border-black" />
+                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-[#FF3B30]" />
               )}
-            </div>
-            <span className="w-full px-1 truncate">Plus</span>
+            </span>
+            <span className="w-full truncate px-0.5">Plus</span>
           </button>
         </div>
       </nav>

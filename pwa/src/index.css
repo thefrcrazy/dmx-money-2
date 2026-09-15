@@ -22,7 +22,7 @@
   --color-text-secondary: var(--color-text-secondary);
   --color-border: var(--color-border);
   
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   --font-serif: "New York", "Times New Roman", serif;
   --font-mono: "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
   
@@ -61,22 +61,43 @@
     --color-border: rgba(255, 255, 255, 0.1);
 }
 
-/* Overrides Mobile (style Apple iOS 26 / Gemini) */
+/* Mobile : couleurs système et fonds groupés des apps iOS. */
 @media (max-width: 768px) {
   :root {
-    --card-radius: 24px;
-    --color-primary-custom: #6366f1;
-    --color-primary-rgb-custom: 99, 102, 241;
-    --color-bg-card: rgba(255, 255, 255, 0.72);
-    --color-text-secondary: #6E6E73;
+    --card-radius: 22px;
+    --ios-grouped-bg: #F2F2F7;
+    --ios-card: #FFFFFF;
+    --ios-elevated: #FFFFFF;
+    --ios-label: #000000;
+    --ios-secondary-label: rgba(60, 60, 67, 0.6);
+    --ios-tertiary-label: rgba(60, 60, 67, 0.3);
+    --ios-separator: rgba(60, 60, 67, 0.16);
+    --ios-fill: rgba(120, 120, 128, 0.2);
+    --ios-fill-secondary: rgba(120, 120, 128, 0.16);
+    --ios-fill-tertiary: rgba(118, 118, 128, 0.12);
+    --ios-material: rgba(252, 252, 253, 0.78);
+    --ios-material-border: rgba(0, 0, 0, 0.06);
+    --color-bg-primary: var(--ios-grouped-bg);
+    --color-bg-secondary: var(--ios-grouped-bg);
+    --color-bg-tertiary: var(--ios-grouped-bg);
+    --color-bg-card: var(--ios-card);
+    --color-text-secondary: var(--ios-secondary-label);
+    --color-border: var(--ios-separator);
   }
-  
+
   .dark {
-    --color-primary-custom: #8b5cf6;
-    --color-primary-rgb-custom: 139, 92, 246;
-    --color-bg-card: rgba(12, 12, 12, 0.68);
-    --color-text-secondary: #8E8E93;
-    --color-border: rgba(255, 255, 255, 0.08);
+    --ios-grouped-bg: #000000;
+    --ios-card: #1C1C1E;
+    --ios-elevated: #2C2C2E;
+    --ios-label: #FFFFFF;
+    --ios-secondary-label: rgba(235, 235, 245, 0.6);
+    --ios-tertiary-label: rgba(235, 235, 245, 0.3);
+    --ios-separator: rgba(84, 84, 88, 0.6);
+    --ios-fill: rgba(120, 120, 128, 0.36);
+    --ios-fill-secondary: rgba(120, 120, 128, 0.32);
+    --ios-fill-tertiary: rgba(118, 118, 128, 0.24);
+    --ios-material: rgba(30, 30, 32, 0.74);
+    --ios-material-border: rgba(255, 255, 255, 0.08);
   }
 }
 
@@ -144,30 +165,23 @@ a,
   overflow: hidden;
 }
 
-/* Overrides Mobile (style Apple iOS 26 / Gemini) */
+/* Mobile : cartes en sections groupées iOS, pleines et sans ombre. */
 @media (max-width: 768px) {
   .app-card {
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.04);
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    background: var(--ios-card);
+    border-color: transparent;
+    box-shadow: none;
   }
-  
-  .dark .app-card {
-    box-shadow: 0 15px 45px -12px rgba(0, 0, 0, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-  }
-  
+
   .app-input {
+    border-color: transparent;
     border-radius: 12px;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: var(--ios-fill-tertiary);
   }
-  
+
   .app-selector-bg {
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.06);
+    border-color: transparent;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14);
   }
 }
 
@@ -972,47 +986,45 @@ button, a, input, [role="button"] { -webkit-app-region: no-drag; }
   opacity: 0.85;
 }
 
-/* Overrides Globales Mobile Premium (iOS 26 / Gemini) */
+/* Mobile : rendu d'app iOS pour le compagnon (typographie, feuilles, champs, contrôles). */
 @media (max-width: 768px) {
-  /* 1. Surcharges des Angles des Cartes */
-  .rounded-2xl, .rounded-xl, .rounded-3xl {
-    border-radius: 24px !important;
-  }
-  
-  /* 2. Métamorphose Translucide Satinée de toutes les Cartes */
-  div[class*="rounded-"].bg-white, 
-  section[class*="rounded-"].bg-white, 
-  article[class*="rounded-"].bg-white,
-  div[class*="rounded-"].bg-\[\#121212\], 
-  section[class*="rounded-"].bg-\[\#121212\], 
-  article[class*="rounded-"].bg-\[\#121212\] {
-    background-color: rgba(255, 255, 255, 0.72) !important;
-    backdrop-filter: blur(24px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
-    border: 1px solid rgba(0, 0, 0, 0.04) !important;
-    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.04) !important;
+  /* Libellés : ni petites capitales espacées ni graisses extrêmes, comme sur iOS. */
+  .uppercase {
+    text-transform: none;
+    letter-spacing: normal;
   }
 
-  .dark div[class*="rounded-"].bg-white, 
-  .dark section[class*="rounded-"].bg-white, 
-  .dark article[class*="rounded-"].bg-white,
-  .dark div[class*="rounded-"].bg-\[\#121212\], 
-  .dark section[class*="rounded-"].bg-\[\#121212\], 
-  .dark article[class*="rounded-"].bg-\[\#121212\],
-  .dark div[class*="rounded-"].bg-neutral-900, 
-  .dark section[class*="neutral-900"].bg-neutral-900, 
-  .dark article[class*="neutral-900"].bg-neutral-900,
-  .dark div[class*="rounded-"].bg-neutral-950, 
-  .dark section[class*="rounded-"].bg-neutral-950, 
-  .dark article[class*="rounded-"].bg-neutral-950 {
-    background-color: rgba(12, 12, 12, 0.68) !important;
-    backdrop-filter: blur(24px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    box-shadow: 0 15px 45px -12px rgba(0, 0, 0, 0.5) !important;
+  .font-black,
+  .font-extrabold {
+    font-weight: 700;
   }
 
-  /* 3. Transformation des Modaux en Bottom Sheets style iOS */
+  .text-\[7\.5px\],
+  .text-\[8px\],
+  .text-\[9px\],
+  .text-\[10px\] {
+    font-size: 11px;
+  }
+
+  .rounded-2xl,
+  .rounded-3xl {
+    border-radius: 22px;
+  }
+
+  /* Boutons en capsule, pleins ou gris, comme les boutons système. */
+  .app-btn {
+    border-radius: 999px;
+    font-weight: 600;
+    box-shadow: none;
+  }
+
+  .app-btn-secondary,
+  .app-btn-outline {
+    background-color: var(--ios-fill-tertiary);
+    border-color: transparent;
+  }
+
+  /* Feuilles qui montent du bas de l'écran. */
   .app-modal-overlay {
     align-items: flex-end !important;
     position: fixed !important;
@@ -1021,27 +1033,23 @@ button, a, input, [role="button"] { -webkit-app-region: no-drag; }
     width: 100vw !important;
     height: 100dvh !important;
     padding: 0 !important;
-    background-color: rgba(0, 0, 0, 0.4) !important;
+    background-color: rgba(0, 0, 0, 0.3) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
-  
+
   .app-modal-content {
-    border-bottom-left-radius: 0 !important;
-    border-bottom-right-radius: 0 !important;
-    border-top-left-radius: 32px !important;
-    border-top-right-radius: 32px !important;
+    border-radius: 28px 28px 0 0 !important;
     max-width: 100% !important;
     margin-bottom: 0 !important;
-    animation: bottom-sheet-slide-in 0.32s cubic-bezier(0.32, 0.94, 0.6, 1) forwards !important;
-    max-height: calc(100dvh - env(safe-area-inset-top) - 12px) !important;
+    animation: bottom-sheet-slide-in 0.42s cubic-bezier(0.32, 0.72, 0, 1) both !important;
+    max-height: calc(100dvh - env(safe-area-inset-top) - 10px) !important;
     display: flex !important;
     flex-direction: column !important;
     overflow: hidden !important;
-    box-shadow: 0 -15px 50px rgba(0, 0, 0, 0.2) !important;
-    background-color: rgba(255, 255, 255, 0.9) !important;
-    backdrop-filter: blur(30px) saturate(190%) !important;
-    -webkit-backdrop-filter: blur(30px) saturate(190%) !important;
-    border: 1px solid rgba(0, 0, 0, 0.08) !important;
-    border-bottom: none !important;
+    background-color: var(--ios-card) !important;
+    border: none !important;
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.12) !important;
   }
 
   .app-form-popup-overlay {
@@ -1055,115 +1063,90 @@ button, a, input, [role="button"] { -webkit-app-region: no-drag; }
     bottom: 0 !important;
     margin: 0 !important;
     width: 100vw !important;
-    max-height: calc(100dvh - env(safe-area-inset-top) - 12px) !important;
-    background-color: rgba(255, 255, 255, 0.98) !important;
     z-index: 121 !important;
   }
 
-  .mobile-bottom-nav {
-    height: calc(62px + env(safe-area-inset-bottom)) !important;
-    padding-top: 0.375rem !important;
-    padding-bottom: max(calc(env(safe-area-inset-bottom) - 12px), 0px) !important;
+  .app-form-popup-overlay--enter {
+    animation: backdrop-fade-in 0.3s ease-out both !important;
+  }
+
+  .app-form-popup-overlay--exit {
+    animation: backdrop-fade-in 0.26s ease-in reverse both !important;
   }
 
   .app-form-popup-content--enter {
-    animation: form-popup-sheet-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+    animation: form-popup-sheet-in 0.42s cubic-bezier(0.32, 0.72, 0, 1) both !important;
   }
 
   .app-form-popup-content--exit {
-    animation: form-popup-sheet-out 0.24s cubic-bezier(0.4, 0, 1, 1) both !important;
+    animation: form-popup-sheet-out 0.28s cubic-bezier(0.4, 0, 1, 1) both !important;
   }
 
-  .dark .app-modal-content {
-    background-color: rgba(14, 14, 16, 0.88) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-bottom: none !important;
-  }
-
-  .dark .app-form-popup-content {
-    background-color: rgba(14, 14, 16, 0.98) !important;
-  }
-
-  /* Ajustements du corps et en-tête modal mobile */
   .app-modal-header {
-    padding: 1.25rem 1.5rem 0.75rem 1.5rem !important;
+    padding: 0.25rem 1rem 0.5rem !important;
     border-bottom: none !important;
   }
-  
+
   .app-modal-body {
-    padding: 0.5rem 1.5rem 1.5rem 1.5rem !important;
+    padding: 0.5rem 1.25rem 1.25rem !important;
     min-height: 0 !important;
     overflow-y: auto !important;
     overscroll-behavior: contain !important;
     -webkit-overflow-scrolling: touch !important;
-    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom)) !important;
+    padding-bottom: calc(1.25rem + env(safe-area-inset-bottom)) !important;
   }
 
-  /* 4. Optimisation des Champs de Saisie (Inputs) iOS */
-  input[type="text"], 
-  input[type="number"], 
-  input[type="date"], 
-  input[type="password"], 
-  input[type="email"], 
-  select, 
+  /* Champs pleins et sans bordure, comme les champs de formulaire iOS. */
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  input[type="password"],
+  input[type="email"],
+  input[type="search"],
+  input[type="url"],
+  input[type="tel"],
+  select,
   textarea {
-    border-radius: 14px !important;
-    border: 1px solid rgba(0, 0, 0, 0.08) !important;
-    background-color: rgba(0, 0, 0, 0.02) !important;
-    color: #000000 !important;
+    border-radius: 12px !important;
+    border: 1px solid transparent !important;
+    background-color: var(--ios-fill-tertiary) !important;
+    color: var(--ios-label) !important;
     padding: 0.75rem 1rem !important;
-    font-size: 15px !important;
-    font-weight: 500 !important;
+    font-size: 17px !important;
+    font-weight: 400 !important;
     box-shadow: none !important;
-    transition: all 0.2s ease !important;
+    caret-color: var(--color-primary);
+    transition: background-color 0.2s ease, border-color 0.2s ease !important;
   }
 
-  input[type="text"]:focus, 
-  input[type="number"]:focus, 
-  input[type="date"]:focus, 
-  select:focus, 
+  input[type="text"]:focus,
+  input[type="number"]:focus,
+  input[type="date"]:focus,
+  input[type="password"]:focus,
+  input[type="email"]:focus,
+  input[type="search"]:focus,
+  input[type="url"]:focus,
+  input[type="tel"]:focus,
+  select:focus,
   textarea:focus {
-    border-color: var(--color-primary-custom) !important;
-    background-color: #ffffff !important;
+    background-color: var(--ios-fill-secondary) !important;
+    border-color: color-mix(in srgb, var(--color-primary) 45%, transparent) !important;
   }
 
-  .dark input[type="text"], 
-  .dark input[type="number"], 
-  .dark input[type="date"], 
-  .dark input[type="password"], 
-  .dark input[type="email"], 
-  .dark select, 
-  .dark textarea {
-    border: 1px solid rgba(255, 255, 255, 0.06) !important;
-    background-color: rgba(255, 255, 255, 0.04) !important;
-    color: #ffffff !important;
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--ios-tertiary-label);
   }
 
-  .dark input[type="text"]:focus, 
-  .dark input[type="number"]:focus, 
-  .dark input[type="date"]:focus, 
-  .dark select:focus, 
-  .dark textarea:focus {
-    border-color: var(--color-primary-custom) !important;
-    background-color: rgba(0, 0, 0, 0.4) !important;
-  }
-
-  /* 5. Agrandissement et Rapprochement des Checkboxes */
-  input[type="checkbox"] {
-    width: 1.25rem !important;
-    height: 1.25rem !important;
-    border-radius: 6px !important;
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 1.375rem !important;
+    height: 1.375rem !important;
+    accent-color: var(--color-primary);
     cursor: pointer !important;
-    border: 1px solid rgba(0, 0, 0, 0.15) !important;
-    margin-top: 0.25rem !important;
   }
 
-  .dark input[type="checkbox"] {
-    border: 1px solid rgba(255, 255, 255, 0.2) !important;
-    background-color: rgba(0, 0, 0, 0.2) !important;
-  }
-
-  /* 6. Spacings plus denses et plus élégants sur mobile */
+  /* Espacements plus serrés. */
   .space-y-6 > :not([hidden]) ~ :not([hidden]) {
     margin-top: 1rem !important;
   }
@@ -1172,7 +1155,7 @@ button, a, input, [role="button"] { -webkit-app-region: no-drag; }
     margin-top: 0.75rem !important;
   }
 
-  /* 7. Boutons tactiles et aérés */
+  /* Boutons ronds des listes réordonnables. */
   .flex.shrink-0.flex-col.items-center.gap-1 button {
     width: 34px !important;
     height: 34px !important;
@@ -1180,14 +1163,16 @@ button, a, input, [role="button"] { -webkit-app-region: no-drag; }
     align-items: center !important;
     justify-content: center !important;
     border-radius: 50% !important;
-    background-color: rgba(0, 0, 0, 0.03) !important;
-    border: 1px solid rgba(0, 0, 0, 0.02) !important;
+    background-color: var(--ios-fill-tertiary) !important;
+    border: none !important;
   }
-  
-  .dark .flex.shrink-0.flex-col.items-center.gap-1 button {
-    background-color: rgba(255, 255, 255, 0.04) !important;
-    border: 1px solid rgba(255, 255, 255, 0.02) !important;
-  }
+}
+
+/* Verre dépoli des barres iOS (navigation, onglets). */
+.ios-material {
+  background-color: var(--ios-material, rgba(252, 252, 253, 0.78));
+  backdrop-filter: blur(30px) saturate(190%);
+  -webkit-backdrop-filter: blur(30px) saturate(190%);
 }
 
 @media (max-width: 768px) and (prefers-reduced-motion: reduce) {

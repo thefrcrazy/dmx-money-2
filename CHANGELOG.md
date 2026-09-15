@@ -1,12 +1,15 @@
 # Changelog
 
-## 2.0.2 - en développement
+## 2.0.2-rc.1 - 2026-09-15
 
 ### Interface
 
 - Icônes natives sur chaque système : SF Symbols sur macOS et iOS, Segoe Fluent Icons sous Windows (sous Windows 10, un glyphe équivalent remplace les rares icônes absentes de sa police Segoe MDL2 Assets), icônes symboliques GNOME (thème Adwaita et GNOME Icon Development Kit) sous Linux. Les dessins Lucide ne servent plus qu'à la PWA et à macOS 10.15, qui n'a pas de SF Symbols.
+- PWA du compagnon mobile : design d'app iOS en thème clair et sombre (grands titres, barre d'onglets flottante, listes groupées, feuilles qui montent du bas, champs et boutons système). Le Journal devient une liste par jour : toucher une ligne l'ouvre, le rond la pointe, « Sélectionner » regroupe les actions.
 
 ### Corrections
+
+- Compagnon mobile : l'appairage échouait quand la PWA était servie par le Mac, et l'app affichait « aucun mobile appairé ». Le pont n'acceptait que les clés d'accès créées depuis l'adresse publique de la PWA.
 
 - Windows : l'app se fermait en ouvrant la page Analyses, restée à moitié affichée (plage vide, graphiques non remplis).
 - Windows : une page qui ne peut pas s'ouvrir laisse désormais son exception réelle dans `crash.log`, avec les dernières étapes (pages, formulaires) ; la CI ouvre chaque page de l'app publiée.

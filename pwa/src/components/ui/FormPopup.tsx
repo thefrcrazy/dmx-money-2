@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import Button from './Button';
@@ -26,6 +26,7 @@ const FormPopup: React.FC<FormPopupProps> = ({
     isSubmitting = false,
     maxWidth = 'lg'
 }) => {
+    const formId = useId();
     const [shouldRender, setShouldRender] = useState(isOpen);
     const [isClosing, setIsClosing] = useState(false);
 
@@ -90,7 +91,8 @@ const FormPopup: React.FC<FormPopupProps> = ({
         <div className="space-y-4 app-form-content">
             {children}
             {onSubmit && (
-                <div className="flex justify-end gap-3 pt-4 border-t border-black/[0.05] dark:border-white/10 app-modal-footer">
+                // Sur mobile, une feuille titrée porte ses boutons dans l'en-tête, comme sur iOS.
+                <div className={`${title ? 'hidden md:flex' : 'flex'} justify-end gap-3 pt-4 border-t border-black/[0.05] dark:border-white/10 app-modal-footer`}>
                     <Button
                         type="button"
                         variant="secondary"
@@ -118,29 +120,55 @@ const FormPopup: React.FC<FormPopupProps> = ({
                 className={`app-card w-full ${maxWidthClasses[maxWidth]} max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden app-modal-content app-form-popup-content ${contentAnimationClass}`}
                 onClick={(e) => e.stopPropagation()}
             >
-                {/* Drag handle visuel mobile */}
-                <div className="flex justify-center py-2.5 md:hidden cursor-pointer" onClick={onClose}>
-                    <div className="w-12 h-1.5 bg-gray-300 dark:bg-neutral-800 rounded-full" />
+                {/* Poignée de la feuille (mobile) */}
+                <div className="flex justify-center pt-2 pb-1 md:hidden cursor-pointer" onClick={onClose}>
+                    <div className="h-[5px] w-9 rounded-full bg-[var(--ios-fill)]" />
                 </div>
 
                 {title && (
-                    <div className="flex items-center justify-between p-4 border-b border-black/[0.05] dark:border-white/10 app-modal-header">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 app-modal-title">
+                    <div className="relative flex min-h-11 items-center justify-between gap-3 p-4 md:border-b border-black/[0.05] dark:border-white/10 app-modal-header">
+                        {onSubmit ? (
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                disabled={isSubmitting}
+                                className="relative z-10 max-w-[104px] truncate text-[17px] text-primary-500 disabled:opacity-40 md:hidden cursor-pointer"
+                            >
+                                Annuler
+                            </button>
+                        ) : (
+                            <span className="w-8 md:hidden" aria-hidden="true" />
+                        )}
+                        <h3 className="pointer-events-none absolute inset-x-28 truncate text-center text-[17px] font-semibold text-gray-900 dark:text-gray-100 md:static md:inset-auto md:text-left md:text-lg app-modal-title">
                             {title}
                         </h3>
+                        {onSubmit && (
+                            <button
+                                type="submit"
+                                form={formId}
+                                disabled={isSubmitting}
+                                className="relative z-10 max-w-[104px] truncate text-[17px] font-semibold text-primary-500 disabled:opacity-40 md:hidden cursor-pointer"
+                            >
+                                {submitLabel}
+                            </button>
+                        )}
                         <button
+                            type="button"
                             onClick={onClose}
                             aria-label="Fermer"
-                            className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition-colors app-modal-close-btn"
+                            className={`${onSubmit
+                                ? 'hidden md:block'
+                                : 'flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ios-fill-tertiary)] md:block md:h-auto md:w-auto md:bg-transparent'
+                                } relative z-10 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition-colors app-modal-close-btn`}
                         >
-                            <X className="w-5 h-5" />
+                            <X className="h-[18px] w-[18px] md:h-5 md:w-5" />
                         </button>
                     </div>
                 )}
 
                 <div className={onSubmit ? "p-4 app-modal-body" : "app-modal-body"}>
                     {onSubmit ? (
-                        <form onSubmit={onSubmit}>
+                        <form id={formId} onSubmit={onSubmit}>
                             {Content}
                         </form>
                     ) : (
