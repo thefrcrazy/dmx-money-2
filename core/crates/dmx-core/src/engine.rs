@@ -133,7 +133,6 @@ impl Engine {
             }
         }
 
-
         let pool = runtime.block_on(db::open_pool(&database_path))?;
         let engine = Self {
             runtime,
