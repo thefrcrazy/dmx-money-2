@@ -13,8 +13,18 @@ enum SnapshotRunner {
 
     static func run(store: AppStore, window: NSWindow, directory: URL) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        var steps: [Step] = AppRoute.allCases.map { route in
+        var steps: [Step] = [("light-initial", {
+            store.apply(.setTheme(theme: .light))
+            NSApp.appearance = NSAppearance(named: .aqua)
+        })]
+        steps += AppRoute.allCases.map { route in
             (route.rawValue, { store.route = route })
+        }
+        if ProcessInfo.processInfo.environment["DMXMONEY_VERIFY_SETTINGS"] == "1" {
+            steps.append(("settings-general", { store.route = .settings }))
+            for (index, name) in [(1, "companion"), (2, "data"), (3, "about")] {
+                steps.append(("settings-\(name)", { selectSettingsTab(index, in: window) }))
+            }
         }
         steps.append(("form-transaction", { store.present(.transaction(id: nil)) }))
         steps.append(("form-scheduled", { store.present(.scheduled(id: nil)) }))
@@ -43,6 +53,25 @@ enum SnapshotRunner {
         steps.append(("light-after-dark-categories", { store.route = .categories }))
         steps.append(("light-after-dark-settings", { store.route = .settings }))
         perform(steps[...], store: store, window: window, directory: directory)
+    }
+
+    private static func selectSettingsTab(_ index: Int, in window: NSWindow) {
+        func find(_ view: NSView) -> NSSegmentedControl? {
+            if let control = view as? NSSegmentedControl,
+               control.segmentCount == 4, control.label(forSegment: 0) == "Général" {
+                return control
+            }
+            for child in view.subviews {
+                if let control = find(child) { return control }
+            }
+            return nil
+        }
+        guard let root = window.contentView, let control = find(root) else {
+            fputs("Settings verification failed: four-section navigation missing.\n", stderr)
+            exit(1)
+        }
+        control.selectedSegment = index
+        control.sendAction(control.action, to: control.target)
     }
 
     private static func perform(_ steps: ArraySlice<Step>, store: AppStore, window: NSWindow, directory: URL) {

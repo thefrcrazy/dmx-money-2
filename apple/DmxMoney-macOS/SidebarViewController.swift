@@ -279,9 +279,10 @@ final class SidebarRouteCell: NSTableCellView {
     }
 
     private func updateColors() {
-        let selected = backgroundStyle == .emphasized
-        textField?.textColor = selected ? .alternateSelectedControlTextColor : .labelColor
-        imageView?.contentTintColor = selected ? .alternateSelectedControlTextColor : .secondaryLabelColor
+        // The custom selection is translucent, not a solid emphasized system selection.
+        // Catalina may still report .emphasized here; its white text would lose contrast.
+        textField?.textColor = .labelColor
+        imageView?.contentTintColor = .secondaryLabelColor
     }
 }
 

@@ -219,14 +219,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     var settingsActions: SettingsActions {
-        SettingsActions(
-            exportBackup: { [weak self] in self?.exportBackup(nil) },
-            importFile: { [weak self] in self?.importFile(nil) },
-            copyToClipboard: { text in
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(text, forType: .string)
-            },
-            iCloud: cloud?.settings
-        )
+        FileActions.settingsActions(store: store, cloud: cloud)
     }
 }

@@ -122,6 +122,16 @@ jobs:
         run: SKIP_CORE=1 ./scripts/build-macos.sh modern
       - name: macOS legacy (Intel, macOS 10.15 Catalina)
         run: SKIP_CORE=1 ./scripts/build-macos.sh legacy
+      - name: Interface AppKit et icônes Catalina (clair, sombre, paramètres)
+        run: ./scripts/verify-apple-ui.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: apple-ui-catalina-artwork
+          path: |
+            target/apple-ui-verification/screenshots.*/*.png
+            target/apple-ui-verification/build.log
+          if-no-files-found: warn
       - name: iOS (simulateur arm64)
         run: |
           xcodebuild -project apple/DmxMoney.xcodeproj -scheme DmxMoney-iOS \

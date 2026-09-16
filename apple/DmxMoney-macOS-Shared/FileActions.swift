@@ -14,7 +14,6 @@ enum FileActions {
                 NSPasteboard.general.setString(text, forType: .string)
             },
             checkForUpdates: UpdateChecker.shared.isAvailable ? { UpdateChecker.shared.checkForUpdates(nil) } : nil,
-            updateAvailable: { UpdateChecker.shared.isAvailable },
             iCloud: cloud?.settings
         )
     }

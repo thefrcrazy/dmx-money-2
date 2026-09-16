@@ -12,6 +12,17 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.0.4",
+        date: "2026-09-16",
+        title: "Cohérence des interfaces",
+        changes: [
+            "Mac Intel : onglets des paramètres et bouton de vérification des mises à jour rétablis.",
+            "Icônes et sélection en thème clair corrigées pour la variante compatible Catalina.",
+            "PWA : sorties rouges, entrées vertes et montants au format français en euros.",
+            "Titre toujours visible, connexion à gauche et assistant à droite."
+        ]
+    },
+    {
         version: "2.0.3",
         date: "2026-09-16",
         title: "Version stable",

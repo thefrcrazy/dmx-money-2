@@ -13,6 +13,22 @@ Deux workflows GitHub Actions :
   x64 et arm64, AppImage, bundle Flatpak, puis création de la release GitHub avec les notes
   tirées du `CHANGELOG.md`.
 
+## Vérification des interfaces à chaque version
+
+Toute modification d’une interface doit être comparée aux implémentations macOS moderne,
+macOS Intel/Catalina, Windows, Linux et PWA. Documenter les différences voulues et reporter
+les corrections communes, sans supposer que la compilation d’une variante valide les autres.
+
+- Vérifier les actions accessibles (onglets, mise à jour, import/export), les soldes et les formats.
+- Contrôler les icônes en clair, sombre et après retour au clair, y compris une sélection active.
+- La CI lance `scripts/verify-apple-ui.sh` : application AppKit, données fictives isolées,
+  icônes embarquées forcées, navigation effective dans les quatre onglets des paramètres.
+  Les captures sont conservées dans l’artefact `apple-ui-catalina-artwork` pour revue visuelle.
+- Ce test sur un OS récent ne remplace pas un essai sur Catalina réel. Signaler explicitement
+  lorsque l’ancien OS n’est pas disponible ; ne pas qualifier cette limite de validation Catalina.
+- Conserver la cible Intel macOS 10.15. Le SDK local Xcode 27 peut nécessiter une cible de test
+  12.0 (`DMXMONEY_UI_MIN_MACOS=12.0`), sans changer la cible des binaires distribués.
+
 ## Étapes
 
 ```bash
@@ -42,9 +58,9 @@ d'appcast).
 | `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER` | clé App Store Connect (base64) pour la notarisation |
 | `DMX_UPDATE_FEED_URL` | URL du flux lu par l'app macOS, par exemple `https://github.com/<owner>/<repo>/releases/latest/download/updates.json` |
 
-Sans ce secret, `release.yml` utilise le flux des releases GitHub du dépôt. Une compilation
-locale n'a pas de flux : l'app macOS ne cherche alors aucune mise à jour et masque l'entrée de
-menu « Rechercher les mises à jour… ».
+Sans ce secret, les builds utilisent le flux des releases GitHub du dépôt. Les deux variantes
+macOS partagent `FileActions.settingsActions` : le bouton « Vérifier les mises à jour… »
+reste accessible dans les paramètres et dans le menu de l’application.
 
 ## Mises à jour macOS
 
@@ -62,8 +78,8 @@ menu « Rechercher les mises à jour… ».
 ```
 
 L'app compare cette version à la sienne (au plus une vérification par jour, plus l'entrée de
-menu), affiche les nouveautés et ouvre la page de téléchargement ; l'installation reste un
-glisser-déposer. Sparkle 2 n'est pas utilisé : ses binaires officiels exigent macOS 11, ce qui
+menu), affiche les nouveautés puis permet de télécharger et remplacer l’application avec
+copie de secours. L’installation manuelle du DMG reste disponible. Sparkle 2 n'est pas utilisé : ses binaires officiels exigent macOS 11, ce qui
 empêcherait le lancement sous Catalina.
 
 ## Windows

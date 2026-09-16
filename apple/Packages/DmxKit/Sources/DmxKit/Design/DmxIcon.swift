@@ -19,10 +19,36 @@ public struct DmxIcon: View {
     }
 
     public var body: some View {
-        DmxIcon.swiftUIImage(name)
-            .resizable()
-            .aspectRatio(contentMode: .fit)
-            .frame(width: size, height: size)
+        Group {
+            if DmxIcon.usesBundledIcons {
+                // Use only the artwork's alpha. Catalina's template Image can retain the
+                // system's white tint instead of inheriting the surrounding foreground.
+                Rectangle()
+                    .mask(
+                        Image(DmxIcon.resolvedName(name), bundle: .module)
+                            .renderingMode(.original)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                    )
+            } else {
+                DmxIcon.swiftUIImage(name)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibility(hidden: true)
+    }
+
+    /// Exercise Catalina artwork in snapshot builds on newer macOS versions too.
+    static var usesBundledIcons: Bool {
+        #if os(macOS)
+        if ProcessInfo.processInfo.environment["DMXMONEY_BUNDLED_ICONS"] == "1" { return true }
+        if #available(macOS 11, *) { return false }
+        return true
+        #else
+        return false
+        #endif
     }
 
     /// SF Symbol correspondant au nom stocké en base (« tag » par défaut).
@@ -86,7 +112,7 @@ public struct DmxIcon: View {
     #if os(macOS)
     /// Image AppKit pour les tableaux et menus.
     public static func image(_ name: String, size: CGFloat = 16) -> NSImage? {
-        if #available(macOS 11, *),
+        if #available(macOS 11, *), !usesBundledIcons,
            let symbol = NSImage(systemSymbolName: availableSymbol(for: name), accessibilityDescription: nil)?
                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size * 0.8, weight: .regular)) {
             symbol.isTemplate = true

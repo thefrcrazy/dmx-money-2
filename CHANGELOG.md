@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.4 - 2026-09-16
+
+- macOS Intel/Catalina : quatre onglets dans les paramètres (Général, Compagnon mobile, Données, À propos), comme dans la variante moderne.
+- Action « Vérifier les mises à jour… » rétablie dans les paramètres Intel, avec les mêmes actions partagées que sur Apple Silicon.
+- Icônes de repli teintées par leur masque et sélection de navigation lisible en thème clair ; conservation des composants et couleurs v2.
+- Vérification CI du rendu AppKit avec les icônes Catalina forcées, passage clair/sombre/clair et parcours des quatre onglets. Ce contrôle ne remplace pas un essai sur macOS 10.15 réel.
+- PWA : retraits rouges et signés, montants au format français en euros, titre fixe avec connexion à gauche et assistant à droite.
+
+
 ## 2.0.3 - 2026-09-16
 
 - Version stable intégrant les correctifs des RC : échéances actualisées, soldes persistants, assistant PWA unique et téléchargement des mises à jour fiabilisé.

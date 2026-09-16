@@ -12,7 +12,7 @@ public struct SettingsActions {
     public var exportBackup: () -> Void
     public var importFile: () -> Void
     public var copyToClipboard: (String) -> Void
-    /// Mises à jour (Sparkle sur macOS) : `nil` masque la ligne.
+    /// Action du téléchargeur macOS : `nil` masque la ligne.
     public var checkForUpdates: (() -> Void)?
     public var updateAvailable: () -> Bool
     public var iCloud: ICloudSettings?
@@ -65,6 +65,7 @@ public struct SettingsPage: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.dmxCompact) private var compact
     private let actions: SettingsActions
+    @State private var selectedTab: SettingsTab = .general
     @State private var bridgeBusy = false
     @State private var refreshTick = 0
     @State private var includePrereleases: Bool = (UserDefaults.standard.object(forKey: "DmxIncludePrereleases") as? Bool) ?? true
@@ -73,25 +74,58 @@ public struct SettingsPage: View {
         self.actions = actions
     }
 
-    public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 30) {
-                if !compact {
-                    Text("Paramètres").font(.system(size: 28, weight: .bold))
-                }
-                appearanceSection
-                if let iCloud = actions.iCloud {
-                    iCloudSection(iCloud)
-                }
-                if store.bridgeAvailable {
-                    bridgeSection
-                }
-                dataSection
-                aboutSection
+    private enum SettingsTab: String, CaseIterable, Identifiable {
+        case general, companion, data, about
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .general: return "Général"
+            case .companion: return "Compagnon mobile"
+            case .data: return "Données"
+            case .about: return "À propos"
             }
-            .padding(compact ? 16 : 24)
-            .frame(maxWidth: 760, alignment: .topLeading)
-            .frame(maxWidth: .infinity)
+        }
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            if !compact {
+                HStack {
+                    Picker("Section", selection: $selectedTab) {
+                        ForEach(SettingsTab.allCases) { tab in
+                            Text(tab.title).tag(tab)
+                        }
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .labelsHidden()
+                    .frame(maxWidth: 580)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                Divider()
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    if compact || selectedTab == .general {
+                        appearanceSection
+                        if let iCloud = actions.iCloud { iCloudSection(iCloud) }
+                    }
+                    if compact || selectedTab == .companion {
+                        if store.bridgeAvailable {
+                            bridgeSection
+                        } else if !compact {
+                            Text("Le compagnon mobile n’est pas disponible sur cette plateforme.")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    if compact || selectedTab == .data { dataSection }
+                    if compact || selectedTab == .about { aboutSection }
+                }
+                .padding(compact ? 16 : 24)
+                .frame(maxWidth: 760, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .background(DmxPalette.pageBackground)
         .onAppear { store.refreshBridgeStatus() }
@@ -533,11 +567,11 @@ public struct SettingsPage: View {
             if let checkForUpdates = actions.checkForUpdates {
                 Divider()
                 let available = actions.updateAvailable()
-                row("Mise à jour logicielle", subtitle: available ? "Nouvelle version disponible" : "L'application est à jour") {
+                row("Mise à jour logicielle", subtitle: available ? "Nouvelle version disponible" : "Rechercher une nouvelle version") {
                     Button(action: checkForUpdates) {
                         HStack(spacing: 6) {
                             DmxIcon("RefreshCw", size: 13)
-                            Text(available ? "Installer" : "Vérifier")
+                            Text(available ? "Installer" : "Vérifier les mises à jour…")
                         }
                     }
                     .buttonStyle(DmxButtonStyle(available ? .primary : .secondary))
