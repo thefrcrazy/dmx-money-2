@@ -250,6 +250,11 @@
                                 </StackPanel>
                             </Button>
                         </Grid>
+                        <Border Height="1" Background="{ThemeResource DmxSeparator}" />
+                        <CheckBox
+                            Content="Autoriser les versions pré-release (bêta / RC)"
+                            IsChecked="{x:Bind ViewModel.IncludePrereleases, Mode=TwoWay}"
+                            Margin="16,8,16,14" />
                     </StackPanel>
                 </Border>
             </StackPanel>

@@ -13,7 +13,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         if let button = statusItem.button {
-            button.image = DmxIcon.image("Wallet", size: 16)
+            let icon = NSImage(named: "MenuBarIcon") ?? DmxIcon.image("Wallet", size: 18)
+            icon?.isTemplate = true
+            button.image = icon
             button.toolTip = "DmxMoney"
         }
         let menu = NSMenu()
@@ -59,7 +61,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
         menu.addItem(action("Synchroniser", #selector(sync)))
+        menu.addItem(action("Rechercher les mises à jour…", #selector(checkForUpdates)))
         menu.addItem(action("Quitter DmxMoney", #selector(quit)))
+    }
+
+    @objc private func checkForUpdates() {
+        UpdateChecker.shared.checkForUpdates(nil)
     }
 
     private func action(_ title: String, _ selector: Selector) -> NSMenuItem {

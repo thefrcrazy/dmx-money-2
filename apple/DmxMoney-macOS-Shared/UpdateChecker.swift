@@ -54,16 +54,43 @@ final class UpdateChecker: NSObject {
         }
     }
 
-    private let feedURL: URL?
+    private struct GitHubRelease: Decodable {
+        struct Asset: Decodable {
+            let name: String
+            let browser_download_url: URL
+        }
+        let tag_name: String
+        let name: String?
+        let body: String?
+        let draft: Bool?
+        let prerelease: Bool?
+        let assets: [Asset]
+    }
+
+    private static let defaultFeedURL = URL(string: "https://api.github.com/repos/thefrcrazy/dmx-money-2/releases")!
+    private let feedURL: URL
     private let lastCheckKey = "DmxLastUpdateCheck"
     private let skippedVersionKey = "DmxSkippedUpdateVersion"
+    private let includePrereleasesKey = "DmxIncludePrereleases"
 
-    var isAvailable: Bool { feedURL != nil }
+    var isAvailable: Bool { true }
+
+    var includePrereleases: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: includePrereleasesKey) != nil {
+                return UserDefaults.standard.bool(forKey: includePrereleasesKey)
+            }
+            return true
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: includePrereleasesKey)
+        }
+    }
 
     override private init() {
         let configured = (Bundle.main.object(forInfoDictionaryKey: "DmxUpdateFeedURL") as? String ?? "")
             .trimmingCharacters(in: .whitespaces)
-        feedURL = configured.isEmpty ? nil : URL(string: configured)
+        feedURL = configured.isEmpty ? Self.defaultFeedURL : (URL(string: configured) ?? Self.defaultFeedURL)
         super.init()
     }
 
@@ -89,20 +116,65 @@ final class UpdateChecker: NSObject {
     // MARK: - Vérification
 
     private func check(silent: Bool) {
-        guard let feedURL = feedURL else { return }
         var request = URLRequest(url: feedURL)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 15
+        request.setValue("DmxMoney-macOS", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+
         URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
             guard let self = self else { return }
             DispatchQueue.main.async {
-                guard let data = data, let feed = try? JSONDecoder().decode(Feed.self, from: data) else {
-                    if !silent {
-                        self.presentFailure(error)
-                    }
+                guard let data = data else {
+                    if !silent { self.presentFailure(error) }
                     return
                 }
-                self.handle(feed, silent: silent)
+
+                if let feed = try? JSONDecoder().decode(Feed.self, from: data) {
+                    self.handle(feed, silent: silent)
+                    return
+                }
+
+                // Essai de décodage sous forme de releases GitHub
+                if let releases = try? JSONDecoder().decode([GitHubRelease].self, from: data) {
+                    let current = AppInfo.version
+                    let isCurrentPrerelease = current.contains("-")
+                    let allowPrerelease = self.includePrereleases || isCurrentPrerelease
+
+                    // Trouver la release candidate la plus récente admissible
+                    let matching = releases.first { rel in
+                        guard !(rel.draft ?? false) else { return false }
+                        if !allowPrerelease {
+                            return !(rel.prerelease ?? false)
+                        }
+                        return true
+                    }
+
+                    if let latest = matching {
+                        let version = latest.tag_name.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
+                        var platforms: [String: Feed.Build] = [:]
+                        for asset in latest.assets {
+                            if asset.name.hasSuffix("apple-silicon.dmg") {
+                                platforms["darwin-arm64"] = Feed.Build(url: asset.browser_download_url, minimumSystemVersion: "26.0")
+                            } else if asset.name.hasSuffix("intel-catalina.dmg") {
+                                platforms["darwin-x86_64"] = Feed.Build(url: asset.browser_download_url, minimumSystemVersion: "10.15")
+                            }
+                        }
+                        let feed = Feed(
+                            version: version,
+                            notes: latest.body,
+                            platforms: platforms,
+                            url: nil,
+                            minimumSystemVersion: nil
+                        )
+                        self.handle(feed, silent: silent)
+                        return
+                    }
+                }
+
+                if !silent {
+                    self.presentFailure(error)
+                }
             }
         }
         .resume()
@@ -128,28 +200,146 @@ final class UpdateChecker: NSObject {
         presentUpdate(feed, build: build, current: current, silent: silent)
     }
 
-    // MARK: - Alertes
+    // MARK: - Alertes et installation
 
     private func presentUpdate(_ feed: Feed, build: Feed.Build, current: String, silent: Bool) {
         let alert = NSAlert()
         alert.messageText = "DmxMoney \(feed.version) est disponible"
-        var text = "Vous utilisez la version \(current)."
+        var text = "Vous utilisez actuellement la version \(current)."
         if let notes = feed.notes, !notes.isEmpty {
-            text += "\n\n\(notes)"
+            text += "\n\nNouveautés :\n\(notes)"
         }
         alert.informativeText = text
-        alert.addButton(withTitle: "Télécharger")
-        alert.addButton(withTitle: "Plus tard")
+
+        let isWritable = FileManager.default.isWritableFile(atPath: Bundle.main.bundlePath)
+        if isWritable {
+            alert.addButton(withTitle: "Mettre à jour et redémarrer")
+            alert.addButton(withTitle: "Télécharger manuellement")
+            alert.addButton(withTitle: "Plus tard")
+        } else {
+            alert.addButton(withTitle: "Télécharger")
+            alert.addButton(withTitle: "Plus tard")
+        }
+
         if silent {
             alert.addButton(withTitle: "Ignorer cette version")
         }
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            NSWorkspace.shared.open(build.url)
-        case .alertThirdButtonReturn:
-            UserDefaults.standard.set(feed.version, forKey: skippedVersionKey)
-        default:
-            break
+
+        let response = alert.runModal()
+        if isWritable {
+            switch response {
+            case .alertFirstButtonReturn:
+                performDownloadAndRestart(build: build, version: feed.version)
+            case .alertSecondButtonReturn:
+                NSWorkspace.shared.open(build.url)
+            case .alertThirdButtonReturn:
+                break
+            default:
+                if silent {
+                    UserDefaults.standard.set(feed.version, forKey: skippedVersionKey)
+                }
+            }
+        } else {
+            switch response {
+            case .alertFirstButtonReturn:
+                NSWorkspace.shared.open(build.url)
+            case .alertSecondButtonReturn:
+                break
+            default:
+                if silent {
+                    UserDefaults.standard.set(feed.version, forKey: skippedVersionKey)
+                }
+            }
+        }
+    }
+
+    private func performDownloadAndRestart(build: Feed.Build, version: String) {
+        let alert = NSAlert()
+        alert.messageText = "Téléchargement de DmxMoney \(version)"
+        alert.informativeText = "La mise à jour est en cours de téléchargement… L'application redémarrera automatiquement une fois prête."
+        let progress = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 300, height: 20))
+        progress.isIndeterminate = true
+        progress.startAnimation(nil)
+        alert.accessoryView = progress
+        alert.addButton(withTitle: "Annuler")
+
+        var isCancelled = false
+        var downloadTask: URLSessionDownloadTask?
+        downloadTask = URLSession.shared.downloadTask(with: build.url) { [weak self] tempURL, _, error in
+            DispatchQueue.main.async {
+                guard !isCancelled else { return }
+                NSApp.stopModal(withCode: .alertSecondButtonReturn)
+
+                guard let self = self, let tempURL = tempURL, error == nil else {
+                    let fail = NSAlert()
+                    fail.messageText = "Échec du téléchargement"
+                    fail.informativeText = error?.localizedDescription ?? "Impossible de télécharger la mise à jour."
+                    fail.addButton(withTitle: "Télécharger manuellement")
+                    fail.addButton(withTitle: "Fermer")
+                    if fail.runModal() == .alertFirstButtonReturn {
+                        NSWorkspace.shared.open(build.url)
+                    }
+                    return
+                }
+
+                let targetDMG = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("DmxMoney-\(version)-\(UUID().uuidString).dmg")
+                try? FileManager.default.moveItem(at: tempURL, to: targetDMG)
+                self.applyDmgAndRestart(dmgURL: targetDMG)
+            }
+        }
+        downloadTask?.resume()
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            isCancelled = true
+            downloadTask?.cancel()
+        }
+    }
+
+    private func applyDmgAndRestart(dmgURL: URL) {
+        let bundlePath = Bundle.main.bundlePath
+        let pid = ProcessInfo.processInfo.processIdentifier
+
+        let script = """
+        #!/bin/sh
+        set -e
+        while kill -0 \(pid) 2>/dev/null; do
+            sleep 0.1
+        done
+
+        MOUNT_DIR=$(mktemp -d /tmp/dmx_mount_XXXXXX)
+        if /usr/bin/hdiutil attach "\(dmgURL.path)" -nobrowse -noverify -mountpoint "$MOUNT_DIR" -quiet; then
+            SRC_APP=$(find "$MOUNT_DIR" -maxdepth 1 -name "DmxMoney*.app" -o -name "*.app" | head -n 1)
+            if [ -n "$SRC_APP" ] && [ -d "$SRC_APP" ]; then
+                rm -rf "\(bundlePath)"
+                cp -pR "$SRC_APP" "\(bundlePath)"
+                xattr -dr com.apple.quarantine "\(bundlePath)" 2>/dev/null || true
+            fi
+            /usr/bin/hdiutil detach "$MOUNT_DIR" -quiet -force 2>/dev/null || true
+            rm -rf "$MOUNT_DIR"
+        fi
+
+        rm -f "\(dmgURL.path)"
+        /usr/bin/open -n "\(bundlePath)"
+        """
+
+        let scriptURL = FileManager.default.temporaryDirectory.appendingPathComponent("dmx_restart_\(pid).sh")
+        do {
+            try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+            proc.arguments = [scriptURL.path]
+            try proc.run()
+
+            NSApp.terminate(nil)
+        } catch {
+            let failAlert = NSAlert()
+            failAlert.messageText = "Erreur lors de l'application de la mise à jour"
+            failAlert.informativeText = error.localizedDescription
+            failAlert.addButton(withTitle: "OK")
+            failAlert.runModal()
         }
     }
 

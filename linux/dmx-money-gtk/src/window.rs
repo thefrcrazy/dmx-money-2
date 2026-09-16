@@ -112,6 +112,17 @@ pub fn present(application: &adw::Application, store: Rc<Store>) {
         footer.append(&button);
         footer_buttons.push((candidate, button));
     }
+    let check_updates = widgets::action_button("Vérifier les mises à jour", Some("RefreshCw"), false);
+    check_updates.add_css_class("flat");
+    let store_for_updates = store.clone();
+    check_updates.connect_clicked(move |_| {
+        let _ = gtk::gio::AppInfo::launch_default_for_uri(
+            "https://github.com/thefrcrazy/dmx-money-2/releases",
+            Option::<&gtk::gio::AppLaunchContext>::None,
+        );
+        store_for_updates.show_toast("Ouverture des versions de DmxMoney…");
+    });
+    footer.append(&check_updates);
     let quit = widgets::action_button("Quitter", Some("Power"), false);
     quit.add_css_class("flat");
     quit.add_css_class("dmx-expense");

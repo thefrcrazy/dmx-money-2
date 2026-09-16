@@ -1033,7 +1033,7 @@ dependencies = [
 
 [[package]]
 name = "dmx-bridge"
-version = "2.0.2-rc.1"
+version = "2.0.2-rc.3"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1059,7 +1059,7 @@ dependencies = [
 
 [[package]]
 name = "dmx-core"
-version = "2.0.2-rc.1"
+version = "2.0.2-rc.3"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1076,7 +1076,7 @@ dependencies = [
 
 [[package]]
 name = "dmx-ffi"
-version = "2.0.2-rc.1"
+version = "2.0.2-rc.3"
 dependencies = [
  "chrono",
  "dmx-bridge",
@@ -1088,7 +1088,7 @@ dependencies = [
 
 [[package]]
 name = "dmx-money-gtk"
-version = "2.0.2-rc.1"
+version = "2.0.2-rc.3"
 dependencies = [
  "async-channel",
  "cairo-rs",
@@ -3397,7 +3397,7 @@ dependencies = [
 
 [[package]]
 name = "seed-demo"
-version = "2.0.2-rc.1"
+version = "2.0.2-rc.3"
 dependencies = [
  "chrono",
  "dmx-core",
@@ -4243,7 +4243,7 @@ dependencies = [
 
 [[package]]
 name = "uniffi-bindgen"
-version = "2.0.2-rc.1"
+version = "2.0.2-rc.3"
 dependencies = [
  "uniffi",
 ]

@@ -457,6 +457,16 @@ public sealed partial class MainWindow : Window
         sync.Click += (_, _) => shell.SyncCommand.Execute(null);
         flyout.Items.Add(sync);
 
+        var updates = new MenuFlyoutItem { Text = "Vérifier les mises à jour…" };
+        updates.Click += async (_, _) =>
+        {
+            if (shell is not null)
+            {
+                await shell.Store.Platform.CheckForUpdatesAsync();
+            }
+        };
+        flyout.Items.Add(updates);
+
         var quit = new MenuFlyoutItem { Text = "Quitter DmxMoney" };
         quit.Click += (_, _) => Quit();
         flyout.Items.Add(quit);
@@ -466,6 +476,14 @@ public sealed partial class MainWindow : Window
     {
         AppWindow.Show();
         Activate();
+    }
+
+    private async void OnCheckUpdates(object sender, RoutedEventArgs args)
+    {
+        if (shell is not null)
+        {
+            await shell.Store.Platform.CheckForUpdatesAsync();
+        }
     }
 
     private void OnQuit(object sender, RoutedEventArgs args) => Quit();

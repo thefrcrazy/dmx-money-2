@@ -183,6 +183,34 @@ impl Page {
         about_row.append(&whats_new);
         about_content.append(&about_row);
 
+        about_content.append(&widgets::separator());
+
+        let update_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        let update_labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        update_labels.set_hexpand(true);
+        let update_title = gtk::Label::new(Some("Mise à jour logicielle"));
+        update_title.set_xalign(0.0);
+        update_title.add_css_class("heading");
+        update_labels.append(&update_title);
+        let update_sub = widgets::caption("Vérifier les nouvelles versions sur GitHub");
+        update_labels.append(&update_sub);
+        update_row.append(&update_labels);
+        let check_updates = gtk::Button::with_label("Vérifier");
+        let store_for_updates = store.clone();
+        check_updates.connect_clicked(move |_| {
+            let _ = gtk::gio::AppInfo::launch_default_for_uri(
+                "https://github.com/thefrcrazy/dmx-money-2/releases",
+                Option::<&gtk::gio::AppLaunchContext>::None,
+            );
+            store_for_updates.show_toast("Ouverture des versions de DmxMoney…");
+        });
+        update_row.append(&check_updates);
+        about_content.append(&update_row);
+        about_content.append(&widgets::separator());
+        let prerelease_check = gtk::CheckButton::with_label("Autoriser les versions pré-release (bêta / RC)");
+        prerelease_check.set_active(true);
+        about_content.append(&prerelease_check);
+
         let root = widgets::page_scroll(&content).upcast();
         let page = Self {
             store: store.clone(),

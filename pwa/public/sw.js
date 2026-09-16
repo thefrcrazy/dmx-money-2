@@ -1,4 +1,4 @@
-const CACHE_NAME = "dmxmoney-shell-v36";
+const CACHE_NAME = "dmxmoney-shell-v37";
 const APP_SHELL = [
   "/",
   "/mobile",

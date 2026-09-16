@@ -24,6 +24,7 @@ pub fn start(store: &Rc<Store>, window: &adw::ApplicationWindow) {
         Navigate(Route),
         NewTransaction,
         Sync,
+        CheckUpdates,
         Quit,
     }
 
@@ -112,6 +113,16 @@ pub fn start(store: &Rc<Store>, window: &adw::ApplicationWindow) {
             );
             items.push(
                 StandardItem {
+                    label: "Rechercher les mises à jour…".into(),
+                    activate: Box::new(|tray: &mut Self| {
+                        let _ = tray.sender.send_blocking(TrayAction::CheckUpdates);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            );
+            items.push(
+                StandardItem {
                     label: "Quitter DmxMoney".into(),
                     activate: Box::new(|tray: &mut Self| {
                         let _ = tray.sender.send_blocking(TrayAction::Quit);
@@ -158,6 +169,13 @@ pub fn start(store: &Rc<Store>, window: &adw::ApplicationWindow) {
                 TrayAction::Navigate(route) => store_for_actions.navigate(route),
                 TrayAction::NewTransaction => store_for_actions.present(crate::store::FormRequest::Transaction(None)),
                 TrayAction::Sync => store_for_actions.reload(),
+                TrayAction::CheckUpdates => {
+                    let _ = gtk::gio::AppInfo::launch_default_for_uri(
+                        "https://github.com/thefrcrazy/dmx-money-2/releases",
+                        Option::<&gtk::gio::AppLaunchContext>::None,
+                    );
+                    store_for_actions.show_toast("Ouverture des versions de DmxMoney…");
+                }
                 TrayAction::Quit => std::process::exit(0),
             }
         }

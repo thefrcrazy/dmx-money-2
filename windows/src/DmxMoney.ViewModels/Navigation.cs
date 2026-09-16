@@ -110,12 +110,16 @@ public interface IPlatformServices
 
     bool UpdateAvailable { get; }
 
+    bool IncludePrereleases { get; set; }
+
     Task CheckForUpdatesAsync();
 }
 
 public sealed class NullPlatformServices : IPlatformServices
 {
     public bool UpdateAvailable => false;
+
+    public bool IncludePrereleases { get; set; } = true;
 
     public Task ExportBackupAsync(string content, string suggestedFileName) => Task.CompletedTask;
 

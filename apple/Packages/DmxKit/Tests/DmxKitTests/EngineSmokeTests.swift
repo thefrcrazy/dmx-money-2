@@ -96,6 +96,12 @@ final class EngineSmokeTests: XCTestCase {
         XCTAssertFalse(AppInfo.isVersion("2.0.0", newerThan: "2.0.1"))
         // Une version affichée avec un suffixe reste comparable.
         XCTAssertTrue(AppInfo.isVersion("2.1.0-beta", newerThan: "2.0.9"))
+        // Pré-releases du même numéro : rc.2 est plus récent que rc.1
+        XCTAssertTrue(AppInfo.isVersion("2.0.2-rc.2", newerThan: "2.0.2-rc.1"))
+        XCTAssertFalse(AppInfo.isVersion("2.0.2-rc.1", newerThan: "2.0.2-rc.2"))
+        // La release finale est plus récente que la pré-release
+        XCTAssertTrue(AppInfo.isVersion("2.0.2", newerThan: "2.0.2-rc.2"))
+        XCTAssertFalse(AppInfo.isVersion("2.0.2-rc.2", newerThan: "2.0.2"))
     }
 
     func testIconsAreBundled() {

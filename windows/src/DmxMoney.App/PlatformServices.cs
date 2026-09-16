@@ -23,10 +23,17 @@ public sealed class WindowsPlatformServices : IPlatformServices
     {
         this.window = window;
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        var url = Environment.GetEnvironmentVariable("DMXMONEY_UPDATE_URL") ?? DefaultUpdateUrl;
+        var url = Environment.GetEnvironmentVariable("DMXMONEY_UPDATE_URL");
         try
         {
-            manager = new UpdateManager(new SimpleWebSource(url));
+            if (!string.IsNullOrWhiteSpace(url))
+            {
+                manager = new UpdateManager(new SimpleWebSource(url));
+            }
+            else
+            {
+                manager = new UpdateManager(new GithubSource("https://github.com/TheFRcRaZy/dmx-money-2", null, prerelease: true));
+            }
         }
         catch (Exception)
         {
@@ -35,6 +42,32 @@ public sealed class WindowsPlatformServices : IPlatformServices
     }
 
     public bool UpdateAvailable => pending is not null;
+
+    public bool IncludePrereleases
+    {
+        get
+        {
+            try
+            {
+                var raw = ApplicationData.Current.LocalSettings.Values["DmxIncludePrereleases"];
+                return raw is bool b ? b : true;
+            }
+            catch (Exception)
+            {
+                return true;
+            }
+        }
+        set
+        {
+            try
+            {
+                ApplicationData.Current.LocalSettings.Values["DmxIncludePrereleases"] = value;
+            }
+            catch (Exception)
+            {
+            }
+        }
+    }
 
     public async Task ExportBackupAsync(string content, string suggestedFileName)
     {
@@ -98,18 +131,33 @@ public sealed class WindowsPlatformServices : IPlatformServices
 
     public async Task CheckForUpdatesAsync()
     {
-        if (manager is null || !manager.IsInstalled)
+        var url = Environment.GetEnvironmentVariable("DMXMONEY_UPDATE_URL");
+        var activeManager = manager;
+        if (string.IsNullOrWhiteSpace(url))
         {
+            try
+            {
+                activeManager = new UpdateManager(new GithubSource("https://github.com/TheFRcRaZy/dmx-money-2", null, prerelease: IncludePrereleases));
+            }
+            catch (Exception)
+            {
+                activeManager = manager;
+            }
+        }
+
+        if (activeManager is null || !activeManager.IsInstalled)
+        {
+            App.Store.ShowToast("Mise à jour automatique disponible sur la version installée.");
             return;
         }
-        pending = await manager.CheckForUpdatesAsync();
+        pending = await activeManager.CheckForUpdatesAsync();
         if (pending is null)
         {
             App.Store.ShowToast("L'application est à jour.");
             return;
         }
-        await manager.DownloadUpdatesAsync(pending);
-        manager.ApplyUpdatesAndRestart(pending);
+        await activeManager.DownloadUpdatesAsync(pending);
+        activeManager.ApplyUpdatesAndRestart(pending);
     }
 }
 

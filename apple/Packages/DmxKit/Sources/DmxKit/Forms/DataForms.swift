@@ -14,19 +14,59 @@ public enum AppInfo {
         return "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
     }
 
-    /// Comparaison numérique composant par composant (2.0.10 est plus récent que 2.0.9).
+    /// Comparaison sémantique SemVer complète (supporte 2.0.10 > 2.0.9, 2.0.2 > 2.0.2-rc.2, 2.0.2-rc.2 > 2.0.2-rc.1).
     public static func isVersion(_ candidate: String, newerThan current: String) -> Bool {
-        let parse: (String) -> [Int] = { value in
-            value.split(separator: ".").map { Int($0.filter(\.isNumber)) ?? 0 }
+        struct SemVer {
+            let core: [Int]
+            let prerelease: [String]?
+
+            init(_ raw: String) {
+                let cleaned = raw.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
+                let parts = cleaned.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: true)
+                core = parts[0].split(separator: ".").map { Int($0.filter(\.isNumber)) ?? 0 }
+                if parts.count > 1 {
+                    prerelease = parts[1].split(separator: ".").map(String.init)
+                } else {
+                    prerelease = nil
+                }
+            }
+
+            func isNewerThan(_ other: SemVer) -> Bool {
+                for index in 0..<max(core.count, other.core.count) {
+                    let a = index < core.count ? core[index] : 0
+                    let b = index < other.core.count ? other.core[index] : 0
+                    if a != b { return a > b }
+                }
+
+                switch (prerelease, other.prerelease) {
+                case (.none, .none):
+                    return false
+                case (.none, .some):
+                    // Une version stable finale est plus récente qu'une release candidate de même numéro
+                    return true
+                case (.some, .none):
+                    return false
+                case let (.some(preA), .some(preB)):
+                    for index in 0..<max(preA.count, preB.count) {
+                        guard index < preA.count else { return false }
+                        guard index < preB.count else { return true }
+                        let compA = preA[index]
+                        let compB = preB[index]
+                        let numA = Int(compA.filter(\.isNumber))
+                        let numB = Int(compB.filter(\.isNumber))
+                        if let nA = numA, let nB = numB, nA != nB {
+                            return nA > nB
+                        }
+                        if compA != compB {
+                            return compA > compB
+                        }
+                    }
+                    return false
+                }
+            }
         }
-        let left = parse(candidate)
-        let right = parse(current)
-        for index in 0..<max(left.count, right.count) {
-            let a = index < left.count ? left[index] : 0
-            let b = index < right.count ? right[index] : 0
-            if a != b { return a > b }
-        }
-        return false
+
+        return SemVer(candidate).isNewerThan(SemVer(current))
     }
 }
 

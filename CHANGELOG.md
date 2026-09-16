@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.2-rc.3 - 2026-09-16
+
+### Mises à jour & Système
+
+- Mise à jour automatique in-place avec redémarrage (Update & Restart) : téléchargement silencieux en tâche de fond et relance automatique de l'application mise à jour sans manipulation manuelle sur macOS et Windows.
+- Gestion complète des pré-releases (SemVer) : case à cocher pour autoriser les pré-releases (bêta / RC) dans les paramètres et détection fluide des montées de version.
+- Bouton « Vérifier les mises à jour » multiplateforme : accessible dans la barre latérale et les menus système sous macOS, Windows et Linux.
+- Icône monochrome officielle macOS : nouveau pictogramme conforme aux HIG Apple pour la barre de menus supérieure.
+- Compagnon mobile & PWA : synchronisation et purge de cache v37 immédiate sur Cloudflare KV.
+
 ## 2.0.2-rc.2 - 2026-09-16
 
 ### Compagnon mobile & PWA

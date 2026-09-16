@@ -67,6 +67,7 @@ public struct SettingsPage: View {
     private let actions: SettingsActions
     @State private var bridgeBusy = false
     @State private var refreshTick = 0
+    @State private var includePrereleases: Bool = (UserDefaults.standard.object(forKey: "DmxIncludePrereleases") as? Bool) ?? true
 
     public init(actions: SettingsActions) {
         self.actions = actions
@@ -541,6 +542,18 @@ public struct SettingsPage: View {
                     }
                     .buttonStyle(DmxButtonStyle(available ? .primary : .secondary))
                 }
+                Divider()
+                let prereleaseBinding = Binding<Bool>(
+                    get: { includePrereleases },
+                    set: { newValue in
+                        includePrereleases = newValue
+                        UserDefaults.standard.set(newValue, forKey: "DmxIncludePrereleases")
+                    }
+                )
+                Toggle("Autoriser les versions pré-release (bêta / RC)", isOn: prereleaseBinding)
+                    .font(.system(size: 13))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
             }
         }
     }

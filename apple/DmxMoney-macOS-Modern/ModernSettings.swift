@@ -180,6 +180,7 @@ private struct DataSettings: View {
 private struct AboutSettings: View {
     @ObservedObject var store: AppStore
     let actions: SettingsActions
+    @AppStorage("DmxIncludePrereleases") private var includePrereleases = true
 
     var body: some View {
         Form {
@@ -199,6 +200,9 @@ private struct AboutSettings: View {
                         check()
                     } label: {
                         Label("Rechercher les mises à jour…", systemImage: "arrow.down.circle")
+                    }
+                    Toggle(isOn: $includePrereleases) {
+                        Label("Autoriser les versions pré-release", systemImage: "flask")
                     }
                 }
                 Button {

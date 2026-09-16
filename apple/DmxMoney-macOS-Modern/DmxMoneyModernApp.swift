@@ -28,11 +28,14 @@ struct DmxMoneyModernApp: App {
         }
         .windowResizability(.contentMinSize)
 
-        // Résumé des comptes dans la barre des menus, comme la 1.x.
-        MenuBarExtra("DmxMoney", systemImage: "eurosign.circle") {
+        // Résumé des comptes dans la barre des menus, avec le logo officiel monochrome.
+        MenuBarExtra {
             if let store = launcher.store {
                 MenuBarSummary(store: store) { openWindow(id: "main") }
             }
+        } label: {
+            Image("MenuBarIcon")
+                .renderingMode(.template)
         }
     }
 }
@@ -167,6 +170,7 @@ struct MenuBarSummary: View {
             store.reload()
             store.refreshBridgeStatus()
         }
+        Button("Rechercher les mises à jour…") { UpdateChecker.shared.checkForUpdates(nil) }
         Divider()
         Button("Quitter DmxMoney") { NSApp.terminate(nil) }
     }

@@ -227,6 +227,19 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     public bool UpdateAvailable => Store.Platform.UpdateAvailable;
 
+    public bool IncludePrereleases
+    {
+        get => Store.Platform.IncludePrereleases;
+        set
+        {
+            if (Store.Platform.IncludePrereleases != value)
+            {
+                Store.Platform.IncludePrereleases = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
     [RelayCommand]
     private void ShowWhatsNew() => Store.Present(new FormRequest.WhatsNew());
 

@@ -12,6 +12,24 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.0.2-rc.3",
+        date: "2026-09-16",
+        title: "Mises à jour automatiques et pré-releases",
+        changes: [
+            "Mise à jour automatique in-place avec redémarrage sans téléchargement manuel.",
+            "Prise en charge complète des versions pré-release et réglage dédié.",
+            "Vérification des mises à jour accessible directement dans les menus et barres latérales.",
+            "Icône monochrome officielle DmxMoney pour la barre des menus macOS."
+        ],
+        features: [
+            {
+                title: "Mise à jour en un clic",
+                description: "L'application se met à jour et redémarre toute seule en toute fluidité.",
+                icon: "RefreshCw"
+            }
+        ]
+    },
+    {
         version: "2.0.2-rc.2",
         date: "2026-09-16",
         title: "Compagnon mobile iOS et assistant vocal",
