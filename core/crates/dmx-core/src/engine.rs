@@ -133,27 +133,6 @@ impl Engine {
             }
         }
 
-        // Base déjà présente : une base 1.x plus complète peut exister à côté (dossier repris
-        // d'un ancien build, copie oubliée). On le signale, l'utilisateur décide.
-        let ignored = std::fs::read_to_string(config.data_dir.join(LEGACY_IGNORED_FILE)).unwrap_or_default();
-        if report.imported_legacy_database.is_none() {
-            report.legacy_candidate = runtime.block_on(async {
-                let mine = legacy::inventory(&database_path).await.ok()?;
-                let mut best: Option<legacy::DatabaseInventory> = None;
-                for candidate in legacy::existing_legacy_databases(&config.legacy_database_paths, &database_path) {
-                    let Ok(inventory) = legacy::inventory(&candidate).await else {
-                        continue;
-                    };
-                    if !inventory.is_richer_than(&mine) || ignored.trim() == legacy_marker(&inventory) {
-                        continue;
-                    }
-                    if best.as_ref().is_none_or(|current| inventory.is_richer_than(current)) {
-                        best = Some(inventory);
-                    }
-                }
-                best
-            });
-        }
 
         let pool = runtime.block_on(db::open_pool(&database_path))?;
         let engine = Self {

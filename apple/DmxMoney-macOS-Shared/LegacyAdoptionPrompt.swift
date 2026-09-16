@@ -18,33 +18,7 @@ enum LegacyAdoptionPrompt {
 
     /// À n'appeler qu'une fois la fenêtre affichée.
     static func presentIfNeeded(store: AppStore) {
-        let report = store.engine.openReport()
-        guard let candidate = report.legacyCandidate, hasVisibleWindow else { return }
-
-        let alert = NSAlert()
-        alert.messageText = "Reprendre vos données DmxMoney 1.x ?"
-        alert.informativeText = """
-        Une base DmxMoney 1.x plus complète a été trouvée :
-
-        \(summary(candidate))
-
-        Base actuellement ouverte : \(summary(current(store)))
-
-        Vos données actuelles seront d'abord exportées en .dmx dans le dossier de l'application, \
-        et la base 1.x ne sera pas modifiée.
-        """
-        alert.addButton(withTitle: "Plus tard")
-        alert.addButton(withTitle: "Reprendre les données 1.x")
-        alert.addButton(withTitle: "Ne plus demander")
-
-        switch alert.runModal() {
-        case .alertSecondButtonReturn:
-            adopt(candidate, store: store)
-        case .alertThirdButtonReturn:
-            ignore(store: store)
-        default:
-            break
-        }
+        // Désactivé : ne plus proposer d'adoption intempestive de base 1.x
     }
 
     static func adopt(_ candidate: DatabaseInventory, store: AppStore) {

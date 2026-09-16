@@ -119,8 +119,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.errorMessage = "La base DmxMoney 1.x n'a pas pu être reprise : \(error)"
         } else if report.importedLegacyDatabase != nil {
             store.showToast("Vos données DmxMoney 1.x ont été reprises")
-        } else if report.legacyCandidate != nil {
-            LegacyAdoptionPrompt.presentIfNeeded(store: store)
         }
     }
 

@@ -34,23 +34,7 @@ extension AppStore {
     /// Propose de reprendre une base DmxMoney 1.x plus complète trouvée à côté du dossier de
     /// données. La base 1.x n'est pas modifiée, et l'actuelle est exportée en `.dmx` avant.
     public func proposeLegacyAdoptionIfNeeded() {
-        guard let candidate = engine.openReport().legacyCandidate else { return }
-        let counts = "\(candidate.transactions) opérations, \(candidate.budgets) budgets, \(candidate.scheduled) échéances"
-        let today = self.today
-        confirm(
-            title: "Reprendre vos données DmxMoney 1.x ?",
-            message: "Une base DmxMoney 1.x plus complète a été trouvée (\(counts)). Vos données actuelles seront exportées en .dmx avant la reprise ; la base 1.x n'est pas modifiée.",
-            confirmTitle: "Reprendre",
-            destructive: false
-        ) { [weak self] in
-            guard let self = self else { return }
-            self.perform({ engine in try engine.adoptLegacyDatabase(path: candidate.path, today: today) }, completion: { adoption in
-                self.reload()
-                self.showToast("Données 1.x reprises : \(adoption.summary.transactions) opérations")
-            }, failure: { message in
-                self.errorMessage = "La reprise a échoué : \(message)"
-            })
-        }
+        // Désactivé : ne plus proposer d'adoption intempestive de base 1.x
     }
 
     /// Affiche les nouveautés après une mise à jour ; une installation neuve est marquée comme vue.

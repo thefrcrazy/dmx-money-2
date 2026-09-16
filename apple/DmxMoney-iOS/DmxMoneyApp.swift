@@ -52,12 +52,7 @@ final class Launcher: ObservableObject {
         didStartPostLaunch = true
         // En mode capture, la modale « Nouveautés » est une étape parmi d'autres.
         guard SnapshotRunner.directory == nil else { return }
-        // Une seule présentation à la fois : les nouveautés attendent le prochain lancement.
-        if store.engine.openReport().legacyCandidate != nil {
-            store.proposeLegacyAdoptionIfNeeded()
-        } else {
-            store.presentWhatsNewIfNeeded()
-        }
+        store.presentWhatsNewIfNeeded()
     }
 }
 

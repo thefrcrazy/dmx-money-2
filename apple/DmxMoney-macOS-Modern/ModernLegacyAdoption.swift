@@ -13,69 +13,8 @@ import SwiftUI
 ///   ni la touche Entrée ni une fermeture automatique ne déclenchent la reprise.
 struct ModernLegacyAdoption: ViewModifier {
     @ObservedObject var store: AppStore
-    @State private var candidate: DatabaseInventory?
-    @State private var comparison = ""
-    @State private var asked = false
 
     func body(content: Content) -> some View {
         content
-            .task { await propose() }
-            .alert(
-                "Reprendre vos données DmxMoney 1.x ?",
-                isPresented: Binding(get: { candidate != nil }, set: { if !$0 { candidate = nil } }),
-                presenting: candidate
-            ) { candidate in
-                Button("Plus tard", role: .cancel) { resume() }
-                    .keyboardShortcut(.defaultAction)
-                Button("Reprendre les données 1.x") { adopt(candidate) }
-                Button("Ne plus demander", role: .destructive) { ignore() }
-            } message: { candidate in
-                Text(message(for: candidate))
-            }
-    }
-
-    private func propose() async {
-        guard !asked, SnapshotRunner.directory == nil else { return }
-        guard let found = store.engine.openReport().legacyCandidate else {
-            asked = true
-            return
-        }
-        // La fenêtre du `WindowGroup` peut encore être masquée (lancement au login, app cachée) :
-        // on laisse jusqu'à 30 s, sinon la proposition attend le prochain lancement.
-        for _ in 0..<120 where !LegacyAdoptionPrompt.hasVisibleWindow {
-            try? await Task.sleep(nanoseconds: 250_000_000)
-        }
-        guard LegacyAdoptionPrompt.hasVisibleWindow else { return }
-        asked = true
-        comparison = LegacyAdoptionPrompt.summary(LegacyAdoptionPrompt.current(store))
-        candidate = found
-    }
-
-    private func message(for candidate: DatabaseInventory) -> String {
-        """
-        Une base DmxMoney 1.x plus complète a été trouvée :
-        \(LegacyAdoptionPrompt.summary(candidate)).
-
-        Base actuellement ouverte : \(comparison).
-
-        Vos données actuelles seront d'abord exportées en .dmx dans le dossier de l'application, \
-        et la base 1.x ne sera pas modifiée.
-        """
-    }
-
-    private func adopt(_ candidate: DatabaseInventory) {
-        self.candidate = nil
-        LegacyAdoptionPrompt.adopt(candidate, store: store)
-    }
-
-    private func ignore() {
-        candidate = nil
-        LegacyAdoptionPrompt.ignore(store: store)
-        resume()
-    }
-
-    /// Les nouveautés attendaient la réponse pour ne pas se superposer à l'alerte.
-    private func resume() {
-        store.presentWhatsNewIfNeeded()
     }
 }

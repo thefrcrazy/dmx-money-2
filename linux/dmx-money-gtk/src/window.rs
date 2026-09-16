@@ -331,7 +331,6 @@ pub fn present(application: &adw::Application, store: Rc<Store>) {
         return;
     }
 
-    propose_legacy_adoption(&store);
     store.process_due();
     start_bridge(&store);
     present_whats_new(&store);
@@ -380,33 +379,6 @@ fn pwa_assets_directory() -> Option<std::path::PathBuf> {
         std::path::PathBuf::from("/usr/share/dmx-money/pwa"),
     ];
     candidates.into_iter().find(|path| path.exists())
-}
-
-/// Propose de reprendre une base DmxMoney 1.x plus complète trouvée à côté du dossier de
-/// données (dossier laissé par un ancien build : budgets et échéances semblent disparus).
-fn propose_legacy_adoption(store: &Rc<Store>) {
-    let Some(candidate) = store.engine().open_report().legacy_candidate.clone() else {
-        return;
-    };
-    let counts = format!(
-        "{} opérations, {} budgets, {} échéances",
-        candidate.transactions, candidate.budgets, candidate.scheduled
-    );
-    let store_for_action = store.clone();
-    store.confirm(
-        "Reprendre vos données DmxMoney 1.x ?",
-        &format!(
-            "Une base DmxMoney 1.x plus complète a été trouvée ({counts}). Vos données actuelles              seront exportées en .dmx avant la reprise ; la base 1.x n'est pas modifiée."
-        ),
-        "Reprendre",
-        move || {
-            let path = candidate.path.clone();
-            let today = store_for_action.today();
-            store_for_action.run(Some("Données DmxMoney 1.x reprises"), move |engine| {
-                engine.adopt_legacy_database(&path, today)
-            });
-        },
-    );
 }
 
 fn present_whats_new(store: &Rc<Store>) {

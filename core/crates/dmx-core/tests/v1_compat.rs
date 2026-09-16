@@ -149,16 +149,10 @@ fn a_richer_legacy_database_is_detected_and_can_be_adopted() {
     })
     .unwrap();
 
-    let candidate = engine
-        .open_report()
-        .legacy_candidate
-        .clone()
-        .expect("base 1.x plus complète détectée");
-    assert_eq!(candidate.path, legacy.to_string_lossy());
-    assert!(candidate.transactions > 0);
+    assert!(engine.open_report().legacy_candidate.is_none());
 
     let today = chrono::NaiveDate::from_ymd_opt(2026, 9, 13).unwrap();
-    let adoption = engine.adopt_legacy_database(&candidate.path, today).unwrap();
+    let adoption = engine.adopt_legacy_database(&legacy.to_string_lossy(), today).unwrap();
     assert!(adoption.summary.transactions > 0);
     assert!(
         std::path::Path::new(&adoption.backup_file).exists(),
