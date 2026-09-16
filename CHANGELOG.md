@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.3-rc.1 - 2026-09-16
+
+### Mises à jour & Synchronisation des versions
+
+- Alignement des versions Application et Noyau : `AppInfo.version` prend systématiquement sa source de vérité depuis le noyau DmxCore, éliminant tout décalage entre la version affichée et la version réelle du moteur.
+- Détection des pré-releases fiabilisée : le flux de mise à jour macOS interroge directement l'API des releases GitHub pour prendre en compte immédiatement toutes les pré-releases publiées.
+- Transmission de la version complète à la chaîne de compilation Xcode (`MARKETING_VERSION`).
+
 ## 2.0.2-rc.4 - 2026-09-16
 
 ### Interface & Ergonomie

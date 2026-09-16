@@ -12,6 +12,24 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.0.3-rc.1",
+        date: "2026-09-16",
+        title: "Alignement des versions et détection des pré-releases",
+        changes: [
+            "Alignement strict de la version de l'application sur le noyau DmxCore (résolution de l'écart 2.0.2 / 2.0.2-rc.x).",
+            "Prise en compte immédiate des pré-releases SemVer sans blocage de version.",
+            "Liaison directe du flux de mise à jour macOS avec l'API officielle des releases GitHub.",
+            "Détection et téléchargement automatique de la mise à jour en un clic."
+        ],
+        features: [
+            {
+                title: "Mises à jour fiabilisées",
+                description: "Les montées de version pré-release s'enchaînent désormais de manière fluide.",
+                icon: "RefreshCw"
+            }
+        ]
+    },
+    {
         version: "2.0.2-rc.4",
         date: "2026-09-16",
         title: "Épuration de la navigation et vérifications automatiques",

@@ -81,7 +81,7 @@ jobs:
       - name: Réglages locaux (signature, iCloud, flux de mise à jour)
         env:
           # Sans secret, le flux est celui des releases GitHub du dépôt, où updates.json est publié.
-          FEED_URL: ${{ secrets.DMX_UPDATE_FEED_URL || format('https://github.com/{0}/releases/latest/download/updates.json', github.repository) }}
+          FEED_URL: ${{ secrets.DMX_UPDATE_FEED_URL || format('https://api.github.com/repos/{0}/releases', github.repository) }}
         run: |
           # Un xcconfig lit « // » comme un commentaire : l'URL s'y écrit « /$()/ ». sed plutôt que
           # ${var//…/…}, dont le bash 3.2 de macOS garde les antislashs du remplacement.

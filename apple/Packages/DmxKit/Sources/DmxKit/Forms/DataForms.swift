@@ -2,7 +2,11 @@ import SwiftUI
 
 public enum AppInfo {
     public static var version: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? coreVersion()
+        let core = coreVersion()
+        if !core.isEmpty {
+            return core
+        }
+        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
     }
 
     public static var build: String {
