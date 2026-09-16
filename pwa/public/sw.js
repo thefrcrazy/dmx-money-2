@@ -1,4 +1,5 @@
 const CACHE_NAME = "dmxmoney-shell-2.0.5";
+const BUILD_ASSETS = [];
 const APP_SHELL = [
   "/",
   "/mobile",
@@ -58,7 +59,7 @@ const staleWhileRevalidate = async (request, event) => {
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(APP_SHELL.map(url => new Request(url, { cache: "reload" }))))
+      .then(cache => cache.addAll([...APP_SHELL, ...BUILD_ASSETS].map(url => new Request(url, { cache: "reload" }))))
       .then(() => self.skipWaiting())
   );
 });

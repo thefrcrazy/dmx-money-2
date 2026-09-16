@@ -8,10 +8,11 @@ test('cache stamp is repeatable and changes when a bundle changes', async () => 
     const dir = await mkdtemp(join(tmpdir(), 'dmx-sw-'));
     try {
         await mkdir(join(dir, 'assets'));
-        await writeFile(join(dir, 'sw.js'), 'const CACHE_NAME = "old";\n');
+        await writeFile(join(dir, 'sw.js'), 'const CACHE_NAME = "old";\nconst BUILD_ASSETS = [];\n');
         await writeFile(join(dir, 'assets/app.js'), 'first');
         await stampServiceWorker(dir, '2.0.4');
         const first = await readFile(join(dir, 'sw.js'), 'utf8');
+        expect(first).toContain('/assets/app.js');
         await stampServiceWorker(dir, '2.0.4');
         expect(await readFile(join(dir, 'sw.js'), 'utf8')).toBe(first);
         await writeFile(join(dir, 'assets/app.js'), 'second');
