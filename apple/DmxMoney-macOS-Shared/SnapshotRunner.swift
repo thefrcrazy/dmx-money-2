@@ -31,9 +31,17 @@ enum SnapshotRunner {
             store.present(.restoreBackup(content: content, fileName: "sauvegarde-demo.dmx"))
         }))
         steps.append(("dark-dashboard", {
+            store.apply(.setTheme(theme: .dark))
             NSApp.appearance = NSAppearance(named: .darkAqua)
             store.route = .dashboard
         }))
+        steps.append(("light-after-dark-dashboard", {
+            store.apply(.setTheme(theme: .light))
+            NSApp.appearance = NSAppearance(named: .aqua)
+            store.route = .dashboard
+        }))
+        steps.append(("light-after-dark-categories", { store.route = .categories }))
+        steps.append(("light-after-dark-settings", { store.route = .settings }))
         perform(steps[...], store: store, window: window, directory: directory)
     }
 

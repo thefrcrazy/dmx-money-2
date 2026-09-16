@@ -3,11 +3,16 @@
 //! Les sommes sont faites en centimes entiers pour éviter les erreurs d'arrondi flottant.
 
 use crate::dates::{parse_date, same_month};
-use crate::models::{Transaction, TransactionType};
+use crate::models::{Transaction, TransactionType, TRANSFER_CATEGORY_ID};
 use crate::snapshot::{is_selected, Snapshot};
 use chrono::NaiveDate;
 use serde::Serialize;
 use std::collections::HashMap;
+
+/// Keep cents inside the exact integer range shared with JavaScript clients.
+pub fn is_valid_money(value: f64) -> bool {
+    value.is_finite() && (value * 100.0).abs() <= 9_007_199_254_740_991.0
+}
 
 pub fn cents(value: f64) -> i64 {
     if value.is_finite() {
@@ -83,10 +88,18 @@ pub fn balance_summary(snapshot: &Snapshot, filter: &[String]) -> BalanceSummary
     }
 }
 
+pub fn is_internal_transfer(transaction: &Transaction) -> bool {
+    transaction.is_transfer
+        || transaction.category == TRANSFER_CATEGORY_ID
+        || transaction.transaction_type == TransactionType::Transfer
+}
+
 pub fn monthly_summary(snapshot: &Snapshot, filter: &[String], today: NaiveDate) -> MonthlySummary {
     let (mut income, mut expenses) = (0_i64, 0_i64);
     for transaction in relevant_transactions(snapshot, filter) {
-        if !parse_date(&transaction.date).is_some_and(|date| same_month(date, today)) {
+        if is_internal_transfer(transaction)
+            || !parse_date(&transaction.date).is_some_and(|date| same_month(date, today))
+        {
             continue;
         }
         if transaction.transaction_type == TransactionType::Income {

@@ -216,6 +216,16 @@ fn parse_version(value: &str) -> Option<Vec<u64>> {
 }
 
 pub fn compare_versions(left: &str, right: &str) -> Ordering {
+    let prerelease = |value: &str| {
+        value
+            .split('+')
+            .next()
+            .unwrap_or(value)
+            .split_once('-')
+            .map(|(_, pre)| pre.to_owned())
+    };
+    let left_pre = prerelease(left);
+    let right_pre = prerelease(right);
     match (parse_version(left), parse_version(right)) {
         (Some(left), Some(right)) => {
             let length = left.len().max(right.len());
@@ -230,7 +240,31 @@ pub fn compare_versions(left: &str, right: &str) -> Ordering {
                     ordering => return ordering,
                 }
             }
-            Ordering::Equal
+            match (left_pre, right_pre) {
+                (None, None) => Ordering::Equal,
+                (None, Some(_)) => Ordering::Greater,
+                (Some(_), None) => Ordering::Less,
+                (Some(left), Some(right)) => {
+                    let mut left = left.split('.');
+                    let mut right = right.split('.');
+                    loop {
+                        let ordering = match (left.next(), right.next()) {
+                            (None, None) => return Ordering::Equal,
+                            (None, Some(_)) => Ordering::Less,
+                            (Some(_), None) => Ordering::Greater,
+                            (Some(a), Some(b)) => match (a.parse::<u64>(), b.parse::<u64>()) {
+                                (Ok(a), Ok(b)) => a.cmp(&b),
+                                (Ok(_), Err(_)) => Ordering::Less,
+                                (Err(_), Ok(_)) => Ordering::Greater,
+                                (Err(_), Err(_)) => a.cmp(b),
+                            },
+                        };
+                        if ordering != Ordering::Equal {
+                            return ordering;
+                        }
+                    }
+                }
+            }
         }
         (Some(_), None) => Ordering::Greater,
         (None, Some(_)) => Ordering::Less,

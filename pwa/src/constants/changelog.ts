@@ -12,6 +12,18 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.0.3",
+        date: "2026-09-16",
+        title: "Version stable",
+        changes: [
+            "Échéances actualisées, soldes persistants et assistant accessible depuis le badge global.",
+            "Virements entre vos comptes exclus des revenus et dépenses, avec modification cohérente des deux écritures.",
+            "Contraste des icônes macOS corrigé en thème clair et sombre.",
+            "Validation des montants, sauvegardes et sécurité du pont renforcées.",
+            "Dépendances et protection TLS mises à jour."
+        ]
+    },
+    {
         version: "2.0.3-rc.2",
         date: "2026-09-16",
         title: "Échéances actualisées et dictée fiabilisée",

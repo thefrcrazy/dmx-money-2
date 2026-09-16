@@ -23,11 +23,22 @@ fn round_cents(value: f64) -> f64 {
 }
 
 fn positive_amount(amount: f64) -> CoreResult<f64> {
-    if amount.is_finite() && amount > 0.0 {
-        Ok(round_cents(amount))
+    let rounded = round_cents(amount);
+    if crate::metrics::is_valid_money(rounded) && rounded > 0.0 {
+        Ok(rounded)
     } else {
         Err(CoreError::validation("Saisissez un montant valide"))
     }
+}
+
+#[cfg(test)]
+#[test]
+fn amounts_must_remain_positive_and_finite_after_rounding() {
+    for amount in [0.0, -1.0, 0.001, 1e20, f64::MAX, f64::INFINITY, f64::NAN] {
+        assert!(positive_amount(amount).is_err(), "{amount}");
+    }
+    assert_eq!(positive_amount(12.345).unwrap(), 12.35);
+    assert_eq!(positive_amount(0.01).unwrap(), 0.01);
 }
 
 fn valid_date(value: &str) -> CoreResult<String> {
@@ -105,7 +116,7 @@ pub async fn save_account(pool: &DbPool, draft: AccountDraft) -> CoreResult<Stri
     if name.is_empty() {
         return Err(CoreError::validation("Le nom du compte est requis."));
     }
-    if !draft.initial_balance.is_finite() {
+    if !crate::metrics::is_valid_money(round_cents(draft.initial_balance)) {
         return Err(CoreError::validation("Saisissez un solde initial valide"));
     }
 

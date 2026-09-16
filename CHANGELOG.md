@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.3 - 2026-09-16
+
+- Version stable intégrant les correctifs des RC : échéances actualisées, soldes persistants, assistant PWA unique et téléchargement des mises à jour fiabilisé.
+- Contraste des icônes et de la navigation macOS corrigé en thème clair et lors des changements de thème.
+- Virements internes exclus des revenus et dépenses dans les analyses ; modification et synchronisation des deux écritures cohérentes et atomiques.
+- Validation renforcée des montants et des sauvegardes avant écriture, encadrement des requêtes HTTP et protection des identifiants des appareils du pont Cloudflare.
+- Correctif de sécurité TLS intégré, dépendances PWA actualisées et tests PWA/Worker ajoutés à la CI.
+
+
 ## 2.0.3-rc.2 - 2026-09-16
 
 ### Échéances et rafraîchissement

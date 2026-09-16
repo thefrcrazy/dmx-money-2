@@ -4,7 +4,7 @@ use crate::dates::{
     add_days, add_months, days_between, each_day, each_month, format_date, month_key, parse_date, start_of_month,
 };
 use crate::format::{date_day_month, date_long, month_year};
-use crate::metrics::{cents, euros, signed_cents};
+use crate::metrics::{cents, euros, is_internal_transfer, signed_cents};
 use crate::models::{TimeRange, TransactionType};
 use crate::settings::AppSettings;
 use crate::snapshot::{is_selected, CategoryDisplay, Snapshot};
@@ -178,6 +178,9 @@ pub fn analytics(snapshot: &Snapshot, query: &AnalyticsQuery, today: NaiveDate) 
     let mut expenses: Vec<(String, i64)> = Vec::new();
     let mut income: Vec<(String, i64)> = Vec::new();
     for (transaction, _) in &in_range {
+        if is_internal_transfer(transaction) {
+            continue;
+        }
         let target = match transaction.transaction_type {
             TransactionType::Income => &mut income,
             TransactionType::Expense => &mut expenses,
@@ -195,6 +198,9 @@ pub fn analytics(snapshot: &Snapshot, query: &AnalyticsQuery, today: NaiveDate) 
     let daily_buckets = days_between(start, end) <= 31;
     let mut buckets: HashMap<String, (i64, i64)> = HashMap::new();
     for (transaction, date) in &in_range {
+        if is_internal_transfer(transaction) {
+            continue;
+        }
         let key = if daily_buckets {
             format_date(*date)
         } else {

@@ -9,7 +9,11 @@ source "$(dirname "$0")/env.sh"
 SOURCE="$DMX_ROOT/shared/icons/lucide"
 CATALOG="$DMX_ROOT/apple/Packages/DmxKit/Sources/DmxKit/Resources/Icons.xcassets"
 
-rm -rf "$CATALOG"
+# Keep the separately maintained menu-bar artwork when regenerating Lucide assets.
+for set in "$CATALOG"/*.imageset; do
+    [[ "$(basename "$set")" == "MenuBarIcon.imageset" ]] && continue
+    [[ -d "$set" ]] && rm -rf -- "$set"
+done
 mkdir -p "$CATALOG"
 cat > "$CATALOG/Contents.json" <<'JSON'
 {

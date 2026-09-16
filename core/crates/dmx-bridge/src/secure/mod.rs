@@ -20,7 +20,6 @@ use sqlx::Row;
 use std::{
     collections::HashMap,
     fs,
-    io::BufReader,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,

@@ -1,3 +1,4 @@
+import { applyTransactionUpdate } from '../utils/transactionUpdate';
 import { Account, Transaction, Category, ScheduledTransaction, Settings, Budget } from '../types';
 import { offlineStore, OfflineDataKey } from './offlineStore';
 import {
@@ -896,7 +897,7 @@ export class DatabaseService {
         if (this.usesHttp()) {
             const body = JSON.stringify(transaction);
             await this.commitMobileMutation('/api/transactions', 'PUT', body, () =>
-                offlineStore.updateCollection<Transaction>('transactions', items => items.map(item => item.id === transaction.id ? transaction : item))
+                offlineStore.updateCollection<Transaction>('transactions', items => applyTransactionUpdate(items, transaction))
             );
             return;
         }

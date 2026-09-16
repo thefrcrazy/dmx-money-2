@@ -4,13 +4,21 @@
 //! afin de composer des opérations atomiques.
 
 use crate::db::DbPool;
-use crate::error::{CoreResult, DbContext};
+use crate::error::{CoreError, CoreResult, DbContext};
 use crate::models::{
     Account, AppData, Budget, Category, Periodicity, ScheduledTransaction, Transaction, TransactionType,
     DEFAULT_ACCOUNT_COLOR, DEFAULT_ACCOUNT_ICON,
 };
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
+
+fn validate_money(value: f64) -> CoreResult<()> {
+    if crate::metrics::is_valid_money(value) {
+        Ok(())
+    } else {
+        Err(CoreError::validation("Montant hors plage ou non fini."))
+    }
+}
 
 pub(crate) fn row_string(row: &SqliteRow, column: &str) -> String {
     row_opt_string(row, column).unwrap_or_default()
@@ -131,6 +139,7 @@ pub async fn list_accounts(pool: &DbPool) -> CoreResult<Vec<Account>> {
 }
 
 pub async fn insert_account(connection: &mut SqliteConnection, account: &Account) -> CoreResult<()> {
+    validate_money(account.initial_balance)?;
     sqlx::query(
         "INSERT OR IGNORE INTO accounts (id, name, \"type\", \"initialBalance\", color, icon) VALUES ($1, $2, $3, $4, $5, $6)",
     )
@@ -147,6 +156,7 @@ pub async fn insert_account(connection: &mut SqliteConnection, account: &Account
 }
 
 pub async fn update_account(connection: &mut SqliteConnection, account: &Account) -> CoreResult<()> {
+    validate_money(account.initial_balance)?;
     sqlx::query(
         "UPDATE accounts SET name = $1, \"type\" = $2, \"initialBalance\" = $3, color = $4, icon = $5 WHERE id = $6",
     )
@@ -213,6 +223,7 @@ async fn execute_insert_transaction(
     verb: &str,
     transaction: &Transaction,
 ) -> CoreResult<bool> {
+    validate_money(transaction.amount)?;
     let statement = format!("{verb} {INSERT_TRANSACTION}");
     let result = sqlx::query(&statement)
         .bind(&transaction.id)
@@ -246,6 +257,7 @@ pub async fn insert_transaction_if_absent(
 }
 
 pub async fn update_transaction(connection: &mut SqliteConnection, transaction: &Transaction) -> CoreResult<()> {
+    validate_money(transaction.amount)?;
     sqlx::query(
         "UPDATE transactions SET date = $1, \"accountId\" = $2, \"type\" = $3, amount = $4, category = $5, description = $6, checked = $7, \"isTransfer\" = $8, \"linkedTransactionId\" = $9 WHERE id = $10",
     )
@@ -358,6 +370,7 @@ pub async fn list_budgets(pool: &DbPool) -> CoreResult<Vec<Budget>> {
 }
 
 async fn execute_insert_budget(connection: &mut SqliteConnection, verb: &str, budget: &Budget) -> CoreResult<bool> {
+    validate_money(budget.amount)?;
     let statement =
         format!("{verb} INTO budgets (id, name, amount, category, \"accountId\") VALUES ($1, $2, $3, $4, $5)");
     let result = sqlx::query(&statement)
@@ -382,6 +395,7 @@ pub async fn insert_budget_if_absent(connection: &mut SqliteConnection, budget: 
 }
 
 pub async fn update_budget(connection: &mut SqliteConnection, budget: &Budget) -> CoreResult<()> {
+    validate_money(budget.amount)?;
     sqlx::query("UPDATE budgets SET name = $1, amount = $2, category = $3, \"accountId\" = $4 WHERE id = $5")
         .bind(&budget.name)
         .bind(budget.amount)
@@ -440,6 +454,7 @@ async fn execute_insert_scheduled(
     verb: &str,
     scheduled: &ScheduledTransaction,
 ) -> CoreResult<bool> {
+    validate_money(scheduled.amount)?;
     let statement = format!(
         "{verb} INTO scheduled_transactions (id, description, amount, \"type\", frequency, \"accountId\", \"nextDate\", category, \"toAccountId\", \"includeInForecast\", \"budgetId\", \"endDate\") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
     );
@@ -463,6 +478,7 @@ async fn execute_insert_scheduled(
 }
 
 pub async fn update_scheduled(connection: &mut SqliteConnection, scheduled: &ScheduledTransaction) -> CoreResult<()> {
+    validate_money(scheduled.amount)?;
     sqlx::query(
         "UPDATE scheduled_transactions SET description = $1, amount = $2, \"type\" = $3, frequency = $4, \"accountId\" = $5, \"nextDate\" = $6, category = $7, \"toAccountId\" = $8, \"includeInForecast\" = $9, \"budgetId\" = $10, \"endDate\" = $11 WHERE id = $12",
     )
@@ -497,6 +513,16 @@ pub async fn delete_scheduled(connection: &mut SqliteConnection, id: &str) -> Co
 
 /// Remplace toutes les données métier (import `.dmx`), dans l'ordre imposé par les clés étrangères.
 pub async fn replace_all_data(connection: &mut SqliteConnection, data: &AppData) -> CoreResult<()> {
+    for value in data
+        .accounts
+        .iter()
+        .map(|item| item.initial_balance)
+        .chain(data.transactions.iter().map(|item| item.amount))
+        .chain(data.scheduled.iter().map(|item| item.amount))
+        .chain(data.budgets.iter().map(|item| item.amount))
+    {
+        validate_money(value)?;
+    }
     for (table, context) in [
         ("transactions", "nettoyage des transactions"),
         ("scheduled_transactions", "nettoyage des échéances"),

@@ -33,6 +33,26 @@ jobs:
       - name: Tests
         run: cargo test -p dmx-core -p dmx-bridge -p dmx-ffi
 
+  web:
+    name: PWA et Worker
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Dépendances verrouillées
+        working-directory: pwa
+        run: bun install --frozen-lockfile
+      - name: Typage, tests et build PWA
+        working-directory: pwa
+        run: |
+          bunx tsc --noEmit
+          bun test
+          bun run build
+      - name: Contrats du Worker
+        run: bun test cloudflare/managed-bridge/src/index.test.ts
+
   linux:
     name: Linux (GTK4 / libadwaita)
     runs-on: ubuntu-24.04

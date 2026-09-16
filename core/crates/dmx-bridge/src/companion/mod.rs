@@ -26,6 +26,7 @@ mod settings;
 mod state;
 mod types;
 mod url;
+mod validation;
 
 use self::api::route_api_request;
 use self::assets::serve_static_asset;

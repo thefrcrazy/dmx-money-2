@@ -5,7 +5,8 @@
 
 use crate::dates::{days_between, parse_date, same_month};
 use crate::metrics::{
-    balance_summary, cents, euros, monthly_summary, relevant_transactions, signed_cents, BalanceSummary, MonthlySummary,
+    balance_summary, cents, euros, is_internal_transfer, monthly_summary, relevant_transactions, signed_cents,
+    BalanceSummary, MonthlySummary,
 };
 use crate::models::{Account, Budget, Transaction, TransactionType, TRANSFER_CATEGORY_ID};
 use crate::snapshot::{is_selected, CategoryDisplay, Snapshot};
@@ -107,7 +108,8 @@ pub fn dashboard(snapshot: &Snapshot, filter: &[String], today: NaiveDate) -> Da
     let monthly_expense_cents = cents(month.expenses);
     let mut expenses_by_category: Vec<(String, i64)> = Vec::new();
     for transaction in relevant_transactions(snapshot, filter) {
-        if transaction.transaction_type != TransactionType::Expense
+        if is_internal_transfer(transaction)
+            || transaction.transaction_type != TransactionType::Expense
             || !parse_date(&transaction.date).is_some_and(|date| same_month(date, today))
         {
             continue;

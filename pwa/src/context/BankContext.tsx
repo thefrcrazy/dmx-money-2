@@ -1,3 +1,4 @@
+import { applyTransactionUpdate } from '../utils/transactionUpdate';
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Account, Transaction, Category, ScheduledTransaction, BankContextType, AppData, Budget } from '../types';
@@ -536,7 +537,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const updateTransaction = useCallback(async (transaction: Transaction) => {
         await dbService.updateTransaction(transaction);
-        setTransactions(prev => prev.map(t => t.id === transaction.id ? transaction : t));
+        setTransactions(prev => applyTransactionUpdate(prev, transaction));
     }, []);
 
     const deleteTransaction = useCallback(async (id: string) => {
@@ -556,7 +557,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const updated = { ...transaction, checked: !transaction.checked };
         await dbService.updateTransaction(updated);
-        setTransactions(prev => prev.map(t => t.id === id ? updated : t));
+        setTransactions(prev => applyTransactionUpdate(prev, updated));
     }, [transactions]);
 
     const processDueScheduledTransactions = useCallback(async () => {

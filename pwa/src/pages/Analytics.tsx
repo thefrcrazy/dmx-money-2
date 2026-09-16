@@ -148,7 +148,7 @@ const Analytics: React.FC = () => {
     }, [transactions, dateRange]);
 
     const expensesByCategory = useMemo(() => {
-        const expenses = filteredTransactions.filter(t => t.type === 'expense');
+        const expenses = filteredTransactions.filter(t => t.type === 'expense' && !t.isTransfer && t.category !== 'transfer');
         const byCategory = expenses.reduce((acc, t) => {
             acc[t.category] = (acc[t.category] || 0) + t.amount;
             return acc;
@@ -168,7 +168,7 @@ const Analytics: React.FC = () => {
     }, [filteredTransactions, categories]);
 
     const incomeByCategory = useMemo(() => {
-        const income = filteredTransactions.filter(t => t.type === 'income');
+        const income = filteredTransactions.filter(t => t.type === 'income' && !t.isTransfer && t.category !== 'transfer');
         const byCategory = income.reduce((acc, t) => {
             acc[t.category] = (acc[t.category] || 0) + t.amount;
             return acc;
@@ -207,7 +207,8 @@ const Analytics: React.FC = () => {
 
         // Pre-group transactions by period key to avoid O(N*M) complexity
         const grouped = filteredTransactions.reduce((acc, t) => {
-            const date = new Date(t.date);
+            if (t.isTransfer || t.category === 'transfer') return acc;
+            const date = new Date(`${t.date}T00:00:00`);
             const key = isShortRange ? format(date, 'yyyy-MM-dd') : format(date, 'yyyy-MM');
             if (!acc[key]) acc[key] = { income: 0, expense: 0 };
             if (t.type === 'income') acc[key].income += t.amount;

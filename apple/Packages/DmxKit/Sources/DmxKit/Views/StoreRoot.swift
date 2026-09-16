@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Racine des vues hébergées : injecte le store et applique la couleur d'accentuation choisie.
 public struct StoreRoot<Content: View>: View {
+    @Environment(\.colorScheme) private var inheritedColorScheme
     @ObservedObject private var store: AppStore
     private let content: Content
 
@@ -13,7 +14,17 @@ public struct StoreRoot<Content: View>: View {
     public var body: some View {
         content
             .environmentObject(store)
+            .environment(\.colorScheme, resolvedColorScheme)
             .accentColor(DmxColors.accent(store.settings.accentColor))
+    }
+    // AppKit changes its appearance separately. Explicitly pass forced themes to every
+    // hosted SwiftUI page, including views retained while they are off screen on Catalina.
+    private var resolvedColorScheme: ColorScheme {
+        switch store.settings.theme {
+        case .light: return .light
+        case .dark: return .dark
+        case .system: return inheritedColorScheme
+        }
     }
 }
 

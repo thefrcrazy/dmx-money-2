@@ -95,6 +95,7 @@ export default {
       }
       return await deleteAcmeTxt(request, env, device.record);
     } catch (error) {
+      if (error instanceof InputError) return jsonResponse({ error: error.message }, error.status);
       console.error("managed_bridge_error", safeError(error));
       return jsonResponse({ error: "internal_error" }, 500);
     }
@@ -241,8 +242,11 @@ async function authorizeRegistration(
   const existing = normalizeId(body.existingDeviceId);
   if (existing) {
     const record = await env.DEVICES.get<DeviceRecord>(deviceKey(existing), "json");
-    if (record && timingSafeEqual(providedHash, record.secretHash)) {
-      return null;
+    if (record) {
+      // The shared enrollment secret must never rotate another device's credentials.
+      return timingSafeEqual(providedHash, record.secretHash)
+        ? null
+        : jsonResponse({ error: "unauthorized" }, 401);
     }
   }
 
@@ -457,12 +461,44 @@ async function cloudflareFetch<T = unknown>(
   return parsed.result;
 }
 
+class InputError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 async function readJson<T>(request: Request): Promise<T> {
+  const limit = 32_768;
   const contentLength = Number(request.headers.get("content-length") || "0");
-  if (contentLength > 32_768) {
-    throw new Error("payload_too_large");
+  if (contentLength > limit) throw new InputError("payload_too_large", 413);
+  const reader = request.body?.getReader();
+  if (!reader) throw new InputError("invalid_json", 400);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) {
+        await reader.cancel();
+        throw new InputError("payload_too_large", 413);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
   }
-  return (await request.json()) as T;
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  try {
+    const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error();
+    // All request fields in this API are optional strings, validated further by each route.
+    if (Object.values(value).some(field => field !== null && typeof field !== "string")) throw new Error();
+    return value as T;
+  } catch {
+    throw new InputError("invalid_json", 400);
+  }
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

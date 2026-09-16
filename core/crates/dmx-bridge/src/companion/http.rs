@@ -1,6 +1,28 @@
 use super::*;
+use std::sync::atomic::AtomicUsize;
 
 const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
+const MAX_HEADER_BYTES: usize = 32 * 1024;
+const MAX_CONNECTIONS: usize = 64;
+
+struct ConnectionPermit(Arc<AtomicUsize>);
+
+impl ConnectionPermit {
+    fn acquire(active: &Arc<AtomicUsize>) -> Option<Self> {
+        active
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+                (count < MAX_CONNECTIONS).then_some(count + 1)
+            })
+            .ok()
+            .map(|_| Self(active.clone()))
+    }
+}
+
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 pub(super) fn server_loop(
     listener: TcpListener,
@@ -11,13 +33,23 @@ pub(super) fn server_loop(
 ) {
     log::info!("Mobile companion server started");
 
+    let active = Arc::new(AtomicUsize::new(0));
     while !stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, _)) => {
+                let Some(permit) = ConnectionPermit::acquire(&active) else {
+                    drop(stream);
+                    continue;
+                };
                 let host = host.clone();
                 let security = security.clone();
                 let tls_config = tls_config.clone();
-                thread::spawn(move || handle_stream(stream, host, security, tls_config));
+                if let Err(error) = thread::Builder::new().name("dmx-http".into()).spawn(move || {
+                    let _permit = permit;
+                    handle_stream(stream, host, security, tls_config);
+                }) {
+                    log::warn!("Mobile companion worker creation failed: {error}");
+                }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(50));
@@ -100,14 +132,20 @@ fn read_request<S: Read>(stream: &mut S) -> Result<HttpRequest, String> {
         }
         buffer.extend_from_slice(&temp[..read]);
 
-        if buffer.len() > MAX_BODY_BYTES {
+        if buffer.len() > MAX_BODY_BYTES + MAX_HEADER_BYTES + 4 {
             return Err("Requête HTTP trop volumineuse".to_string());
         }
 
         if header_end.is_none() {
             if let Some(index) = find_header_end(&buffer) {
+                if index > MAX_HEADER_BYTES {
+                    return Err("En-têtes HTTP trop volumineux".into());
+                }
                 header_end = Some(index);
-                content_length = parse_content_length(&String::from_utf8_lossy(&buffer[..index]));
+                let text = std::str::from_utf8(&buffer[..index]).map_err(|_| "En-têtes HTTP invalides".to_string())?;
+                content_length = parse_content_length(text)?;
+            } else if buffer.len() > MAX_HEADER_BYTES {
+                return Err("En-têtes HTTP trop volumineux".into());
             }
         }
 
@@ -142,7 +180,10 @@ fn read_request<S: Read>(stream: &mut S) -> Result<HttpRequest, String> {
         }
     }
 
-    let body_end = body_start + content_length.min(buffer.len().saturating_sub(body_start));
+    let body_end = body_start + content_length;
+    if buffer.len() < body_end {
+        return Err("Corps HTTP incomplet".into());
+    }
     Ok(HttpRequest {
         method,
         path,
@@ -155,18 +196,27 @@ fn find_header_end(buffer: &[u8]) -> Option<usize> {
     buffer.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
-fn parse_content_length(header_text: &str) -> usize {
-    header_text
-        .lines()
-        .find_map(|line| {
-            let (key, value) = line.split_once(':')?;
-            if key.trim().eq_ignore_ascii_case("content-length") {
-                value.trim().parse::<usize>().ok()
-            } else {
-                None
+fn parse_content_length(header_text: &str) -> Result<usize, String> {
+    let mut length = None;
+    for line in header_text.lines().skip(1) {
+        let (key, value) = line.split_once(':').ok_or("En-tête HTTP invalide")?;
+        if key.trim().eq_ignore_ascii_case("transfer-encoding") {
+            // This single-request server accepts fixed-length bodies only.
+            return Err("Transfer-Encoding non pris en charge".into());
+        }
+        if key.trim().eq_ignore_ascii_case("content-length") {
+            let value = value.trim();
+            if length.is_some() || value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+                return Err("Content-Length invalide ou répété".into());
             }
-        })
-        .unwrap_or(0)
+            let parsed = value.parse::<usize>().map_err(|_| "Content-Length invalide")?;
+            if parsed > MAX_BODY_BYTES {
+                return Err("Requête HTTP trop volumineuse".into());
+            }
+            length = Some(parsed);
+        }
+    }
+    Ok(length.unwrap_or(0))
 }
 
 fn handle_request(request: HttpRequest, host: &BridgeHost, security: &ServerSecurity) -> HttpResponse {
@@ -279,5 +329,59 @@ fn handle_api_request(request: HttpRequest, path: String, host: &BridgeHost) -> 
             response
         }
         Err(error) => error_response(500, &error),
+    }
+}
+
+#[cfg(test)]
+mod framing_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn connection_limit_releases_capacity() {
+        let active = Arc::new(AtomicUsize::new(0));
+        let mut permits: Vec<_> = (0..MAX_CONNECTIONS)
+            .map(|_| ConnectionPermit::acquire(&active).unwrap())
+            .collect();
+        assert!(ConnectionPermit::acquire(&active).is_none());
+        permits.pop();
+        assert!(ConnectionPermit::acquire(&active).is_some());
+        drop(permits);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn rejects_invalid_ambiguous_and_oversized_lengths() {
+        for headers in [
+            "Content-Length: nope",
+            "Content-Length: -1",
+            "Content-Length: +1",
+            "Content-Length: 18446744073709551615",
+            "Content-Length: 8388609",
+            "Content-Length: 0\r\nContent-Length: 1",
+            "Transfer-Encoding: chunked",
+            "Content-Length: 0\r\nTransfer-Encoding: chunked",
+        ] {
+            let request = format!("POST /api/test HTTP/1.1\r\n{headers}\r\n\r\n");
+            assert!(read_request(&mut Cursor::new(request)).is_err(), "{headers}");
+        }
+    }
+
+    #[test]
+    fn rejects_truncated_bodies_and_unbounded_headers() {
+        assert!(read_request(&mut Cursor::new(b"POST / HTTP/1.1\r\nContent-Length: 8\r\n\r\n{}")).is_err());
+        assert!(read_request(&mut Cursor::new(vec![b'x'; MAX_HEADER_BYTES + 1])).is_err());
+    }
+
+    #[test]
+    fn reads_complete_bodies_and_empty_requests() {
+        let request = read_request(&mut Cursor::new(b"POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}")).unwrap();
+        assert_eq!(request.body, b"{}");
+        assert!(
+            read_request(&mut Cursor::new(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"))
+                .unwrap()
+                .body
+                .is_empty()
+        );
     }
 }

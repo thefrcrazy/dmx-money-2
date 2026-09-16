@@ -232,3 +232,61 @@ fn pages_redirect_or_404_without_local_assets() {
     assert_eq!(status, 404);
     let _ = NoopEvents;
 }
+
+#[test]
+fn mobile_rejects_invalid_amounts_and_unbalanced_transfers_without_writes() {
+    let harness = Harness::start();
+    for amount in [-1.0, 0.001, 1e308] {
+        let payload = json!({"id":"bad", "date":"2026-09-16", "accountId":"acc", "type":"expense", "amount":amount, "category":"5", "description":"test", "checked":false}).to_string();
+        assert_eq!(
+            harness.request("POST", "/api/transactions", Some(&payload), true).0,
+            400
+        );
+    }
+    let from = json!({"id":"from", "date":"2026-09-16", "accountId":"a", "type":"expense", "amount":10, "category":"transfer", "description":"test", "checked":false,"isTransfer":true,"linkedTransactionId":"to"});
+    let to = json!({"id":"to", "date":"2026-09-16", "accountId":"b", "type":"income", "amount":11, "category":"transfer", "description":"test", "checked":false,"isTransfer":true,"linkedTransactionId":"from"});
+    let payload = json!({"fromTransaction":from,"toTransaction":to}).to_string();
+    assert_eq!(harness.request("POST", "/api/transfers", Some(&payload), true).0, 400);
+    let (_, _, journal) = harness.request("GET", "/api/transactions", None, true);
+    assert_eq!(journal, "[]");
+}
+
+#[test]
+fn transfer_updates_are_atomic_and_cannot_retarget_unrelated_transactions() {
+    let harness = Harness::start();
+    for id in ["a", "b"] {
+        let account =
+            json!({"id":id,"name":id,"type":"Courant","initialBalance":100,"color":"#3b82f6","icon":"Wallet"})
+                .to_string();
+        assert_eq!(harness.request("POST", "/api/accounts", Some(&account), true).0, 201);
+    }
+    let from = json!({"id":"from", "date":"2026-09-16", "accountId":"a", "type":"expense", "amount":10, "category":"transfer", "description":"test", "checked":false,"isTransfer":true,"linkedTransactionId":"to"});
+    let to = json!({"id":"to", "date":"2026-09-16", "accountId":"b", "type":"income", "amount":10, "category":"transfer", "description":"test", "checked":false,"isTransfer":true,"linkedTransactionId":"from"});
+    let payload = json!({"fromTransaction":from,"toTransaction":to}).to_string();
+    assert_eq!(harness.request("POST", "/api/transfers", Some(&payload), true).0, 201);
+    assert_eq!(harness.request("POST", "/api/transfers", Some(&payload), true).0, 200);
+    let mut edited = from.clone();
+    edited["amount"] = json!(25);
+    edited["checked"] = json!(true);
+    assert_eq!(
+        harness
+            .request("PUT", "/api/transactions", Some(&edited.to_string()), true)
+            .0,
+        200
+    );
+    let (_, _, body) = harness.request("GET", "/api/transactions", None, true);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&body).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows
+        .iter()
+        .all(|row| row["amount"].as_f64() == Some(25.0) && row["checked"] == true));
+    edited["linkedTransactionId"] = json!("other");
+    assert_eq!(
+        harness
+            .request("PUT", "/api/transactions", Some(&edited.to_string()), true)
+            .0,
+        400
+    );
+    // Stale retries must not produce a half-old, half-new transfer.
+    assert_eq!(harness.request("POST", "/api/transfers", Some(&payload), true).0, 409);
+}

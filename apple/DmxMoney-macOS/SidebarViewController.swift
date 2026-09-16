@@ -45,7 +45,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         outlineView.addTableColumn(column)
         outlineView.outlineTableColumn = column
         outlineView.headerView = nil
-        outlineView.selectionHighlightStyle = .sourceList
+        outlineView.selectionHighlightStyle = .regular
         outlineView.floatsGroupRows = false
         outlineView.indentationPerLevel = 0
         outlineView.rowSizeStyle = .medium
@@ -54,7 +54,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         outlineView.dataSource = self
         outlineView.delegate = self
         if #available(macOS 11.0, *) {
-            outlineView.style = .sourceList
+            outlineView.style = .plain
         }
 
         let scrollView = NSScrollView()
@@ -166,7 +166,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let node = item as? Node else { return nil }
-        let cell = NSTableCellView()
+        let cell = node.route == nil ? NSTableCellView() : SidebarRouteCell()
         let label = NSTextField(labelWithString: node.route == nil ? node.title.uppercased() : node.title)
         label.translatesAutoresizingMaskIntoConstraints = false
         label.lineBreakMode = .byTruncatingTail
@@ -200,6 +200,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             ])
         }
         return cell
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        SidebarRowView()
     }
 
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
@@ -247,6 +251,11 @@ final class SidebarButton: NSButton {
         fatalError("init(coder:) n'est pas utilisé")
     }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
     private func updateAppearance() {
         contentTintColor = isActive ? .controlAccentColor : (tint == .labelColor ? .secondaryLabelColor : tint)
         attributedTitle = NSAttributedString(string: title, attributes: [
@@ -254,5 +263,41 @@ final class SidebarButton: NSButton {
             .font: NSFont.systemFont(ofSize: 13, weight: isActive ? .semibold : .regular),
         ])
         layer?.backgroundColor = isActive ? NSColor.controlAccentColor.withAlphaComponent(0.15).cgColor : nil
+    }
+}
+
+/// Match template icons and text to AppKit's selection background in both appearances.
+final class SidebarRouteCell: NSTableCellView {
+    override var allowsVibrancy: Bool { false }
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { updateColors() }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+    }
+
+    private func updateColors() {
+        let selected = backgroundStyle == .emphasized
+        textField?.textColor = selected ? .alternateSelectedControlTextColor : .labelColor
+        imageView?.contentTintColor = selected ? .alternateSelectedControlTextColor : .secondaryLabelColor
+    }
+}
+
+/// A translucent accent keeps the source-list selection readable in inactive windows too.
+final class SidebarRowView: NSTableRowView {
+    override var allowsVibrancy: Bool { false }
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard selectionHighlightStyle != .none else { return }
+        NSColor.controlAccentColor.withAlphaComponent(isEmphasized ? 0.18 : 0.10).setFill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 6, yRadius: 6).fill()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
 }

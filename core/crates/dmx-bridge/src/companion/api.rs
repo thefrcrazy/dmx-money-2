@@ -53,6 +53,12 @@ pub(super) async fn route_api_request(
     let id = parts.get(2).map(String::as_str);
     let method = request.method.as_str();
 
+    if matches!(method, "POST" | "PUT") && !(resource == "scheduled" && id == Some("process-due")) {
+        if let Err(error) = super::validation::validate(resource, &request.body) {
+            return Ok((error_response(400, &error), false));
+        }
+    }
+
     match (method, resource) {
         ("GET", "status") => Ok((
             json_response(200, json!({ "ok": true, "dataVersion": get_data_version(pool).await? })),
@@ -89,6 +95,15 @@ pub(super) async fn route_api_request(
         )),
         ("POST", "transactions") => {
             let transaction: Transaction = parse_json(&request.body)?;
+            if transaction.is_transfer {
+                return Ok((
+                    error_response(
+                        400,
+                        "Utilisez la route de virement pour créer les deux contreparties ensemble.",
+                    ),
+                    false,
+                ));
+            }
             in_transaction!(pool, "ajout de transaction", |connection| {
                 repo::insert_transaction_if_absent(connection, &transaction)
             });
@@ -96,9 +111,46 @@ pub(super) async fn route_api_request(
         }
         ("PUT", "transactions") => {
             let transaction: Transaction = parse_json(&request.body)?;
-            in_transaction!(pool, "mise à jour de transaction", |connection| {
-                repo::update_transaction(connection, &transaction)
-            });
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(|error| map_db_error(error, "mise à jour de transaction"))?;
+            let Some(previous) = load_transaction(&mut tx, &transaction.id).await? else {
+                return Ok((error_response(404, "Transaction introuvable."), false));
+            };
+            if previous.is_transfer != transaction.is_transfer
+                || previous.linked_transaction_id != transaction.linked_transaction_id
+            {
+                return Ok((
+                    error_response(400, "La liaison d'un virement ne peut pas être remplacée."),
+                    false,
+                ));
+            }
+            if let Some(linked) = transaction.linked_transaction_id.as_deref() {
+                let Some(mut counterpart) = load_transaction(&mut tx, linked).await? else {
+                    return Ok((error_response(400, "Contrepartie introuvable."), false));
+                };
+                if !counterpart.is_transfer
+                    || counterpart.linked_transaction_id.as_deref() != Some(transaction.id.as_str())
+                    || counterpart.account_id == transaction.account_id
+                    || counterpart.transaction_type == transaction.transaction_type
+                {
+                    return Ok((error_response(400, "Contrepartie invalide."), false));
+                }
+                counterpart.amount = transaction.amount;
+                counterpart.date = transaction.date.clone();
+                counterpart.description = transaction.description.clone();
+                counterpart.checked = transaction.checked;
+                repo::update_transaction(&mut tx, &counterpart)
+                    .await
+                    .map_err(core_error)?;
+            }
+            repo::update_transaction(&mut tx, &transaction)
+                .await
+                .map_err(core_error)?;
+            tx.commit()
+                .await
+                .map_err(|error| map_db_error(error, "mise à jour de transaction"))?;
             Ok((ok(200), true))
         }
         ("DELETE", "transactions") => {
@@ -114,6 +166,14 @@ pub(super) async fn route_api_request(
                 .begin()
                 .await
                 .map_err(|error| map_db_error(error, "ajout de virement"))?;
+            let from = load_transaction(&mut tx, &payload.from_transaction.id).await?;
+            let to = load_transaction(&mut tx, &payload.to_transaction.id).await?;
+            if from.is_some() || to.is_some() {
+                if from.as_ref() == Some(&payload.from_transaction) && to.as_ref() == Some(&payload.to_transaction) {
+                    return Ok((ok(200), false));
+                }
+                return Ok((error_response(409, "Identifiants de virement déjà utilisés."), false));
+            }
             repo::insert_transaction_if_absent(&mut tx, &payload.from_transaction)
                 .await
                 .map_err(core_error)?;
@@ -246,4 +306,13 @@ fn extract_id(path_id: Option<&str>, body: &[u8]) -> Result<String, String> {
         return Ok(id.to_string());
     }
     parse_json::<DeletePayload>(body).map(|payload| payload.id)
+}
+
+async fn load_transaction(connection: &mut SqliteConnection, id: &str) -> Result<Option<Transaction>, String> {
+    let row = sqlx::query("SELECT * FROM transactions WHERE id = $1")
+        .bind(id)
+        .fetch_optional(connection)
+        .await
+        .map_err(|error| map_db_error(error, "lecture de transaction"))?;
+    Ok(row.as_ref().map(repo::transaction_from_row))
 }

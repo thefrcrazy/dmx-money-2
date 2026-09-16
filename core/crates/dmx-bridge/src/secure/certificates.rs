@@ -1,4 +1,5 @@
 use super::*;
+use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 
 #[derive(Debug, Deserialize)]
 struct DnsJsonResponse {
@@ -26,12 +27,11 @@ pub async fn load_tls_config(
 
     let cert_file = fs::File::open(&paths.cert).map_err(|error| format!("Certificat HTTPS illisible: {error}"))?;
     let key_file = fs::File::open(&paths.key).map_err(|error| format!("Clé HTTPS illisible: {error}"))?;
-    let certs = rustls_pemfile::certs(&mut BufReader::new(cert_file))
+    let certs = CertificateDer::pem_reader_iter(cert_file)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("Certificat HTTPS invalide: {error}"))?;
-    let key = rustls_pemfile::private_key(&mut BufReader::new(key_file))
-        .map_err(|error| format!("Clé HTTPS invalide: {error}"))?
-        .ok_or_else(|| "Clé HTTPS manquante".to_string())?;
+    let key = PrivateKeyDer::from_pem_reader(key_file)
+        .map_err(|error| format!("Clé HTTPS invalide ou manquante: {error}"))?;
     let config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)

@@ -104,6 +104,7 @@ public struct DmxIcon: View {
 
 /// Pastille arrondie teintée de la couleur d'un compte ou d'une catégorie.
 public struct IconBadge: View {
+    @Environment(\.colorScheme) private var colorScheme
     private let icon: String
     private let colorHex: String
     private let size: CGFloat
@@ -122,7 +123,7 @@ public struct IconBadge: View {
             RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
                 .fill(filled ? color : color.opacity(0.14))
             DmxIcon(icon, size: size * 0.5)
-                .foregroundColor(filled ? .white : color)
+                .foregroundColor(IconContrast.color(hex: colorHex, filled: filled, dark: colorScheme == .dark))
         }
         .frame(width: size, height: size)
     }

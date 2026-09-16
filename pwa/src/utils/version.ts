@@ -20,6 +20,24 @@ export const compareVersions = (left: string, right: string) => {
         const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
         if (difference !== 0) return difference;
     }
+    const prerelease = (value: string) => value.trim().split('+', 1)[0].split('-').slice(1).join('-');
+    const leftPre = prerelease(left);
+    const rightPre = prerelease(right);
+    if (!leftPre || !rightPre) return leftPre ? -1 : rightPre ? 1 : 0;
+    const leftIds = leftPre.split('.');
+    const rightIds = rightPre.split('.');
+    for (let index = 0; index < Math.max(leftIds.length, rightIds.length); index += 1) {
+        const a = leftIds[index];
+        const b = rightIds[index];
+        if (a === undefined) return -1;
+        if (b === undefined) return 1;
+        if (a === b) continue;
+        const aNumeric = /^\d+$/.test(a);
+        const bNumeric = /^\d+$/.test(b);
+        if (aNumeric && bNumeric) return BigInt(a) < BigInt(b) ? -1 : 1;
+        if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+        return a < b ? -1 : 1;
+    }
     return 0;
 };
 
