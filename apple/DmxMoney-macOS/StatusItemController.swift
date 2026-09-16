@@ -61,7 +61,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
         menu.addItem(action("Synchroniser", #selector(sync)))
-        menu.addItem(action("Rechercher les mises à jour…", #selector(checkForUpdates)))
+        menu.addItem(action("Vérifier les mises à jour…", #selector(checkForUpdates)))
         menu.addItem(action("Quitter DmxMoney", #selector(quit)))
     }
 

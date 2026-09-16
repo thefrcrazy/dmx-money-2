@@ -187,13 +187,6 @@ private struct Sidebar: View {
             List(selection: $route) {
                 row(.categories)
                 row(.settings)
-                if let check = actions.checkForUpdates {
-                    Button(action: check) {
-                        Label("Rechercher les mises à jour", systemImage: "arrow.down.circle")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                }
                 Button {
                     // Pas de confirmation : la fenêtre peut se fermer sans quitter, quitter est
                     // donc un choix explicite.
@@ -210,7 +203,7 @@ private struct Sidebar: View {
             }
             .listStyle(.sidebar)
             .scrollDisabled(true)
-            .frame(height: actions.checkForUpdates == nil ? 104 : 136)
+            .frame(height: 104)
             Text("DmxMoney • v\(AppInfo.version)")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)

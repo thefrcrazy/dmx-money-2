@@ -31,18 +31,6 @@
             <NavigationView.PaneFooter>
                 <StackPanel Padding="12,4,12,12" Spacing="4">
                     <Button
-                        x:Name="CheckUpdatesButton"
-                        Click="OnCheckUpdates"
-                        HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Left"
-                        Background="Transparent"
-                        BorderThickness="0">
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <local:AppIcon Icon="RefreshCw" FontSize="16" />
-                            <TextBlock Text="Vérifier les mises à jour" />
-                        </StackPanel>
-                    </Button>
-                    <Button
                         x:Name="QuitButton"
                         Click="OnQuit"
                         HorizontalAlignment="Stretch"

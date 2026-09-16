@@ -199,7 +199,7 @@ private struct AboutSettings: View {
                     Button {
                         check()
                     } label: {
-                        Label("Rechercher les mises à jour…", systemImage: "arrow.down.circle")
+                        Label("Vérifier les mises à jour…", systemImage: "arrow.down.circle")
                     }
                     Toggle(isOn: $includePrereleases) {
                         Label("Autoriser les versions pré-release", systemImage: "flask")

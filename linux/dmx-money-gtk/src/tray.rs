@@ -113,7 +113,7 @@ pub fn start(store: &Rc<Store>, window: &adw::ApplicationWindow) {
             );
             items.push(
                 StandardItem {
-                    label: "Rechercher les mises à jour…".into(),
+                    label: "Vérifier les mises à jour…".into(),
                     activate: Box::new(|tray: &mut Self| {
                         let _ = tray.sender.send_blocking(TrayAction::CheckUpdates);
                     }),

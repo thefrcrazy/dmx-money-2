@@ -36,7 +36,7 @@ enum MainMenu {
         let menu = NSMenu()
         menu.addItem(item("À propos de DmxMoney", #selector(NSApplication.orderFrontStandardAboutPanel(_:))))
         let updates = item(
-            "Rechercher les mises à jour…",
+            "Vérifier les mises à jour…",
             #selector(UpdateChecker.checkForUpdates(_:)),
             target: UpdateChecker.shared
         )

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.2-rc.4 - 2026-09-16
+
+### Interface & Ergonomie
+
+- Épuration de la barre latérale : suppression du bouton d'action dans le pied de navigation pour une interface épurée et sans encombrement.
+- Libellé officiel macOS : adoption du libellé standard « Vérifier les mises à jour… » dans le menu de l'application et la barre des menus.
+- Vérification périodique des mises à jour : contrôle silencieux et automatique toutes les 24 heures (au démarrage et en tâche de fond).
+
 ## 2.0.2-rc.3 - 2026-09-16
 
 ### Mises à jour & Système

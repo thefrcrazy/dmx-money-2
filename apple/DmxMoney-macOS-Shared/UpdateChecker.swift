@@ -94,11 +94,19 @@ final class UpdateChecker: NSObject {
         super.init()
     }
 
-    // MARK: - Points d'entrée
+    private var periodicTimer: Timer?
 
-    /// Vérification silencieuse au lancement, au plus une fois par jour.
+    /// Vérification silencieuse au lancement, puis toutes les 24 heures en tâche de fond.
     func checkInBackgroundIfNeeded() {
         guard isAvailable else { return }
+
+        if periodicTimer == nil {
+            // Vérification périodique toutes les 6 heures si l'application reste ouverte
+            periodicTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
+                self?.checkInBackgroundIfNeeded()
+            }
+        }
+
         let defaults = UserDefaults.standard
         let last = defaults.double(forKey: lastCheckKey)
         let now = Date().timeIntervalSince1970

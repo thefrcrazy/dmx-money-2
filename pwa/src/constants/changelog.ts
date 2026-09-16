@@ -12,6 +12,24 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.0.2-rc.4",
+        date: "2026-09-16",
+        title: "Épuration de la navigation et vérifications automatiques",
+        changes: [
+            "Libellé officiel « Vérifier les mises à jour… » conforme aux standards macOS.",
+            "Suppression du bouton de mise à jour dans le pied de la barre latérale pour une navigation épurée.",
+            "Vérification automatique et discrète en tâche de fond programmée toutes les 24 heures.",
+            "Accès direct aux mises à jour conservé dans les menus système et la page Réglages."
+        ],
+        features: [
+            {
+                title: "Navigation simplifiée",
+                description: "La barre latérale retrouve sa clarté sans boutons superflus.",
+                icon: "Sparkles"
+            }
+        ]
+    },
+    {
         version: "2.0.2-rc.3",
         date: "2026-09-16",
         title: "Mises à jour automatiques et pré-releases",

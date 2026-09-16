@@ -478,14 +478,6 @@ public sealed partial class MainWindow : Window
         Activate();
     }
 
-    private async void OnCheckUpdates(object sender, RoutedEventArgs args)
-    {
-        if (shell is not null)
-        {
-            await shell.Store.Platform.CheckForUpdatesAsync();
-        }
-    }
-
     private void OnQuit(object sender, RoutedEventArgs args) => Quit();
 
     private void Quit()

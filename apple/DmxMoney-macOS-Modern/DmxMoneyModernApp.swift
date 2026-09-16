@@ -137,7 +137,7 @@ struct DmxCommands: Commands {
         }
         CommandGroup(after: .appInfo) {
             if UpdateChecker.shared.isAvailable {
-                Button("Rechercher les mises à jour…") { UpdateChecker.shared.checkForUpdates(nil) }
+                Button("Vérifier les mises à jour…") { UpdateChecker.shared.checkForUpdates(nil) }
             }
             Button("Nouveautés") { store?.present(.whatsNew) }
         }
@@ -170,7 +170,7 @@ struct MenuBarSummary: View {
             store.reload()
             store.refreshBridgeStatus()
         }
-        Button("Rechercher les mises à jour…") { UpdateChecker.shared.checkForUpdates(nil) }
+        Button("Vérifier les mises à jour…") { UpdateChecker.shared.checkForUpdates(nil) }
         Divider()
         Button("Quitter DmxMoney") { NSApp.terminate(nil) }
     }
