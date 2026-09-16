@@ -7,7 +7,7 @@ const parseVersion = (value: string): number[] | null => {
     return parts.map(Number);
 };
 
-const compareVersions = (left: string, right: string) => {
+export const compareVersions = (left: string, right: string) => {
     const leftParts = parseVersion(left);
     const rightParts = parseVersion(right);
 

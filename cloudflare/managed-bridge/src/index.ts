@@ -125,17 +125,21 @@ async function serveStaticAsset(request: Request, env: Env): Promise<Response> {
 }
 
 function staticAssetKey(pathname: string): string {
-  const cleaned = pathname.replace(/^\/+/, "");
-  if (cleaned === "mobile" || cleaned === "mobile/") {
+  const cleaned = pathname.replace(/^\/+/, "").replace(/\/+$/, "");
+  if (cleaned === "mobile" || cleaned === "") {
     return "index.html";
   }
-  if (cleaned.startsWith("mobile/assets/")) {
-    return cleaned.replace(/^mobile\//, "");
+  if (cleaned.startsWith("mobile/")) {
+    const rest = cleaned.replace(/^mobile\//, "");
+    if (!rest.includes(".")) {
+      return "index.html";
+    }
+    return rest;
   }
-  if (cleaned.startsWith("mobile/") && !cleaned.includes(".")) {
+  if (!cleaned.includes(".")) {
     return "index.html";
   }
-  return cleaned || "index.html";
+  return cleaned;
 }
 
 function staticHeaders(key: string, env: Env): Headers {
@@ -163,7 +167,11 @@ function staticHeaders(key: string, env: Env): Headers {
       "upgrade-insecure-requests",
     ].join("; "),
   );
-  headers.set("cache-control", key.includes("-") && key.startsWith("assets/")
+  const isStaticMediaOrHashed = (key.includes("-") && key.startsWith("assets/"))
+    || key.endsWith(".png")
+    || key.endsWith(".ico")
+    || key.endsWith(".svg");
+  headers.set("cache-control", isStaticMediaOrHashed
     ? "public, max-age=31536000, immutable"
     : "no-cache");
   return headers;

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Wallet, LayoutDashboard, PieChart, TrendingUp, Settings, Receipt, CalendarClock, Tag, Calculator, ChevronLeft, ChevronRight, MoreHorizontal, RefreshCw, Wifi, WifiOff, Power, CheckCircle2 } from 'lucide-react';
+import { Wallet, LayoutDashboard, PieChart, TrendingUp, Settings, Receipt, CalendarClock, Tag, Calculator, ChevronLeft, ChevronRight, MoreHorizontal, RefreshCw, Wifi, WifiOff, Power, CheckCircle2, Sparkles } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { useUpdater } from '../hooks/useUpdater';
 import MultiSelect from '../components/ui/MultiSelect';
@@ -7,6 +7,7 @@ import TitleBar from '../components/ui/TitleBar';
 import { useFinancialMetrics } from '../hooks/useFinancialMetrics';
 import { formatCurrency } from '../utils/format';
 import { hasTauriRuntime, isMobileCompanion } from '../utils/runtime';
+import AssistantModal from '../components/AssistantModal';
 
 
 interface LayoutProps {
@@ -32,6 +33,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [sidebarTooltip, setSidebarTooltip] = useState<{ label: string; top: number } | null>(null);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const mainRef = React.useRef<HTMLElement>(null);
   const pullStartXRef = React.useRef(0);
   const pullStartYRef = React.useRef(0);
@@ -464,6 +466,15 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
               </div>
             </div>
             <div className="h-8 w-px bg-gray-200 dark:bg-neutral-700 opacity-50 hidden xs:block"></div>
+            <button
+              type="button"
+              onClick={() => setIsAssistantOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary-500/10 text-primary-600 dark:text-primary-400 hover:bg-primary-500/20 text-xs font-semibold transition-colors cursor-pointer"
+              title="Ouvrir l'assistant"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>Assistant</span>
+            </button>
             <div className="text-right">
               <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">Actuel</div>
               <div className="text-base sm:text-xl font-bold text-gray-900 dark:text-gray-100">
@@ -498,6 +509,19 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
             )}
           </div>
         </header>
+
+        {/* Bouton assistant mobile : accessible partout, placé sous le badge de connexion */}
+        {isMobileMode && (
+          <button
+            type="button"
+            onClick={() => setIsAssistantOpen(true)}
+            aria-label="Ouvrir l'assistant"
+            title="Assistant DmxMoney"
+            className="md:hidden fixed right-4 top-[calc(env(safe-area-inset-top)+48px)] z-30 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 dark:bg-[#1c1c1e]/90 shadow-md border border-black/5 dark:border-white/10 backdrop-blur-md text-primary-600 dark:text-primary-400 active:scale-95 transition-transform cursor-pointer"
+          >
+            <Sparkles className="h-4 w-4" />
+          </button>
+        )}
 
         <main
           ref={mainRef}
@@ -686,6 +710,12 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
           </button>
         </div>
       </nav>
+
+      {/* Assistant vocal universel modal / feuille mobile */}
+      <AssistantModal
+        isOpen={isAssistantOpen}
+        onClose={() => setIsAssistantOpen(false)}
+      />
     </div>
   );
 };

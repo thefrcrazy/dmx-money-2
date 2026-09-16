@@ -15,6 +15,7 @@ import { NavigationProvider, useNavigation } from './context/NavigationContext';
 import { ToastProvider } from './context/ToastContext';
 import { useUpdater } from './hooks/useUpdater';
 import { LATEST_VERSION } from './constants/changelog';
+import { compareVersions } from './utils/version';
 import ReleaseNotesModal from './components/ui/ReleaseNotesModal';
 import { useBank } from './context/BankContext';
 import { applyMobileCompanionPairingUrl, getMobilePlatform, hasMobileCompanionSetup, hasMobilePasskeySetup, isMobileCompanion, isStandalonePwa } from './utils/runtime';
@@ -659,9 +660,20 @@ const AppContent: React.FC = () => {
   // Initialize updater polling (silent check at startup + interval)
   useUpdater();
 
+  const LAST_SEEN_CHANGELOG_KEY = 'dmxmoney.pwa.lastSeenChangelog';
+
   // Check for new version at startup
   useEffect(() => {
-    if (settings.lastSeenVersion !== undefined && settings.lastSeenVersion !== LATEST_VERSION) {
+    try {
+      const localSeen = localStorage.getItem(LAST_SEEN_CHANGELOG_KEY);
+      if (localSeen && compareVersions(localSeen, LATEST_VERSION) >= 0) {
+        return;
+      }
+    } catch {
+      // Ignorer
+    }
+
+    if (settings.lastSeenVersion !== undefined && compareVersions(settings.lastSeenVersion, LATEST_VERSION) < 0) {
       // Small delay to ensure smooth transition
       const timer = setTimeout(() => {
         setShowReleaseNotes(true);
@@ -672,6 +684,11 @@ const AppContent: React.FC = () => {
 
   const handleCloseReleaseNotes = async () => {
     setShowReleaseNotes(false);
+    try {
+      localStorage.setItem(LAST_SEEN_CHANGELOG_KEY, LATEST_VERSION);
+    } catch {
+      // Ignorer
+    }
     await updateLastSeenVersion(LATEST_VERSION);
   };
 

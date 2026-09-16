@@ -3,9 +3,10 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/png" href="./logo.png" />
-  <link rel="apple-touch-icon" href="./pwa-192.png" />
-  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="preload" as="image" href="/logo.png" />
+  <link rel="icon" type="image/png" href="/logo.png" />
+  <link rel="apple-touch-icon" href="/pwa-192.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#f9fafb" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
@@ -102,8 +103,9 @@
   <div id="root">
     <div id="splash-screen">
       <div class="logo-container">
-        <img src="./logo.png" alt="DmxMoney Logo"
-          style="width: 120px; height: 120px; filter: drop-shadow(0 10px 15px rgba(0,0,0,0.1));" />
+        <img src="/logo.png" alt="DmxMoney Logo" width="120" height="120" loading="eager" decoding="sync"
+          style="width: 120px; height: 120px; filter: drop-shadow(0 10px 15px rgba(0,0,0,0.1));"
+          onerror="if (this.src !== './logo.png') this.src = './logo.png';" />
       </div>
       <div class="spinner" style="width: 30px; height: 30px; border-width: 2px;"></div>
       <div class="loading-text">DmxMoney se prépare...</div>

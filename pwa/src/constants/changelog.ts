@@ -12,6 +12,29 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.0.2",
+        date: "2026-09-16",
+        title: "Compagnon mobile iOS et assistant vocal",
+        changes: [
+            "PWA du compagnon mobile : interface repensée selon les codes graphiques d'iOS.",
+            "Assistant vocal universel : dictez vos opérations et posez vos questions depuis n'importe quelle page.",
+            "Accès instantané sans écran blanc grâce au cache de navigation du service worker.",
+            "Correctif d'appairage mobile avec le pont local HTTPS."
+        ],
+        features: [
+            {
+                title: "Assistant vocal partout",
+                description: "Dictez vos dépenses et revenus au micro depuis n'importe où sur l'application.",
+                icon: "Sparkles"
+            },
+            {
+                title: "Design iOS & rapidité",
+                description: "Feuilles qui montent du bas, onglets flottants et chargement instantané.",
+                icon: "Smartphone"
+            }
+        ]
+    },
+    {
         version: "1.0.22",
         date: "2026-09-01",
         title: "Trousseau réparé, pont mobile rétabli",

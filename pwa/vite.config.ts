@@ -10,11 +10,23 @@ export default defineConfig({
     tailwindcss()
   ],
   build: {
-    target: 'es2020',
-    minify: 'terser',
+    target: "es2020",
+    minify: "terser",
     terserOptions: {
       safari10: true,
     },
-    cssTarget: 'safari15'
-  }
+    cssTarget: "safari15",
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/recharts") || id.includes("node_modules/d3")) {
+            return "vendor-charts";
+          }
+          if (id.includes("node_modules/lucide-react")) {
+            return "vendor-icons";
+          }
+        },
+      },
+    },
+  },
 })

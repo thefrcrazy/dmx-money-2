@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
-import { Sparkles, ArrowUp, AlertCircle, Loader2 } from 'lucide-react';
-import Card from './ui/Card';
-import { dbService, type AssistantAnswer } from '../services/db';
+import React, { useState } from "react";
+import { Sparkles, ArrowUp, AlertCircle, Loader2, Mic, MicOff } from "lucide-react";
+import Card from "./ui/Card";
+import { dbService, type AssistantAnswer } from "../services/db";
+import { useSpeechRecognition } from "../hooks/useSpeechRecognition";
 
 const EXAMPLES = [
-    'ajoute 12,50 € en alimentation',
-    'quel est mon solde ?',
-    'combien me reste-t-il en carburant ?',
-    'prochaines échéances',
+  "ajoute 12,50 € en alimentation",
+  "quel est mon solde ?",
+  "combien me reste-t-il en carburant ?",
+  "prochaines échéances",
 ];
 
 /**
@@ -18,59 +19,116 @@ const EXAMPLES = [
  * Le mobile n'affiche que ce que le Mac renvoie.
  */
 const AssistantBar: React.FC = () => {
-    const [text, setText] = useState('');
-    const [answer, setAnswer] = useState<AssistantAnswer | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [isAsking, setIsAsking] = useState(false);
+  const [text, setText] = useState("");
+  const [answer, setAnswer] = useState<AssistantAnswer | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isAsking, setIsAsking] = useState(false);
 
-    const ask = async (value: string) => {
-        const question = value.trim();
-        if (!question || isAsking) return;
-        setIsAsking(true);
-        setError(null);
-        try {
-            const result = await dbService.askAssistant(question);
-            setAnswer(result);
-            setText('');
-            // Les écritures remontent par la surveillance de `dataVersion` du compagnon : la
-            // liste se recharge d'elle-même au tick suivant.
-        } catch (requestError) {
-            setError(requestError instanceof Error ? requestError.message : 'Demande impossible.');
-            setAnswer(null);
-        } finally {
-            setIsAsking(false);
-        }
-    };
+  const ask = async (value: string) => {
+    const question = value.trim();
+    if (!question || isAsking) return;
+    setIsAsking(true);
+    setError(null);
+    try {
+      const result = await dbService.askAssistant(question);
+      setAnswer(result);
+      setText("");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Demande impossible.");
+      setAnswer(null);
+    } finally {
+      setIsAsking(false);
+    }
+  };
 
-    return (
-        <Card title="Assistant" icon={Sparkles} subtitle="Dictez une opération ou posez une question">
-            {/* Champ de message, bouton d'envoi rond intégré comme dans Messages. */}
-            <form
-                className="relative"
-                onSubmit={event => {
-                    event.preventDefault();
-                    void ask(text);
-                }}
+  const {
+    isListening,
+    error: speechError,
+    isSupported: isSpeechSupported,
+    startListening,
+    stopListening,
+  } = useSpeechRecognition({
+    onResult: (transcript) => {
+      setText(transcript);
+    },
+    onEnd: (finalTranscript) => {
+      const trimmed = finalTranscript.trim();
+      if (trimmed) {
+        setText(trimmed);
+        void ask(trimmed);
+      }
+    },
+  });
+
+  const toggleListening = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  };
+
+  return (
+    <Card title="Assistant" icon={Sparkles} subtitle="Dictez une opération ou posez une question">
+      {/* Champ de message avec bouton micro et bouton d'envoi. */}
+      <form
+        className="relative flex items-center"
+        onSubmit={event => {
+          event.preventDefault();
+          if (isListening) stopListening();
+          void ask(text);
+        }}
+      >
+        <input
+          type="text"
+          value={text}
+          onChange={event => setText(event.target.value)}
+          placeholder={isListening ? "Parlez maintenant..." : "Ajoute 12,50 € en alimentation"}
+          enterKeyHint="send"
+          disabled={isAsking}
+          aria-label="Demande à l'assistant"
+          className={`app-input h-11 w-full !pr-20 text-sm transition-all ${
+            isListening ? "border-red-500 ring-2 ring-red-500/20" : ""
+          }`}
+        />
+        <div className="absolute right-1.5 flex items-center gap-1">
+          {isSpeechSupported && (
+            <button
+              type="button"
+              onClick={toggleListening}
+              disabled={isAsking}
+              className={`flex h-8 w-8 items-center justify-center rounded-full transition-all ${
+                isListening
+                  ? "bg-red-500 text-white animate-pulse"
+                  : "bg-[var(--ios-fill-tertiary)] text-[var(--ios-label)] hover:bg-[var(--ios-fill-secondary)] active:scale-95"
+              }`}
+              aria-label={isListening ? "Arrêter l'écoute" : "Dicter vocalement"}
             >
-                <input
-                    type="text"
-                    value={text}
-                    onChange={event => setText(event.target.value)}
-                    placeholder="Ajoute 12,50 € en alimentation"
-                    enterKeyHint="send"
-                    disabled={isAsking}
-                    aria-label="Demande à l'assistant"
-                    className="app-input h-11 w-full !pr-12 text-sm"
-                />
-                <button
-                    type="submit"
-                    disabled={isAsking || !text.trim()}
-                    className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-primary-500 text-white transition-opacity disabled:opacity-30"
-                    aria-label="Envoyer"
-                >
-                    {isAsking ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" strokeWidth={2.5} />}
-                </button>
-            </form>
+              {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </button>
+          )}
+          <button
+            type="submit"
+            disabled={isAsking || !text.trim()}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-500 text-white transition-opacity disabled:opacity-30 active:scale-95"
+            aria-label="Envoyer"
+          >
+            {isAsking ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" strokeWidth={2.5} />}
+          </button>
+        </div>
+      </form>
+
+      {isListening && (
+        <p className="mt-2 text-xs text-red-500 animate-pulse font-medium">
+          À l'écoute... Le message sera envoyé dès la fin de votre phrase.
+        </p>
+      )}
+
+      {speechError && (
+        <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+          {speechError}
+        </p>
+      )}
 
             {!answer && !error && (
                 <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 scrollbar-hide md:mx-0 md:flex-wrap md:px-0" data-no-pull-refresh="true">

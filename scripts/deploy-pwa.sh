@@ -25,7 +25,7 @@ for root, dirs, files in os.walk(dist_dir):
         full_path = os.path.join(root, f)
         key = os.path.relpath(full_path, dist_dir)
         cmd = [
-            'bunx', 'wrangler', 'kv', 'key', 'put',
+            'npx', 'wrangler', 'kv', 'key', 'put',
             f'--config={config}',
             '--binding=ASSETS',
             '--remote',
