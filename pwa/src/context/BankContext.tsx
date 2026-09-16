@@ -560,10 +560,16 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, [transactions]);
 
     const processDueScheduledTransactions = useCallback(async () => {
-        if (isLoading || isProcessingScheduledRef.current) return 0;
+        if (isLoading || isProcessingScheduledRef.current || (isMobileCompanion() && mobileConnectionState !== 'connected')) return 0;
 
         isProcessingScheduledRef.current = true;
         try {
+            // The connected desktop owns recurrence generation and deduplication.
+            if (isMobileCompanion()) {
+                const processed = await dbService.processDueScheduled();
+                await loadBankData();
+                return processed;
+            }
             const { processedScheduled, newTransactions, hasScheduledChanges } = await processDueScheduledItems(scheduled, transactions);
 
             if (newTransactions.length > 0) {
@@ -580,7 +586,24 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } finally {
             isProcessingScheduledRef.current = false;
         }
-    }, [isLoading, scheduled, transactions]);
+    }, [isLoading, scheduled, transactions, loadBankData, mobileConnectionState]);
+
+    const dueRefreshRef = useRef(processDueScheduledTransactions);
+    dueRefreshRef.current = processDueScheduledTransactions;
+    useEffect(() => {
+        if (isLoading) return;
+        const refresh = () => {
+            if (document.visibilityState === 'visible') void dueRefreshRef.current();
+        };
+        const timer = window.setInterval(refresh, 60_000);
+        window.addEventListener('focus', refresh);
+        document.addEventListener('visibilitychange', refresh);
+        return () => {
+            window.clearInterval(timer);
+            window.removeEventListener('focus', refresh);
+            document.removeEventListener('visibilitychange', refresh);
+        };
+    }, [isLoading]);
 
     // --- Categories ---
     const addCategory = useCallback(async (category: Omit<Category, 'id'>) => {

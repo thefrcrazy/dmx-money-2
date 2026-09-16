@@ -1,3 +1,4 @@
+import { useLocalToday } from '../hooks/useLocalToday';
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Plus, Calendar, Trash2, Edit2, Clock, X, Tag, Sparkles, Search, ChevronDown, ArrowRightLeft } from 'lucide-react';
@@ -116,6 +117,7 @@ const getRecurrenceIdentity = (item: RecurrenceIdentityInput) => [
 ].join('|');
 
 const Scheduled: React.FC = () => {
+    const localToday = useLocalToday();
     const { accounts, transactions, scheduled, categories, budgets, addScheduled, updateScheduled, deleteScheduled, filterAccount } = useBank();
     const { showToast } = useToast();
     const { settings, updateDismissedScheduledSuggestions, updateSettings } = useSettings();
@@ -146,7 +148,7 @@ const Scheduled: React.FC = () => {
             : scheduled.filter(t => filterAccount.includes(t.accountId));
 
         if (dueRange !== 'all') {
-            const today = new Date();
+            const today = new Date(localToday);
             today.setHours(0, 0, 0, 0);
             const endDate = addMonthsSafely(today, SCHEDULED_DUE_RANGE_MONTHS[dueRange]);
             endDate.setHours(23, 59, 59, 999);
@@ -212,7 +214,8 @@ const Scheduled: React.FC = () => {
         searchTerm,
         accountMap,
         categoryMap,
-        budgetMap
+        budgetMap,
+        localToday
     ]);
 
     const monthlySuggestions = useMemo<MonthlySuggestion[]>(() => {
@@ -278,7 +281,7 @@ const Scheduled: React.FC = () => {
             }
         });
 
-        const today = new Date();
+        const today = new Date(localToday);
         today.setHours(0, 0, 0, 0);
 
         return Array.from(groups.values())
@@ -323,7 +326,7 @@ const Scheduled: React.FC = () => {
                 return dateDiff || a.description.localeCompare(b.description, 'fr');
             })
             .filter(suggestion => !dismissedSuggestionKeys.has(suggestion.suggestionKey));
-    }, [transactions, scheduled, filterAccount, dismissedSuggestionKeys]);
+    }, [transactions, scheduled, filterAccount, dismissedSuggestionKeys, localToday]);
 
     useEffect(() => {
         if (monthlySuggestions.length === 0) {

@@ -82,7 +82,7 @@ impl Route {
     }
 
     pub fn shows_balances(self) -> bool {
-        matches!(self, Route::Dashboard | Route::Transactions)
+        true
     }
 
     pub fn sections() -> [(&'static str, &'static [Route]); 3] {
@@ -152,6 +152,7 @@ pub struct Store {
     next_listener: Cell<u64>,
     hooks: RefCell<UiHooks>,
     bridge_enabled: Cell<bool>,
+    last_due_check: Cell<Option<(chrono::NaiveDate, i64)>>,
 }
 
 impl Store {
@@ -185,6 +186,7 @@ impl Store {
             next_listener: Cell::new(0),
             hooks: RefCell::new(UiHooks::default()),
             bridge_enabled: Cell::new(bridge_enabled),
+            last_due_check: Cell::new(None),
         });
         store.refresh_balances();
         Ok(store)
@@ -423,7 +425,14 @@ impl Store {
     /// Crée les opérations des échéances arrivées à terme.
     pub fn process_due(self: &Rc<Self>) {
         let today = self.today();
+        let Some(version) = self.read(|engine| engine.data_version()) else {
+            return;
+        };
+        if self.last_due_check.get() == Some((today, version)) {
+            return;
+        }
         if let Some(result) = self.read(|engine| engine.process_due_scheduled(today)) {
+            self.last_due_check.set(Some((today, version)));
             if result.created_transactions > 0 {
                 self.show_toast(&format!(
                     "{} échéance{} ajoutée{} au journal",

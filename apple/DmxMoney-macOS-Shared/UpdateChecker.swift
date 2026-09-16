@@ -13,15 +13,15 @@ import DmxKit
 ///   "version": "2.0.1",
 ///   "notes": "…",
 ///   "platforms": {
-///     "darwin-arm64":  { "url": "https://…-apple-silicon.dmg",  "minimumSystemVersion": "11.0" },
+///     "darwin-arm64":  { "url": "https://…-apple-silicon.dmg",  "minimumSystemVersion": "26.0" },
 ///     "darwin-x86_64": { "url": "https://…-intel-catalina.dmg", "minimumSystemVersion": "10.15" }
 ///   }
 /// }
 /// ```
 ///
 /// Aucune dépendance externe : Sparkle 2 n'est distribué qu'en binaire macOS 11+, ce qui
-/// empêcherait l'application de se lancer sous Catalina. On se limite donc à prévenir et à
-/// ouvrir la page de téléchargement ; l'installation reste un glisser-déposer.
+/// empêcherait l'application de se lancer sous Catalina. Le téléchargement utilise URLSession
+/// et le remplacement conserve une copie de secours jusqu’à la fin de l’installation.
 final class UpdateChecker: NSObject {
     static let shared = UpdateChecker()
 
@@ -95,6 +95,7 @@ final class UpdateChecker: NSObject {
     }
 
     private var periodicTimer: Timer?
+    private var isDownloading = false
 
     /// Vérification silencieuse au lancement, puis toutes les 24 heures en tâche de fond.
     func checkInBackgroundIfNeeded() {
@@ -124,6 +125,7 @@ final class UpdateChecker: NSObject {
     // MARK: - Vérification
 
     private func check(silent: Bool) {
+        guard !isDownloading else { return }
         var request = URLRequest(url: feedURL)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 15
@@ -266,69 +268,129 @@ final class UpdateChecker: NSObject {
         alert.messageText = "Téléchargement de DmxMoney \(version)"
         alert.informativeText = "La mise à jour est en cours de téléchargement… L'application redémarrera automatiquement une fois prête."
         let progress = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 300, height: 20))
-        progress.isIndeterminate = true
-        progress.startAnimation(nil)
+        progress.style = .bar
+        progress.isIndeterminate = false
+        progress.minValue = 0
+        progress.maxValue = 1
+        progress.doubleValue = 0
         alert.accessoryView = progress
         alert.addButton(withTitle: "Annuler")
 
-        var isCancelled = false
-        var downloadTask: URLSessionDownloadTask?
-        downloadTask = URLSession.shared.downloadTask(with: build.url) { [weak self] tempURL, _, error in
+        // A sheet keeps the main queue running throughout the download.
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else {
+            NSWorkspace.shared.open(build.url)
+            return
+        }
+        guard !isDownloading else { return }
+        isDownloading = true
+        let targetDMG = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DmxMoney-\(UUID().uuidString).dmg")
+        var finished = false
+        var result: Result<URL, Error>?
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 60
+        configuration.timeoutIntervalForResource = 600
+        let session = URLSession(configuration: configuration)
+        let task = session.downloadTask(with: build.url) { tempURL, response, error in
+            let downloaded: Result<URL, Error> = Result {
+                if let error { throw error }
+                guard let response = response as? HTTPURLResponse,
+                      (200...299).contains(response.statusCode), let tempURL else {
+                    throw URLError(.badServerResponse)
+                }
+                // URLSession deletes tempURL when this callback returns.
+                try FileManager.default.moveItem(at: tempURL, to: targetDMG)
+                return targetDMG
+            }
             DispatchQueue.main.async {
-                guard !isCancelled else { return }
-                NSApp.stopModal(withCode: .alertSecondButtonReturn)
-
-                guard let self = self, let tempURL = tempURL, error == nil else {
-                    let fail = NSAlert()
-                    fail.messageText = "Échec du téléchargement"
-                    fail.informativeText = error?.localizedDescription ?? "Impossible de télécharger la mise à jour."
-                    fail.addButton(withTitle: "Télécharger manuellement")
-                    fail.addButton(withTitle: "Fermer")
-                    if fail.runModal() == .alertFirstButtonReturn {
-                        NSWorkspace.shared.open(build.url)
-                    }
+                guard !finished else {
+                    try? FileManager.default.removeItem(at: targetDMG)
                     return
                 }
-
-                let targetDMG = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("DmxMoney-\(version)-\(UUID().uuidString).dmg")
-                try? FileManager.default.moveItem(at: tempURL, to: targetDMG)
-                self.applyDmgAndRestart(dmgURL: targetDMG)
+                result = downloaded
+                window.endSheet(alert.window, returnCode: .alertSecondButtonReturn)
             }
         }
-        downloadTask?.resume()
-
-        if alert.runModal() == .alertFirstButtonReturn {
-            isCancelled = true
-            downloadTask?.cancel()
+        let observation = task.progress.observe(\.fractionCompleted) { taskProgress, _ in
+            DispatchQueue.main.async {
+                guard !finished else { return }
+                progress.isIndeterminate = taskProgress.totalUnitCount <= 0
+                progress.doubleValue = taskProgress.fractionCompleted
+            }
         }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            finished = true
+            self?.isDownloading = false
+            observation.invalidate()
+            if response == .alertFirstButtonReturn || result == nil {
+                session.invalidateAndCancel()
+                try? FileManager.default.removeItem(at: targetDMG)
+                return
+            }
+            session.finishTasksAndInvalidate()
+            switch result! {
+            case .success(let url):
+                self?.applyDmgAndRestart(dmgURL: url)
+            case .failure(let error):
+                let fail = NSAlert()
+                fail.messageText = "Échec du téléchargement"
+                fail.informativeText = error.localizedDescription
+                fail.addButton(withTitle: "Télécharger manuellement")
+                fail.addButton(withTitle: "Fermer")
+                fail.beginSheetModal(for: window) { response in
+                    if response == .alertFirstButtonReturn { NSWorkspace.shared.open(build.url) }
+                }
+            }
+        }
+        task.resume()
     }
 
     private func applyDmgAndRestart(dmgURL: URL) {
         let bundlePath = Bundle.main.bundlePath
         let pid = ProcessInfo.processInfo.processIdentifier
 
+        // Pass paths as arguments: application paths can contain quotes or shell syntax.
+        // Stage a complete replacement before moving the installed application aside.
         let script = """
         #!/bin/sh
-        set -e
-        while kill -0 \(pid) 2>/dev/null; do
-            sleep 0.1
-        done
-
-        MOUNT_DIR=$(mktemp -d /tmp/dmx_mount_XXXXXX)
-        if /usr/bin/hdiutil attach "\(dmgURL.path)" -nobrowse -noverify -mountpoint "$MOUNT_DIR" -quiet; then
-            SRC_APP=$(find "$MOUNT_DIR" -maxdepth 1 -name "DmxMoney*.app" -o -name "*.app" | head -n 1)
-            if [ -n "$SRC_APP" ] && [ -d "$SRC_APP" ]; then
-                rm -rf "\(bundlePath)"
-                cp -pR "$SRC_APP" "\(bundlePath)"
-                xattr -dr com.apple.quarantine "\(bundlePath)" 2>/dev/null || true
+        set -eu
+        PID="$1"
+        DMG="$2"
+        APP="$3"
+        WORK=""
+        MOUNT_DIR=""
+        BACKUP=""
+        cleanup() {
+            STATUS=$?
+            if [ -n "$MOUNT_DIR" ]; then /usr/bin/hdiutil detach "$MOUNT_DIR" -quiet 2>/dev/null || true; fi
+            if [ -d "$BACKUP" ] && [ ! -e "$APP" ]; then
+                mv "$BACKUP" "$APP"
             fi
-            /usr/bin/hdiutil detach "$MOUNT_DIR" -quiet -force 2>/dev/null || true
-            rm -rf "$MOUNT_DIR"
+            if [ -n "$WORK" ]; then rm -rf "$WORK"; fi
+            rm -f "$DMG" "$0"
+            if [ "$STATUS" -ne 0 ]; then
+                /usr/bin/open -n "$APP" || true
+                /usr/bin/osascript -e 'display alert "DmxMoney" message "La mise à jour a échoué. La version précédente a été conservée. Relancez le téléchargement ou installez le DMG manuellement."' || true
+            fi
+        }
+        trap cleanup EXIT
+        WORK=$(/usr/bin/mktemp -d "${APP}.update.XXXXXX")
+        MOUNT_DIR="$WORK/mount"
+        BACKUP="$WORK/previous.app"
+        mkdir "$MOUNT_DIR"
+        /usr/bin/hdiutil attach "$DMG" -nobrowse -mountpoint "$MOUNT_DIR" -quiet
+        SRC_APP="$MOUNT_DIR/DmxMoney.app"
+        test -d "$SRC_APP"
+        test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$SRC_APP/Contents/Info.plist")" = "com.dmxmoney.app"
+        /usr/bin/codesign --verify --deep --strict "$SRC_APP"
+        /usr/bin/ditto "$SRC_APP" "$WORK/replacement.app"
+        while kill -0 "$PID" 2>/dev/null; do sleep 0.1; done
+        mv "$APP" "$BACKUP"
+        if ! mv "$WORK/replacement.app" "$APP"; then
+            mv "$BACKUP" "$APP"
+            exit 1
         fi
-
-        rm -f "\(dmgURL.path)"
-        /usr/bin/open -n "\(bundlePath)"
+        /usr/bin/open -n "$APP"
         """
 
         let scriptURL = FileManager.default.temporaryDirectory.appendingPathComponent("dmx_restart_\(pid).sh")
@@ -338,7 +400,7 @@ final class UpdateChecker: NSObject {
 
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/bin/sh")
-            proc.arguments = [scriptURL.path]
+            proc.arguments = [scriptURL.path, String(pid), dmgURL.path, bundlePath]
             try proc.run()
 
             NSApp.terminate(nil)

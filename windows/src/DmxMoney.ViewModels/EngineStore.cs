@@ -28,6 +28,8 @@ public sealed partial class EngineStore : ObservableObject, IDisposable
 
     private readonly Listener listener;
     private CancellationTokenSource? toastCancellation;
+    private bool processingDue;
+    private (string Day, long Version)? lastDueCheck;
 
     public DmxEngine Engine { get; }
 
@@ -182,12 +184,20 @@ public sealed partial class EngineStore : ObservableObject, IDisposable
     public void ProcessDueScheduled()
     {
         var today = Today;
+        var key = (today, DataVersion);
+        if (processingDue || lastDueCheck == key) return;
+        processingDue = true;
         _ = PerformAsync(engine => engine.ProcessDueScheduled(today), result =>
         {
+            processingDue = false;
+            lastDueCheck = key;
             if (result.CreatedTransactions > 0 || result.UpdatedScheduled > 0 || result.DeletedScheduled > 0)
             {
                 DueResult = result;
             }
+        }, message => {
+            processingDue = false;
+            ErrorMessage = message;
         });
     }
 

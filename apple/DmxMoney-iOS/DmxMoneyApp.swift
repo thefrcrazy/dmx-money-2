@@ -19,7 +19,7 @@ struct DmxMoneyApp: App {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                launcher.store?.processDueScheduled()
+                launcher.store?.startScheduledRefresh()
             }
         }
     }
@@ -52,6 +52,7 @@ final class Launcher: ObservableObject {
         didStartPostLaunch = true
         // En mode capture, la modale « Nouveautés » est une étape parmi d'autres.
         guard SnapshotRunner.directory == nil else { return }
+        store.startScheduledRefresh()
         store.presentWhatsNewIfNeeded()
     }
 }

@@ -1,12 +1,13 @@
 import { useMemo } from 'react';
+import { useLocalToday } from './useLocalToday';
 import { useBank } from '../context/BankContext';
 import { isSameMonth } from 'date-fns';
 
 export const useFinancialMetrics = () => {
     const { accounts, transactions, filterAccount } = useBank();
 
+    const now = useLocalToday();
     const metrics = useMemo(() => {
-        const now = new Date();
         const isAllAccounts = filterAccount.length === 0;
 
         // 1. Filter Transactions based on account selection
@@ -35,7 +36,7 @@ export const useFinancialMetrics = () => {
         // 4. Monthly Stats (Income vs Expenses)
         const monthTransactions = relevantTransactions.filter(t => {
             try {
-                return isSameMonth(new Date(t.date), now);
+                return t.category !== 'transfer' && isSameMonth(new Date(t.date + 'T00:00:00'), now);
             } catch (e) {
                 return false;
             }
@@ -59,7 +60,7 @@ export const useFinancialMetrics = () => {
             monthlySaved,
             relevantTransactions
         };
-    }, [accounts, transactions, filterAccount]);
+    }, [accounts, transactions, filterAccount, now]);
 
     return metrics;
 };

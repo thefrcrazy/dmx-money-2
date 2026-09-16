@@ -464,6 +464,102 @@
           }
         }
       }
+    },
+    "Faire un virement": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Faire un virement"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Make a transfer"
+          }
+        }
+      }
+    },
+    "Enregistre un virement entre deux comptes dans DmxMoney.": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enregistre un virement entre deux comptes dans DmxMoney."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Records a transfer between two accounts in DmxMoney."
+          }
+        }
+      }
+    },
+    "Compte source": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compte source"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Source account"
+          }
+        }
+      }
+    },
+    "Compte destination": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compte destination"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Destination account"
+          }
+        }
+      }
+    },
+    "Depuis quel compte ?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Depuis quel compte ?"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "From which account?"
+          }
+        }
+      }
+    },
+    "Vers quel compte ?": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vers quel compte ?"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To which account?"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

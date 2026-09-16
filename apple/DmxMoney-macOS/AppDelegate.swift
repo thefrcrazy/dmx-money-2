@@ -8,7 +8,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cloud: CloudSyncController?
     private var statusItemController: StatusItemController?
     private var cancellables = Set<AnyCancellable>()
-    private var lastDueCheck: String?
     private var pendingOpenURLs: [URL] = []
 
     // MARK: - Cycle de vie
@@ -51,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.showWindow(nil)
         statusItemController = StatusItemController(store: store, appDelegate: self)
 
-        runDueScheduled()
+        store.startScheduledRefresh()
         startBridge()
         // Après le premier cycle d'affichage : un panneau modal ouvert pendant la mise en page
         // de la fenêtre relancerait le rendu des pages SwiftUI hébergées.
@@ -103,9 +102,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func runDueScheduled() {
         guard let store = store else { return }
-        let today = store.today
-        guard lastDueCheck != today else { return }
-        lastDueCheck = today
         store.processDueScheduled()
     }
 
@@ -158,8 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cloud?.syncNow()
         store.reload()
         store.refreshBridgeStatus()
-        lastDueCheck = nil
-        runDueScheduled()
+        store.processDueScheduled(force: true)
     }
 
     @objc func exportBackup(_ sender: Any?) {

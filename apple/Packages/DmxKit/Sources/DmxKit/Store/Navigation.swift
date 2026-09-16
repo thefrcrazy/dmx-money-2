@@ -61,7 +61,7 @@ public enum AppRoute: String, CaseIterable, Identifiable {
 
     /// Pages qui affichent les soldes Pointé / Actuel dans la barre d'outils.
     public var showsBalances: Bool {
-        self == .dashboard || self == .transactions
+        true
     }
 
     public static let sidebarSections: [SidebarSection] = [

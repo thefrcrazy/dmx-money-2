@@ -11,30 +11,23 @@ fi
 
 "$DMX_ROOT/scripts/build-pwa.sh"
 
-python3 - <<PY
+python3 - <<'PYTHON'
 import os
 import subprocess
+from pathlib import Path
 
-dist_dir = "$DMX_ROOT/pwa/dist"
-config = "$CONFIG"
-
-for root, dirs, files in os.walk(dist_dir):
-    for f in files:
-        if f.startswith('.'):
-            continue
-        full_path = os.path.join(root, f)
-        key = os.path.relpath(full_path, dist_dir)
-        cmd = [
-            'npx', 'wrangler', 'kv', 'key', 'put',
-            '--namespace-id=b3d0c645407c48669e7232fa7e907c6e',
-            '--remote',
-            key,
-            f'--path={full_path}'
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        if res.returncode != 0:
-            print(f"Échec sur {key}: {res.stderr}")
-            exit(1)
-        print(f"✓ {key}")
-print("Déploiement PWA terminé avec succès.")
-PY
+root = Path(os.environ['DMX_ROOT'])
+dist = root / 'pwa/dist'
+config = root / 'cloudflare/managed-bridge/wrangler.local.toml'
+# Publish immutable assets first; entry points must never reference missing bundles.
+files = [path for path in dist.rglob('*') if path.is_file() and not path.name.startswith('.')]
+priority = lambda path: 2 if path.name == 'sw.js' else 1 if path.name == 'index.html' else 0
+for path in sorted(files, key=lambda path: (priority(path), str(path))):
+    key = path.relative_to(dist).as_posix()
+    subprocess.run([
+        'npx', 'wrangler', 'kv', 'key', 'put', key,
+        '--config', str(config), '--binding', 'ASSETS', '--remote', '--path', str(path),
+    ], check=True)
+    print(f'✓ {key}', flush=True)
+print('Déploiement PWA terminé avec succès.')
+PYTHON

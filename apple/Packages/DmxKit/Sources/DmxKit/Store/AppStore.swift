@@ -1,5 +1,10 @@
 import Combine
 import Foundation
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
 
 /// État partagé de l'application : moteur Rust, réglages, comptes, catégories et filtre global.
 ///
@@ -22,7 +27,9 @@ public final class AppStore: ObservableObject {
     /// Incrémenté à chaque changement de données ou de filtre : les pages se recalculent.
     @Published public private(set) var revision: Int = 0
     @Published public var errorMessage: String?
-    @Published public var route: AppRoute = .dashboard
+    @Published public var route: AppRoute = .dashboard {
+        didSet { if oldValue != route { processDueScheduled() } }
+    }
     @Published public var form: FormRequest?
     @Published public var confirmation: ConfirmRequest?
     @Published public var toast: String?
@@ -31,6 +38,34 @@ public final class AppStore: ObservableObject {
 
     private let queue = DispatchQueue(label: "com.dmxmoney.engine", qos: .userInitiated)
     private let listener = ListenerProxy()
+    private var dueTimer: Timer?
+    private var lifecycleObservers: [NSObjectProtocol] = []
+    private var processingDue = false
+    private var lastDueCheck: (day: String, version: Int64)?
+
+    /// Install once after the window exists; also refresh date-sensitive pages after midnight.
+    public func startScheduledRefresh() {
+        guard dueTimer == nil else { return }
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in self?.processDueScheduled() }
+        RunLoop.main.add(timer, forMode: .common)
+        dueTimer = timer
+        #if os(macOS)
+        let active = NSApplication.didBecomeActiveNotification
+        #else
+        let active = UIApplication.didBecomeActiveNotification
+        #endif
+        for name in [active, NSNotification.Name.NSCalendarDayChanged] {
+            lifecycleObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.processDueScheduled()
+            })
+        }
+        processDueScheduled()
+    }
+
+    deinit {
+        dueTimer?.invalidate()
+        lifecycleObservers.forEach(NotificationCenter.default.removeObserver)
+    }
 
     public init(engine: DmxEngine) {
         self.engine = engine
@@ -115,11 +150,21 @@ public final class AppStore: ObservableObject {
     }
 
     /// Crée les opérations des échéances arrivées à terme (au lancement et au retour au premier plan).
-    public func processDueScheduled() {
-        perform({ engine in try engine.processDueScheduled(today: DmxCore.today()) }) { [weak self] result in
+    public func processDueScheduled(force: Bool = false) {
+        let day = today
+        guard !processingDue, force || lastDueCheck?.day != day || lastDueCheck?.version != dataVersion else { return }
+        processingDue = true
+        let version = dataVersion
+        perform({ engine in try engine.processDueScheduled(today: day) }) { [weak self] result in
+            guard let self else { return }
+            self.processingDue = false
+            self.lastDueCheck = (day, version)
             if result.createdTransactions > 0 || result.updatedScheduled > 0 || result.deletedScheduled > 0 {
-                self?.dueResult = result
+                self.dueResult = result
             }
+        } failure: { [weak self] message in
+            self?.processingDue = false
+            self?.errorMessage = message
         }
     }
 

@@ -64,6 +64,7 @@ impl AssistantReply {
             summary: "Je n'ai pas compris la demande.".to_string(),
             details: vec![
                 "Essayez « ajoute 12,50 € en courses »,".to_string(),
+                "« virement de 50 € de Courant vers Livret A »,".to_string(),
                 "« quel est mon solde ? », « combien me reste-t-il en alimentation ? »,".to_string(),
                 "« prochaines échéances » ou « résumé du mois ».".to_string(),
             ],
@@ -75,42 +76,126 @@ impl AssistantReply {
 
 /// Traduit une phrase en intention. `None` si la demande n'est pas reconnue.
 pub fn interpret(snapshot: &Snapshot, text: &str, today: NaiveDate) -> Option<AssistantIntent> {
-    let normalized = normalize_search(text);
+    let normalized = crate::text::collapse_whitespace(&normalize_search(text));
     if normalized.is_empty() {
         return None;
     }
 
     if contains_any(
         &normalized,
-        &["echeance", "echeancier", "prelevement a venir", "a venir"],
+        &[
+            "echeance",
+            "echeancier",
+            "prelevement a venir",
+            "a venir",
+            "upcoming",
+            "scheduled",
+            "due payments",
+        ],
     ) {
         if contains_any(
             &normalized,
-            &["traite", "traiter", "applique", "appliquer", "enregistre les"],
+            &[
+                "traite",
+                "traiter",
+                "applique",
+                "appliquer",
+                "enregistre les",
+                "process",
+                "record due",
+            ],
         ) {
             return Some(AssistantIntent::ProcessDue);
         }
         return Some(AssistantIntent::Upcoming);
     }
 
-    if contains_any(&normalized, &["resume", "bilan", "ce mois", "du mois", "mois ci"])
-        && !contains_any(&normalized, &["budget", "reste"])
+    if contains_any(
+        &normalized,
+        &[
+            "resume",
+            "bilan",
+            "ce mois",
+            "du mois",
+            "mois ci",
+            "monthly summary",
+            "month summary",
+        ],
+    ) && !contains_any(&normalized, &["budget", "reste"])
     {
         return Some(AssistantIntent::MonthSummary);
     }
 
-    if contains_any(&normalized, &["budget", "reste", "restant", "reste t il", "enveloppe"]) {
+    if contains_any(
+        &normalized,
+        &["budget", "reste", "restant", "reste t il", "enveloppe", "remaining"],
+    ) {
         let category_id = find_category(snapshot, &normalized);
         return Some(AssistantIntent::BudgetRemaining { category_id });
     }
 
-    if contains_any(&normalized, &["solde", "combien j ai", "combien ai je", "combien sur"]) {
+    if contains_any(
+        &normalized,
+        &["solde", "combien j ai", "combien ai je", "combien sur", "balance"],
+    ) {
         return Some(AssistantIntent::Balance {
             account_id: find_account(snapshot, &normalized),
         });
     }
 
+    // An incomplete transfer must never fall through to an expense or guess an account.
+    if contains_any(
+        &normalized,
+        &["virement", "transfert", "vire", "virer", "transfer", "transfere"],
+    ) {
+        let (from_id, to_id) = find_transfer_accounts(snapshot, &normalized)?;
+        // Account names may contain digits (Livret A 2026, Account 2).
+        let mut amount_text = normalized.clone();
+        let mut names: Vec<_> = snapshot.accounts.iter().map(|a| normalize_search(&a.name)).collect();
+        names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+        for name in names {
+            if !name.is_empty() {
+                amount_text = amount_text.replace(&name, " ");
+            }
+        }
+        let amount = find_amount(&amount_text)?;
+        let mut draft = ops::new_transaction_draft(snapshot, &[], today);
+        draft.kind = TransactionType::Transfer;
+        draft.amount = amount;
+        draft.account_id = from_id;
+        draft.to_account_id = Some(to_id);
+        draft.category_id = crate::models::TRANSFER_CATEGORY_ID.to_string();
+        draft.description = "Virement".to_string();
+        return Some(AssistantIntent::AddTransaction(draft));
+    }
+
     // Reste le cas d'une saisie : il faut un montant.
+    if !contains_any(
+        &normalized,
+        &[
+            "ajout",
+            "note",
+            "depens",
+            "paye",
+            "achat",
+            "recu",
+            "recois",
+            "revenu",
+            "salaire",
+            "remboursement",
+            "encaisse",
+            "credit",
+            "add",
+            "spent",
+            "paid",
+            "expense",
+            "income",
+            "received",
+            "salary",
+        ],
+    ) {
+        return None;
+    }
     let amount = find_amount(&normalized)?;
     let kind = if contains_any(
         &normalized,
@@ -121,8 +206,10 @@ pub fn interpret(snapshot: &Snapshot, text: &str, today: NaiveDate) -> Option<As
             "salaire",
             "remboursement",
             "encaisse",
-            "vire sur",
             "credit",
+            "income",
+            "received",
+            "salary",
         ],
     ) {
         TransactionType::Income
@@ -192,6 +279,31 @@ pub fn draft_from_parts(
         phrase.push_str(&normalize_search(account));
     }
     let mut built = draft(snapshot, &phrase, amount, kind, today);
+    // Structured entities must resolve independently: category words cannot select an account.
+    if let Some(account) = account {
+        let matches: Vec<_> = snapshot
+            .accounts
+            .iter()
+            .filter(|a| a.id == account || normalize_search(&a.name) == normalize_search(account))
+            .collect();
+        built.account_id = if matches.len() == 1 {
+            matches[0].id.clone()
+        } else {
+            account.to_string()
+        };
+    }
+    if let Some(category) = category {
+        let matches: Vec<_> = snapshot
+            .categories
+            .iter()
+            .filter(|c| c.id == category || normalize_search(&c.name) == normalize_search(category))
+            .collect();
+        built.category_id = if matches.len() == 1 {
+            matches[0].id.clone()
+        } else {
+            category.to_string()
+        };
+    }
     if let Some(description) = description {
         let trimmed = description.trim();
         if !trimmed.is_empty() {
@@ -224,19 +336,46 @@ pub fn answer(snapshot: &Snapshot, intent: &AssistantIntent, today: NaiveDate) -
         }
         AssistantIntent::Upcoming => upcoming_reply(snapshot, today, intent),
         AssistantIntent::MonthSummary => month_reply(snapshot, today, intent),
-        AssistantIntent::AddTransaction(draft) => AssistantReply::read(
-            format!(
-                "{} de {} à enregistrer.",
-                if draft.kind == TransactionType::Income {
-                    "Revenu"
-                } else {
-                    "Dépense"
-                },
-                currency_fr(draft.amount)
-            ),
-            Vec::new(),
-            intent.clone(),
-        ),
+        AssistantIntent::AddTransaction(draft) => {
+            if draft.kind == TransactionType::Transfer {
+                let from_account = snapshot
+                    .accounts
+                    .iter()
+                    .find(|account| account.id == draft.account_id)
+                    .map(|account| account.name.clone())
+                    .unwrap_or_else(|| "Compte source".to_string());
+                let to_account = draft
+                    .to_account_id
+                    .as_ref()
+                    .and_then(|to_id| snapshot.accounts.iter().find(|account| account.id == *to_id))
+                    .map(|account| account.name.clone())
+                    .unwrap_or_else(|| "Compte destination".to_string());
+                AssistantReply::read(
+                    format!(
+                        "Virement de {} de {} vers {} à enregistrer.",
+                        currency_fr(draft.amount),
+                        from_account,
+                        to_account
+                    ),
+                    Vec::new(),
+                    intent.clone(),
+                )
+            } else {
+                AssistantReply::read(
+                    format!(
+                        "{} de {} à enregistrer.",
+                        if draft.kind == TransactionType::Income {
+                            "Revenu"
+                        } else {
+                            "Dépense"
+                        },
+                        currency_fr(draft.amount)
+                    ),
+                    Vec::new(),
+                    intent.clone(),
+                )
+            }
+        }
         AssistantIntent::ProcessDue => {
             AssistantReply::read("Échéances dues à traiter.".to_string(), Vec::new(), intent.clone())
         }
@@ -378,6 +517,27 @@ pub fn saved_reply(snapshot: &Snapshot, draft: &ops::TransactionDraft) -> Assist
         .find(|account| account.id == draft.account_id)
         .map(|account| account.name.clone())
         .unwrap_or_default();
+
+    if draft.kind == TransactionType::Transfer {
+        let to_account = draft
+            .to_account_id
+            .as_ref()
+            .and_then(|to_id| snapshot.accounts.iter().find(|account| account.id == *to_id))
+            .map(|account| account.name.clone())
+            .unwrap_or_else(|| "Compte destination".to_string());
+        return AssistantReply {
+            summary: format!(
+                "Virement de {} de {} vers {} enregistré.",
+                currency_fr(draft.amount),
+                account,
+                to_account
+            ),
+            details: Vec::new(),
+            changed: true,
+            intent: Some(AssistantIntent::AddTransaction(draft.clone())),
+        };
+    }
+
     let category = snapshot
         .categories
         .iter()
@@ -459,6 +619,9 @@ fn find_amount(normalized: &str) -> Option<f64> {
             continue;
         }
         let start = index;
+        if start > 0 && matches!(bytes[start - 1], '-' | '−') {
+            return None;
+        }
         let mut digits = String::new();
         let mut separator_seen = false;
         while index < bytes.len() {
@@ -487,7 +650,7 @@ fn find_amount(normalized: &str) -> Option<f64> {
             }
         }
         if let Ok(value) = digits.parse::<f64>() {
-            if value > 0.0 {
+            if value.is_finite() && value > 0.0 {
                 return Some(value);
             }
         }
@@ -497,6 +660,9 @@ fn find_amount(normalized: &str) -> Option<f64> {
 
 /// Compte dont le nom apparaît dans la phrase (le nom le plus long gagne).
 fn find_account(snapshot: &Snapshot, normalized: &str) -> Option<String> {
+    if let Some(account) = snapshot.accounts.iter().find(|account| account.id == normalized) {
+        return Some(account.id.clone());
+    }
     snapshot
         .accounts
         .iter()
@@ -510,6 +676,13 @@ fn find_account(snapshot: &Snapshot, normalized: &str) -> Option<String> {
 
 /// Catégorie dont le nom apparaît dans la phrase ; « Virement » est réservée aux virements.
 fn find_category(snapshot: &Snapshot, normalized: &str) -> Option<String> {
+    if let Some(category) = snapshot
+        .categories
+        .iter()
+        .find(|category| category.id == normalized && category.id != "transfer")
+    {
+        return Some(category.id.clone());
+    }
     snapshot
         .categories
         .iter()
@@ -524,4 +697,74 @@ fn find_category(snapshot: &Snapshot, normalized: &str) -> Option<String> {
         })
         .max_by_key(|(_, length)| *length)
         .map(|(id, _)| id)
+}
+
+/// Resolve exactly two unambiguous account mentions, with explicit direction markers.
+fn find_transfer_accounts(snapshot: &Snapshot, text: &str) -> Option<(String, String)> {
+    let mut matches = Vec::new();
+    for account in &snapshot.accounts {
+        let name = normalize_search(&account.name);
+        if name.is_empty() {
+            continue;
+        }
+        for (start, _) in text.match_indices(&name) {
+            let end = start + name.len();
+            if text[..start].chars().next_back().is_some_and(char::is_alphanumeric)
+                || text[end..].chars().next().is_some_and(char::is_alphanumeric)
+            {
+                continue;
+            }
+            matches.push((account, start, end));
+        }
+    }
+    // A longer account name wins, but identical names remain ambiguous.
+    let all = matches.clone();
+    matches.retain(|(_, start, end)| {
+        !all.iter().any(|(_, other_start, other_end)| {
+            other_start <= start && other_end >= end && other_end - other_start > end - start
+        })
+    });
+    matches.sort_by_key(|(_, start, _)| *start);
+    if matches.len() != 2 || matches[0].0.id == matches[1].0.id {
+        return None;
+    }
+    let (first, start, _) = matches[0];
+    let (second, second_start, _) = matches[1];
+    let destination = |before: &str| {
+        [
+            "vers",
+            "sur",
+            "a",
+            "au",
+            "to",
+            "into",
+            "vers le compte",
+            "sur le compte",
+            "to account",
+            "to the account",
+        ]
+        .iter()
+        .any(|marker| before.trim_end().ends_with(&format!(" {marker}")))
+    };
+    let source = |before: &str| {
+        [
+            "de",
+            "du",
+            "depuis",
+            "from",
+            "depuis le compte",
+            "du compte",
+            "from account",
+            "from the account",
+        ]
+        .iter()
+        .any(|marker| before.trim_end().ends_with(&format!(" {marker}")))
+    };
+    if source(&text[..start]) && destination(&text[..second_start]) {
+        Some((first.id.clone(), second.id.clone()))
+    } else if destination(&text[..start]) && source(&text[..second_start]) {
+        Some((second.id.clone(), first.id.clone()))
+    } else {
+        None
+    }
 }

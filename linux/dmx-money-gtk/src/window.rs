@@ -216,6 +216,7 @@ pub fn present(application: &adw::Application, store: Rc<Store>) {
 
     // --- Navigation ---
     let select_route = {
+        let store = store.clone();
         let stack = stack.clone();
         let rows = rows.clone();
         let sidebar_list = sidebar_list.clone();
@@ -224,6 +225,7 @@ pub fn present(application: &adw::Application, store: Rc<Store>) {
         let pages = pages.clone();
         let syncing = syncing.clone();
         move |target: Route| {
+            store.process_due();
             route.set(target);
             stack.set_visible_child_name(target.id());
             syncing.set(true);
@@ -332,6 +334,22 @@ pub fn present(application: &adw::Application, store: Rc<Store>) {
     }
 
     store.process_due();
+    let weak_store = Rc::downgrade(&store);
+    gtk::glib::timeout_add_seconds_local(60, move || {
+        let Some(store) = weak_store.upgrade() else {
+            return gtk::glib::ControlFlow::Break;
+        };
+        store.process_due();
+        gtk::glib::ControlFlow::Continue
+    });
+    let weak_store = Rc::downgrade(&store);
+    window.connect_is_active_notify(move |window| {
+        if window.is_active() {
+            if let Some(store) = weak_store.upgrade() {
+                store.process_due();
+            }
+        }
+    });
     start_bridge(&store);
     present_whats_new(&store);
     tray::start(&store, &window);

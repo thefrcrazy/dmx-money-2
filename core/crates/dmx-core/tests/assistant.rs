@@ -190,3 +190,178 @@ fn amount_parsing_accepts_both_separators() {
         }
     }
 }
+
+#[test]
+fn transfers_in_french_and_english_preserve_direction_and_balances() {
+    for sentence in [
+        "virement de 50 € de Compte Courant vers Livret A",
+        "transfère 50 euros depuis Compte Courant vers Livret A",
+        "transfer 50 euros from Compte Courant to Livret A",
+        "transfer 50 euros to Livret A from Compte Courant",
+        "virement de 50 € vers Livret A depuis Compte Courant",
+    ] {
+        let (engine, from) = engine_with_account();
+        let to = engine
+            .save_account(ops::AccountDraft {
+                name: "Livret A".into(),
+                ..ops::new_account_draft()
+            })
+            .unwrap();
+        let preview = engine.assistant(sentence, today(), false).unwrap();
+        assert!(!preview.changed);
+        assert_eq!(engine.snapshot().unwrap().transactions.len(), 0);
+        let reply = engine.assistant(sentence, today(), true).unwrap();
+        assert!(reply.changed, "{sentence}: {reply:?}");
+        assert!(reply.summary.contains("Virement"));
+        let snapshot = engine.snapshot().unwrap();
+        assert_eq!(snapshot.transactions.len(), 2);
+        let draft = match reply.intent.unwrap() {
+            AssistantIntent::AddTransaction(draft) => draft,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(draft.kind, TransactionType::Transfer);
+        assert_eq!(draft.account_id, from);
+        assert_eq!(draft.to_account_id, Some(to));
+        assert_eq!(draft.amount, 50.0);
+        assert!(plain(
+            &engine
+                .assistant("quel est mon solde ?", today(), false)
+                .unwrap()
+                .summary
+        )
+        .contains("1 000,00"));
+    }
+}
+
+#[test]
+fn incomplete_ambiguous_or_unknown_commands_do_not_write() {
+    let (engine, _) = engine_with_account();
+    engine
+        .save_account(ops::AccountDraft {
+            name: "Livret A".into(),
+            ..ops::new_account_draft()
+        })
+        .unwrap();
+    for sentence in [
+        "virement de 50 euros vers Livret A",
+        "transfer -50 from Compte Courant to Livret A",
+        "transfer 50 from Unknown to Livret A",
+        "virement de 50 de Compte Courant vers Compte Courant",
+        "transfer 50 Compte Courant Livret A",
+        "transfer from Compte Courant to Livret A",
+        "what happened on 12 September?",
+        "virement de 50 de Compte Courant vers Livret Absent",
+    ] {
+        let reply = engine.assistant(sentence, today(), true).unwrap();
+        assert!(!reply.changed, "{sentence}: {reply:?}");
+    }
+    assert!(engine.snapshot().unwrap().transactions.is_empty());
+    engine
+        .save_account(ops::AccountDraft {
+            name: "Livret A".into(),
+            ..ops::new_account_draft()
+        })
+        .unwrap();
+    assert!(
+        !engine
+            .assistant("transfer 50 from Compte Courant to Livret A", today(), true)
+            .unwrap()
+            .changed
+    );
+}
+
+#[test]
+fn english_read_intents_and_income_are_recognised() {
+    let (engine, _) = engine_with_account();
+    let snapshot = engine.snapshot().unwrap();
+    assert!(matches!(
+        assistant::interpret(&snapshot, "what is my balance?", today()),
+        Some(AssistantIntent::Balance { .. })
+    ));
+    assert!(matches!(
+        assistant::interpret(&snapshot, "remaining budget", today()),
+        Some(AssistantIntent::BudgetRemaining { .. })
+    ));
+    assert!(matches!(
+        assistant::interpret(&snapshot, "monthly summary", today()),
+        Some(AssistantIntent::MonthSummary)
+    ));
+    assert!(matches!(
+        assistant::interpret(&snapshot, "upcoming payments", today()),
+        Some(AssistantIntent::Upcoming)
+    ));
+    assert!(matches!(
+        assistant::interpret(&snapshot, "process due payments", today()),
+        Some(AssistantIntent::ProcessDue)
+    ));
+    let result = engine.assistant("received salary 2450 euros", today(), true).unwrap();
+    assert!(result.changed);
+    assert_eq!(
+        engine.snapshot().unwrap().transactions[0].transaction_type,
+        TransactionType::Income
+    );
+}
+
+#[test]
+fn structured_entities_resolve_by_id_without_cross_matching() {
+    let (engine, account) = engine_with_account();
+    let category = engine
+        .snapshot()
+        .unwrap()
+        .categories
+        .iter()
+        .find(|c| c.name == "Alimentation")
+        .unwrap()
+        .id
+        .clone();
+    let intent = engine
+        .assistant_draft(
+            25.0,
+            TransactionType::Expense,
+            Some(&category),
+            Some(&account),
+            None,
+            today(),
+        )
+        .unwrap();
+    let reply = engine.assistant_execute(intent, today()).unwrap();
+    match reply.intent.unwrap() {
+        AssistantIntent::AddTransaction(draft) => {
+            assert_eq!(draft.account_id, account);
+            assert_eq!(draft.category_id, category);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn transfer_matching_handles_overlapping_and_numbered_account_names() {
+    let (engine, source) = engine_with_account();
+    engine
+        .save_account(ops::AccountDraft {
+            name: "Compte".into(),
+            ..ops::new_account_draft()
+        })
+        .unwrap();
+    let destination = engine
+        .save_account(ops::AccountDraft {
+            name: "Livret 2026".into(),
+            ..ops::new_account_draft()
+        })
+        .unwrap();
+    let reply = engine
+        .assistant(
+            "transfer from Compte Courant to Livret 2026 amount 50 euros",
+            today(),
+            true,
+        )
+        .unwrap();
+    match reply.intent.unwrap() {
+        AssistantIntent::AddTransaction(draft) => {
+            assert_eq!(draft.account_id, source);
+            assert_eq!(draft.to_account_id, Some(destination));
+            assert_eq!(draft.amount, 50.0);
+        }
+        other => panic!("{other:?}"),
+    }
+}

@@ -1,3 +1,4 @@
+import { useLocalToday } from '../hooks/useLocalToday';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useBank } from '../context/BankContext';
 import { useSettings } from '../context/SettingsContext';
@@ -58,6 +59,7 @@ const mergeSuggestionKeys = (...sources: Array<string[] | undefined>) => (
 );
 
 const Budget: React.FC = () => {
+    const localToday = useLocalToday();
     const {
         accounts,
         transactions,
@@ -89,7 +91,7 @@ const Budget: React.FC = () => {
         accountId: 'all'
     });
 
-    const now = new Date();
+    const now = localToday;
     const monthStart = startOfMonth(now);
     const monthEnd = endOfMonth(now);
     const daysInMonth = monthEnd.getDate();

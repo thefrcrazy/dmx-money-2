@@ -138,8 +138,11 @@ CloudKit) et l'interrupteur iCloud reste masqué — comme sous macOS 13 et ant�
 ## Mises à jour
 
 `UpdateChecker` lit le JSON publié à `DMX_UPDATE_FEED_URL` (au plus une vérification par jour,
-plus l'entrée de menu « Rechercher les mises à jour… »), annonce la nouvelle version et ouvre
-la page de téléchargement. Le flux contient une entrée par architecture
+plus l'entrée de menu « Rechercher les mises à jour… »), annonce la nouvelle version et propose son installation. Le téléchargement
+s’affiche dans une feuille non bloquante, avec annulation et délai maximal de dix minutes.
+Le DMG est conservé avant le retour du callback URLSession, puis son contenu signé est
+copié avant le remplacement de l’app. Une copie de secours permet de restaurer l’ancienne
+version si le remplacement échoue. Le flux contient une entrée par architecture
 (`darwin-arm64`, `darwin-x86_64`) : un Mac Intel sous Catalina reçoit le DMG legacy, jamais
 celui d'Apple Silicon. Sparkle 2 n'est pas utilisé : ses binaires officiels sont compilés
 pour macOS 11 et empêcheraient le lancement sous Catalina. Voir `docs/release.md`.
@@ -176,7 +179,7 @@ L'app iOS rend la fenêtre clé (feuilles comprises) puis quitte.
 
 ## Siri et Raccourcis (variante moderne)
 
-`DmxIntents.swift` déclare sept intentions App Intents — ajouter une opération, solde, budget
+`DmxIntents.swift` déclare huit intentions App Intents — ajouter une opération, virement entre comptes, solde, budget
 restant, prochaines échéances, résumé du mois, traiter les échéances dues, demande libre — et
 `DmxShortcuts` leurs phrases Siri. Elles tournent dans le processus de l'app, appellent
 `dmx-core` et lisent la phrase qu'il renvoie : aucune intention ne calcule de montant.
@@ -219,8 +222,20 @@ texte libre.
 **Langue de Siri.** Les phrases sont déclarées en français et traduites en anglais dans
 `AppShortcuts.xcstrings` : Siri réglé en anglais comprend « What's my balance in DmxMoney »,
 en français « Quel est mon solde dans DmxMoney ». Titres, descriptions et paramètres des
-intentions sont eux aussi traduits (`Localizable.xcstrings`) : Siri s'en sert pour relier une
+intentions sont eux aussi traduits (`AppIntents.xcstrings`) : Siri s'en sert pour relier une
 demande libre à la bonne intention. Les réponses, produites par le noyau, restent en français.
+
+**Virements.** Dire « Faire un virement dans DmxMoney » (anglais : « Make a transfer in
+DmxMoney »). Siri demande le montant, le compte source et le compte destination. Les comptes
+sont recherchables par nom et leurs identifiants sont transmis au noyau. Le virement est
+une écriture dans DmxMoney ; il ne déclenche pas de virement bancaire externe.
+
+**Demande libre.** Le noyau reconnaît un ensemble déterministe de formulations françaises et
+anglaises, avec montants en chiffres. Exemple : « transfer 50 euros from Compte Courant to
+Livret A ». Les deux noms de compte et la direction doivent être explicites. Une demande
+incomplète ou ambiguë ne doit produire aucune écriture. Cela ne constitue pas une prise en
+charge universelle de toutes les langues ; le modèle local peut reformuler certaines demandes
+mais son résultat dépend de sa disponibilité. Les réponses restent françaises.
 
 Siri n'oriente vers l'app que si la phrase **contient son nom** : « Quel est mon solde dans
 DmxMoney », « Solde DmxMoney », « Combien il me reste sur DmxMoney ». « Quel est mon solde »
@@ -284,3 +299,17 @@ open -n -g --fresh -a dist/modern/DmxMoney.app \
 * `DMXMONEY_DATA_DIR` permet de travailler sur un dossier de test (pont PWA désactivé),
   `DMXMONEY_LEGACY_DB` (chemins séparés par `:`) y ajoute des bases 1.x à reprendre.
 * Sauvegardes `.dmx` compatibles 1.x, déclarées comme type de document de l'app macOS.
+
+## Vérifications des mises à jour et intentions
+
+- `source scripts/env.sh && cargo test -p dmx-core -p dmx-ffi` : moteur et analyse des demandes.
+- `cd apple/Packages/DmxKit && swift test` : passage Swift/UniFFI, soldes et rejets de virements invalides.
+- `python3 scripts/tests/test-macos-updater.py` : fenêtre AppKit de test, serveur HTTP local,
+  succès, erreur HTTP et annulation. Aucun remplacement d’application ni accès aux données personnelles.
+- Compiler la cible moderne et contrôler `Metadata.appintents/extract.actionsdata` : huit intentions,
+  dont `TransferMoneyIntent`, et ressources françaises/anglaises.
+
+La reconnaissance vocale Siri et l’indexation d’une app installée/signée nécessitent encore un
+essai sur la machine cible. Les mises à jour Windows passent par Velopack, avec délai de recherche de 30 secondes,
+annulation du téléchargement après dix minutes et signalement des erreurs ; Linux ouvre la
+page des versions. Le hook Tauri de la PWA est inactif dans un navigateur ordinaire.

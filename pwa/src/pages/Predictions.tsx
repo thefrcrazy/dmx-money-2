@@ -1,3 +1,4 @@
+import { useLocalToday } from '../hooks/useLocalToday';
 import React, { useMemo, useState } from 'react';
 import { useBank } from '../context/BankContext';
 import { useToast } from '../context/ToastContext';
@@ -198,6 +199,7 @@ const CustomTooltip = ({ active, payload, negativeMarkerByDate, alertThreshold }
 };
 
 const Predictions: React.FC = () => {
+    const localToday = useLocalToday();
     const { accounts: allAccounts, scheduled: allScheduled, transactions: allTransactions, categories, filterAccount } = useBank();
     const { showToast } = useToast();
     const { settings, updateSettings } = useSettings();
@@ -280,10 +282,10 @@ const Predictions: React.FC = () => {
         return initialBalanceSum + transactionsSum;
     }, [accounts, transactions]);
 
-    const todayInputValue = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
+    const todayInputValue = format(localToday, 'yyyy-MM-dd');
 
     const projectionRange = useMemo(() => {
-        const today = new Date();
+        const today = new Date(localToday);
         today.setHours(0, 0, 0, 0);
 
         const startDate = timeRange !== 'custom' && monthStartsOnFirst ? startOfMonth(today) : new Date(today);
@@ -296,7 +298,7 @@ const Predictions: React.FC = () => {
         const daysToProject = Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / millisecondsPerDay));
 
         return { today, startDate, endDate, daysToProject };
-    }, [timeRange, customEndDate, monthStartsOnFirst]);
+    }, [timeRange, customEndDate, monthStartsOnFirst, localToday]);
 
     const predictionData = useMemo(() => {
         const data = [];

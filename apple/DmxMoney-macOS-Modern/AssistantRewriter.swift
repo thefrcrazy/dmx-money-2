@@ -19,11 +19,13 @@ enum AssistantRewriter {
     Formes acceptées :
     - « ajoute <montant> € en <catégorie> sur <compte> » pour une dépense
     - « j'ai reçu <montant> € en <catégorie> sur <compte> » pour un revenu
+    - « virement de <montant> € de <compte source> vers <compte destination> » pour un virement
     - « quel est mon solde » ou « solde <compte> »
     - « combien me reste-t-il en <catégorie> »
     - « prochaines échéances »
     - « résumé du mois »
     - « traiter les échéances dues »
+    Garde les noms des comptes et leur direction exactement tels qu’ils sont dits. Ne complète jamais un compte manquant.
     Garde le montant exactement tel qu'il est dit. Si la demande ne correspond à aucune forme, \
     renvoie la demande d'origine sans la modifier.
     """

@@ -353,6 +353,28 @@ impl DmxEngine {
         Ok(self.engine.assistant_execute(intent, day)?.into())
     }
 
+    /// Structured transfer: account IDs come directly from Siri entities, never from prose.
+    pub fn assistant_transfer(
+        &self,
+        amount: f64,
+        from_account_id: String,
+        to_account_id: String,
+        today: String,
+    ) -> FfiResult<AssistantResult> {
+        let today = day(&today)?;
+        let mut draft = self.engine.transaction_draft(None, &[], today)?;
+        draft.kind = TransactionType::Transfer;
+        draft.amount = amount;
+        draft.account_id = from_account_id;
+        draft.to_account_id = Some(to_account_id);
+        draft.category_id = dmx_core::models::TRANSFER_CATEGORY_ID.to_string();
+        draft.description = "Virement".to_string();
+        Ok(self
+            .engine
+            .assistant_execute(dmx_core::assistant::AssistantIntent::AddTransaction(draft), today)?
+            .into())
+    }
+
     pub fn assistant_balance(&self, account: Option<String>, today: String) -> FfiResult<AssistantResult> {
         Ok(self.engine.assistant_balance(account.as_deref(), day(&today)?)?.into())
     }

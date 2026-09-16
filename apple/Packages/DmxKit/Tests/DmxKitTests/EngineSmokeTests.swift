@@ -63,6 +63,62 @@ final class EngineSmokeTests: XCTestCase {
         XCTAssertFalse(unknown.changed)
     }
 
+    func testStructuredTransferUsesIdsAndRejectsInvalidParameters() throws {
+        let engine = try DmxEngine.openInMemory()
+        var draft = try engine.accountDraft(id: nil)
+        draft.name = "Compte courant"
+        draft.initialBalance = 1000
+        let source = try engine.saveAccount(draft: draft)
+        draft.name = "Épargne"
+        draft.initialBalance = 0
+        let destination = try engine.saveAccount(draft: draft)
+        let result = try engine.assistantTransfer(amount: 50, fromAccountId: source, toAccountId: destination, today: today)
+        XCTAssertTrue(result.changed)
+        XCTAssertEqual(result.draft?.accountId, source)
+        XCTAssertEqual(result.draft?.toAccountId, destination)
+        XCTAssertEqual(try engine.dashboard(accounts: [source], today: today).balances.currentBalance, 950)
+        XCTAssertEqual(try engine.dashboard(accounts: [destination], today: today).balances.currentBalance, 50)
+        for amount in [0, -50, Double.nan, Double.infinity] {
+            XCTAssertThrowsError(try engine.assistantTransfer(amount: amount, fromAccountId: source, toAccountId: destination, today: today))
+        }
+        XCTAssertThrowsError(try engine.assistantTransfer(amount: 50, fromAccountId: source, toAccountId: source, today: today))
+        XCTAssertThrowsError(try engine.assistantTransfer(amount: 50, fromAccountId: source, toAccountId: "missing", today: today))
+        XCTAssertEqual(try engine.dashboard(accounts: [source], today: today).balances.currentBalance, 950)
+    }
+
+    @MainActor
+    func testNavigationProcessesDuePaymentsAndKeepsBalancesOnEveryPage() async throws {
+        let engine = try DmxEngine.openInMemory()
+        var account = try engine.accountDraft(id: nil)
+        account.name = "Courant"
+        account.initialBalance = 1000
+        let accountId = try engine.saveAccount(draft: account)
+        let store = AppStore(engine: engine)
+        var scheduled = try engine.scheduledDraft(id: nil, today: store.today)
+        scheduled.accountId = accountId
+        scheduled.categoryId = "5"
+        scheduled.amount = 25
+        scheduled.description = "Test échéance"
+        scheduled.frequency = .once
+        scheduled.nextDate = store.today
+        _ = try engine.saveScheduled(draft: scheduled)
+        store.reload()
+        let processed = expectation(description: "Navigation catches up due payments")
+        let subscription = store.$dueResult.dropFirst().sink { result in
+            if result?.createdTransactions == 1 { processed.fulfill() }
+        }
+        store.route = .transactions
+        await fulfillment(of: [processed], timeout: 5)
+        subscription.cancel()
+        XCTAssertEqual(store.balances.currentBalance, 975)
+        XCTAssertEqual(store.balances.checkedBalance, 1000)
+        for route in AppRoute.allCases {
+            XCTAssertTrue(route.showsBalances)
+            store.route = route
+        }
+        XCTAssertEqual(try engine.dashboard(accounts: [], today: store.today).balances.currentBalance, 975)
+    }
+
     func testValidationErrorsCarryFrenchMessages() throws {
         let engine = try DmxEngine.openInMemory()
         var draft = try engine.accountDraft(id: nil)

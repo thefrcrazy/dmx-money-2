@@ -120,6 +120,7 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
         switch (args.PropertyName)
         {
             case nameof(EngineStore.Route):
+                Store.ProcessDueScheduled();
                 Activate();
                 OnPropertyChanged(nameof(Route));
                 OnPropertyChanged(nameof(RouteTitle));

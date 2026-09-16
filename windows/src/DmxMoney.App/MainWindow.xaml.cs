@@ -50,6 +50,7 @@ public sealed partial class MainWindow : Window
     private ContentDialog? openDialog;
     private bool syncingFilter;
     private bool alerting;
+    private DispatcherQueueTimer? dueTimer;
 
     public ICommand ShowWindowCommand { get; }
 
@@ -84,6 +85,14 @@ public sealed partial class MainWindow : Window
         UpdateAccountFilter();
         UpdateHeader();
         Navigate(viewModel.Route);
+        dueTimer = DispatcherQueue.CreateTimer();
+        dueTimer.Interval = TimeSpan.FromMinutes(1);
+        dueTimer.Tick += (_, _) => viewModel.Store.ProcessDueScheduled();
+        dueTimer.Start();
+        Activated += (_, args) => {
+            if (args.WindowActivationState != WindowActivationState.Deactivated) viewModel.Store.ProcessDueScheduled();
+        };
+        Closed += (_, _) => dueTimer.Stop();
         if (Environment.GetEnvironmentVariable("DMXMONEY_SELF_TEST") == "1")
         {
             StartSelfTest();

@@ -1,3 +1,4 @@
+import { useLocalToday } from '../hooks/useLocalToday';
 import React, { useMemo, useState } from 'react';
 import Button from '../components/ui/Button';
 import CategoryPieChart from '../features/analytics/CategoryPieChart';
@@ -53,6 +54,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 const Analytics: React.FC = () => {
+    const localToday = useLocalToday();
     const { transactions: allTransactions, accounts: allAccounts, categories, filterAccount } = useBank();
     const { settings, updateSettings } = useSettings();
     const timeRange = settings.analyticsTimeRange || 'year';
@@ -103,9 +105,10 @@ const Analytics: React.FC = () => {
     };
 
     const dateRange = useMemo(() => {
-        const today = new Date();
+        const today = new Date(localToday);
         let start = subMonths(today, 6);
-        let end = today;
+        let end = new Date(today);
+        end.setHours(23, 59, 59, 999);
 
         switch (timeRange) {
             case 'week':
@@ -136,11 +139,11 @@ const Analytics: React.FC = () => {
                 break;
         }
         return { start, end };
-    }, [timeRange, customStartDate, customEndDate, monthStartsOnFirst]);
+    }, [timeRange, customStartDate, customEndDate, monthStartsOnFirst, localToday]);
 
     const filteredTransactions = useMemo(() => {
         return transactions.filter(t => {
-            return isWithinInterval(new Date(t.date), { start: dateRange.start, end: dateRange.end });
+            return isWithinInterval(new Date(t.date + 'T00:00:00'), { start: dateRange.start, end: dateRange.end });
         });
     }, [transactions, dateRange]);
 

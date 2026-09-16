@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.0.3-rc.2 - 2026-09-16
+
+### Échéances et rafraîchissement
+
+- Vérification des échéances au changement de page, au retour au premier plan et régulièrement lorsque l’application reste ouverte. Les données et les vues dépendantes du jour sont recalculées.
+- Génération des échéances de la PWA compagnon par le noyau du desktop, avec déduplication des occurrences.
+- Soldes Pointé et Actuel visibles sur toutes les pages des interfaces de bureau, notamment macOS Intel/Catalina.
+- Analyse et prédictions de la PWA actualisées au changement de jour ; graphique mensuel de l’accueil limité à la bonne année et hors virements internes.
+
+### Assistant et mises à jour
+
+- Suppression du deuxième assistant intégré à l’accueil PWA ; conservation du bouton global.
+- Transcription complète conservée entre les événements vocaux, annulation propre à la fermeture, erreurs de microphone et réseau explicites. La demande dictée reste modifiable avant l’envoi.
+- Intent Siri de virement avec comptes source/destination explicites, recherche des comptes et catégories par nom, identifiants structurés et ressources FR/EN corrigées.
+- Téléchargement macOS non bloquant, annulation, délais maximaux et gestion des erreurs ; remplacement de l’application avec copie de secours. Délais et erreurs également gérés sous Windows.
+
+
 ## 2.0.3-rc.1 - 2026-09-16
 
 ### Mises à jour & Synchronisation des versions

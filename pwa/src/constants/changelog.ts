@@ -12,6 +12,18 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.0.3-rc.2",
+        date: "2026-09-16",
+        title: "Échéances actualisées et dictée fiabilisée",
+        changes: [
+            "Les échéances dues sont revérifiées lors de la navigation et du retour dans l’application.",
+            "Les périodes d’analyse et de prédiction suivent le changement de jour.",
+            "L’assistant reste accessible depuis le bouton global, sans doublon sur l’accueil.",
+            "La dictée conserve la phrase complète et permet de la relire avant l’envoi.",
+            "Soldes de bureau toujours visibles, virements Siri et téléchargement des mises à jour corrigés."
+        ]
+    },
+    {
         version: "2.0.3-rc.1",
         date: "2026-09-16",
         title: "Alignement des versions et détection des pré-releases",

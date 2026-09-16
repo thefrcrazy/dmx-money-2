@@ -71,7 +71,14 @@ struct AccountEntity: AppEntity {
     }
 }
 
-struct AccountQuery: EntityQuery {
+struct AccountQuery: EntityStringQuery {
+    func entities(matching string: String) async throws -> [AccountEntity] {
+        let entities = try await suggestedEntities()
+        let exact = entities.filter { $0.name.compare(string, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
+        if !exact.isEmpty { return exact }
+        return entities.filter { $0.name.range(of: string, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+    }
+
     func entities(for identifiers: [String]) async throws -> [AccountEntity] {
         try await suggestedEntities().filter { identifiers.contains($0.id) }
     }
@@ -97,7 +104,14 @@ struct CategoryEntity: AppEntity {
     }
 }
 
-struct CategoryQuery: EntityQuery {
+struct CategoryQuery: EntityStringQuery {
+    func entities(matching string: String) async throws -> [CategoryEntity] {
+        let entities = try await suggestedEntities()
+        let exact = entities.filter { $0.name.compare(string, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
+        if !exact.isEmpty { return exact }
+        return entities.filter { $0.name.range(of: string, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+    }
+
     func entities(for identifiers: [String]) async throws -> [CategoryEntity] {
         try await suggestedEntities().filter { identifiers.contains($0.id) }
     }
@@ -191,11 +205,40 @@ struct AddTransactionIntent: AppIntent {
             try engine.assistantAddTransaction(
                 amount: amount,
                 kind: kind.coreType,
-                category: category?.name,
-                account: account?.name,
+                category: category?.id,
+                account: account?.id,
                 description: note,
                 today: today
             )
+        }
+        return .result(value: result.summary, dialog: IntentDialog(stringLiteral: result.summary), view: AssistantSnippet(result: result))
+    }
+}
+
+// MARK: - Virement
+
+struct TransferMoneyIntent: AppIntent {
+    static let title = LocalizedStringResource("Faire un virement", table: "AppIntents")
+    static let description = IntentDescription(LocalizedStringResource("Enregistre un virement entre deux comptes dans DmxMoney.", table: "AppIntents"))
+    static let openAppWhenRun = false
+
+    @Parameter(title: LocalizedStringResource("Montant", table: "AppIntents"), controlStyle: .field)
+    var amount: Double
+
+    @Parameter(title: LocalizedStringResource("Compte source", table: "AppIntents"), requestValueDialog: IntentDialog(LocalizedStringResource("Depuis quel compte ?", table: "AppIntents")))
+    var source: AccountEntity
+
+    @Parameter(title: LocalizedStringResource("Compte destination", table: "AppIntents"), requestValueDialog: IntentDialog(LocalizedStringResource("Vers quel compte ?", table: "AppIntents")))
+    var destination: AccountEntity
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Virement de \(\.$amount) € de \(\.$source) vers \(\.$destination)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog & ShowsSnippetView {
+        let result = try DmxAssistant.run { engine, today in
+            try engine.assistantTransfer(amount: amount, fromAccountId: source.id, toAccountId: destination.id, today: today)
         }
         return .result(value: result.summary, dialog: IntentDialog(stringLiteral: result.summary), view: AssistantSnippet(result: result))
     }
@@ -218,7 +261,7 @@ struct AccountBalanceIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog & ShowsSnippetView {
         let result = try DmxAssistant.run { engine, today in
-            try engine.assistantBalance(account: account?.name, today: today)
+            try engine.assistantBalance(account: account?.id, today: today)
         }
         return .result(value: speech(result), dialog: IntentDialog(stringLiteral: speech(result)), view: AssistantSnippet(result: result))
     }
@@ -241,7 +284,7 @@ struct BudgetRemainingIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog & ShowsSnippetView {
         let result = try DmxAssistant.run { engine, today in
-            try engine.assistantBudget(category: category?.name, today: today)
+            try engine.assistantBudget(category: category?.id, today: today)
         }
         return .result(value: speech(result), dialog: IntentDialog(stringLiteral: speech(result)), view: AssistantSnippet(result: result))
     }
@@ -328,6 +371,22 @@ private func speech(_ result: AssistantResult) -> String {
 
 struct DmxShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: TransferMoneyIntent(),
+            phrases: [
+                "Faire un virement dans \(.applicationName)",
+                "Virement \(.applicationName)",
+                "Transférer de l'argent avec \(.applicationName)",
+            ],
+            shortTitle: "Faire un virement",
+            systemImageName: "arrow.left.arrow.right"
+        )
+        AppShortcut(
+            intent: ProcessDueIntent(),
+            phrases: ["Traiter les échéances dans \(.applicationName)"],
+            shortTitle: "Traiter les échéances dues",
+            systemImageName: "calendar.badge.checkmark"
+        )
         AppShortcut(
             intent: AccountBalanceIntent(),
             phrases: [

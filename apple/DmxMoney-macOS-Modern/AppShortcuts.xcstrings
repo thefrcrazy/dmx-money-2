@@ -273,102 +273,6 @@
         }
       }
     },
-    "Solde": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Balance"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Solde"
-          }
-        }
-      }
-    },
-    "Budget restant": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Budget left"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Budget restant"
-          }
-        }
-      }
-    },
-    "Échéances": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Upcoming payments"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Échéances"
-          }
-        }
-      }
-    },
-    "Résumé du mois": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Monthly summary"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Résumé du mois"
-          }
-        }
-      }
-    },
-    "Demander": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ask"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Demander"
-          }
-        }
-      }
-    },
-    "Ajouter une opération": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add transaction"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ajouter une opération"
-          }
-        }
-      }
-    },
     "Ajouter ${kind} dans ${applicationName}": {
       "localizations": {
         "en": {
@@ -413,6 +317,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nouvelle opération ${applicationName}"
+          }
+        }
+      }
+    },
+    "Faire un virement dans ${applicationName}": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Faire un virement dans ${applicationName}"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Make a transfer in ${applicationName}"
+          }
+        }
+      }
+    },
+    "Virement ${applicationName}": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Virement ${applicationName}"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transfer in ${applicationName}"
+          }
+        }
+      }
+    },
+    "Transférer de l'argent avec ${applicationName}": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transférer de l'argent avec ${applicationName}"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transfer money with ${applicationName}"
+          }
+        }
+      }
+    },
+    "Traiter les échéances dans ${applicationName}": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traiter les échéances dans ${applicationName}"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Process due payments in ${applicationName}"
           }
         }
       }

@@ -47,6 +47,7 @@ export const AssistantModal: React.FC<AssistantModalProps> = ({ isOpen, onClose 
     isSupported: isSpeechSupported,
     startListening,
     stopListening,
+    cancelListening,
   } = useSpeechRecognition({
     onResult: (transcript) => {
       setText(transcript);
@@ -55,25 +56,22 @@ export const AssistantModal: React.FC<AssistantModalProps> = ({ isOpen, onClose 
       const trimmed = finalTranscript.trim();
       if (trimmed) {
         setText(trimmed);
-        void ask(trimmed);
+
       }
     },
   });
 
   useEffect(() => {
     if (isOpen) {
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 300);
+      const timer = setTimeout(() => inputRef.current?.focus(), 300);
+      return () => clearTimeout(timer);
     } else {
-      if (isListening) {
-        stopListening();
-      }
+      cancelListening();
       setAnswer(null);
       setError(null);
       setText("");
     }
-  }, [isOpen]);
+  }, [isOpen, cancelListening]);
 
   const toggleListening = () => {
     if (isListening) {
@@ -100,7 +98,7 @@ export const AssistantModal: React.FC<AssistantModalProps> = ({ isOpen, onClose 
           className="relative flex items-center"
           onSubmit={(event) => {
             event.preventDefault();
-            if (isListening) stopListening();
+            cancelListening();
             void ask(text);
           }}
         >
@@ -157,7 +155,7 @@ export const AssistantModal: React.FC<AssistantModalProps> = ({ isOpen, onClose 
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
             </span>
-            <span>À l'écoute... Le message sera envoyé dès que vous aurez fini de parler.</span>
+            <span>À l'écoute… Relisez la transcription, puis appuyez sur Envoyer.</span>
           </div>
         )}
 

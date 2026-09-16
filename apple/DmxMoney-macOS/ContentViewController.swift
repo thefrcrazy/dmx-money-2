@@ -149,7 +149,7 @@ struct HeaderBar: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            if store.route.usesAccountFilter {
+            if store.route.usesAccountFilter || !store.selectedAccountIds.isEmpty {
                 Text("Compte :").font(.system(size: 12, weight: .medium)).foregroundColor(.secondary)
                 AccountFilterButton()
             } else {

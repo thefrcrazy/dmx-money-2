@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Layout from './layouts/Layout';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
@@ -654,7 +654,14 @@ const MobileConnectionScreen: React.FC = () => {
 const AppContent: React.FC = () => {
   const { activePage, setActivePage } = useNavigation();
   const { settings, updateLastSeenVersion } = useSettings();
-  const { mobileConnectionState } = useBank();
+  const { mobileConnectionState, isLoading, processDueScheduledTransactions } = useBank();
+  const dueRefreshRef = useRef(processDueScheduledTransactions);
+  dueRefreshRef.current = processDueScheduledTransactions;
+  useEffect(() => {
+    if (!isLoading && (!isMobileCompanion() || mobileConnectionState === 'connected')) {
+      void dueRefreshRef.current();
+    }
+  }, [activePage, isLoading, mobileConnectionState]);
   const [showReleaseNotes, setShowReleaseNotes] = useState(false);
 
   // Initialize updater polling (silent check at startup + interval)

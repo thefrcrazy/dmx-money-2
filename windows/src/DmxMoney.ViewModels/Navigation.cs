@@ -60,7 +60,7 @@ public static class AppRoutes
     public static bool UsesAccountFilter(this AppRoute route) => route is AppRoute.Dashboard or AppRoute.Transactions
         or AppRoute.Budget or AppRoute.Scheduled or AppRoute.Analytics or AppRoute.Predictions;
 
-    public static bool ShowsBalances(this AppRoute route) => route is AppRoute.Dashboard or AppRoute.Transactions;
+    public static bool ShowsBalances(this AppRoute route) => true;
 }
 
 /// <summary>Formulaires demandés par les pages ; l'hôte les présente en boîte de dialogue.</summary>

@@ -18,6 +18,7 @@ public sealed class WindowsPlatformServices : IPlatformServices
     private readonly Window window;
     private readonly UpdateManager? manager;
     private UpdateInfo? pending;
+    private bool isUpdating;
 
     public WindowsPlatformServices(Window window)
     {
@@ -131,6 +132,35 @@ public sealed class WindowsPlatformServices : IPlatformServices
 
     public async Task CheckForUpdatesAsync()
     {
+        if (isUpdating) return;
+        isUpdating = true;
+        try
+        {
+            await InstallAvailableUpdateAsync();
+        }
+        catch (TimeoutException)
+        {
+            pending = null;
+            App.Store.ShowToast("La recherche de mise à jour a expiré. Réessayez.");
+        }
+        catch (OperationCanceledException)
+        {
+            pending = null;
+            App.Store.ShowToast("Le téléchargement de la mise à jour a expiré. Réessayez.");
+        }
+        catch (Exception)
+        {
+            pending = null;
+            App.Store.ShowToast("Impossible d'installer la mise à jour. Réessayez ou téléchargez l'installateur manuellement.");
+        }
+        finally
+        {
+            isUpdating = false;
+        }
+    }
+
+    private async Task InstallAvailableUpdateAsync()
+    {
         var url = Environment.GetEnvironmentVariable("DMXMONEY_UPDATE_URL");
         var activeManager = manager;
         if (string.IsNullOrWhiteSpace(url))
@@ -150,13 +180,15 @@ public sealed class WindowsPlatformServices : IPlatformServices
             App.Store.ShowToast("Mise à jour automatique disponible sur la version installée.");
             return;
         }
-        pending = await activeManager.CheckForUpdatesAsync();
+        pending = await activeManager.CheckForUpdatesAsync().WaitAsync(TimeSpan.FromSeconds(30));
         if (pending is null)
         {
             App.Store.ShowToast("L'application est à jour.");
             return;
         }
-        await activeManager.DownloadUpdatesAsync(pending);
+        App.Store.ShowToast("Téléchargement de la mise à jour…");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        await activeManager.DownloadUpdatesAsync(pending, null, timeout.Token);
         activeManager.ApplyUpdatesAndRestart(pending);
     }
 }

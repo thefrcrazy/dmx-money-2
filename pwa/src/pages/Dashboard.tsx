@@ -1,3 +1,4 @@
+import { useLocalToday } from '../hooks/useLocalToday';
 import React, { useState, useMemo } from 'react';
 import { TrendingUp, TrendingDown, DollarSign, Tag, ArrowRightLeft, Wallet, Receipt, Plus, CalendarClock, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 import { useBank } from '../context/BankContext';
@@ -13,10 +14,9 @@ import Card from '../components/ui/Card';
 import { ICONS } from '../constants/icons';
 import { useFinancialMetrics } from '../hooks/useFinancialMetrics';
 import { formatCurrency } from '../utils/format';
-import AssistantBar from '../components/AssistantBar';
-import { isMobileCompanion } from '../utils/runtime';
 
 const Dashboard: React.FC = () => {
+    const localToday = useLocalToday();
     const { accounts, scheduled, categories, budgets, filterAccount, addAccount } = useBank();
     const { setActivePage } = useNavigation();
     const { monthlyIncome, monthlyExpenses, monthlySaved, relevantTransactions, currentBalance } = useFinancialMetrics();
@@ -41,9 +41,8 @@ const Dashboard: React.FC = () => {
 
     // Categories Breakdown
     const topCategories = useMemo(() => {
-        const currentMonth = new Date().getMonth();
         const expensesByCategory = relevantTransactions
-            .filter(t => t.type === 'expense' && new Date(t.date).getMonth() === currentMonth)
+            .filter(t => t.type === 'expense' && t.category !== 'transfer' && isSameMonth(new Date(t.date + 'T00:00:00'), localToday))
             .reduce((acc, t) => {
                 acc[t.category] = (acc[t.category] || 0) + t.amount;
                 return acc;
@@ -62,7 +61,7 @@ const Dashboard: React.FC = () => {
                 };
             })
             .sort((a, b) => b.amount - a.amount);
-    }, [relevantTransactions, categories, monthlyExpenses]);
+    }, [relevantTransactions, categories, monthlyExpenses, localToday]);
 
     // Budget Logic
     const { totalBudgeted, budgetRemaining, budgetProgress, budgetExpenses } = useMemo(() => {
@@ -117,7 +116,6 @@ const Dashboard: React.FC = () => {
     return (
         <div className="space-y-4 md:space-y-8 animate-fade-in-up">
             {/* Assistant : seulement quand le mobile est relié au Mac, qui fait l'analyse. */}
-            {isMobileCompanion() && <AssistantBar />}
             <h2 className="hidden md:block text-2xl font-bold text-gray-900 dark:text-gray-100">Tableau de Bord</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">

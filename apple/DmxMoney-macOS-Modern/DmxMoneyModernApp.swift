@@ -78,7 +78,7 @@ final class Launcher: ObservableObject {
         // Publie les raccourcis Siri auprès du système à chaque lancement : sans cet appel,
         // l'index des intentions peut rester vide pour une app installée hors de /Applications.
         DmxShortcuts.updateAppShortcutParameters()
-        store.processDueScheduled()
+        store.startScheduledRefresh()
         guard SnapshotRunner.directory == nil else { return }
         UpdateChecker.shared.checkInBackgroundIfNeeded()
         // La reprise d'une base 1.x est proposée par `ModernLegacyAdoption`, en alerte SwiftUI :
