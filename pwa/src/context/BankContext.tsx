@@ -336,6 +336,16 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const mobileMode = isMobileCompanion();
 
             try {
+                const cached = mobileMode ? await dbService.getCachedBankData() : null;
+                if (cached) {
+                    setAccounts(cached.accounts);
+                    setTransactions(cached.transactions);
+                    setCategories(cached.categories);
+                    setScheduled(cached.scheduled);
+                    setBudgets(cached.budgets);
+                    setMobileConnectionState('offline');
+                    return;
+                }
                 await dbService.init();
                 await loadBankData({ processScheduled: true });
                 if (mobileMode) {
@@ -413,6 +423,8 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
         let unlisten: (() => void) | undefined;
         let syncTimeout: ReturnType<typeof setTimeout> | undefined;
         let consecutiveSyncFailures = 0;
+        let syncInFlight = false;
+        let wakeSync: (() => void) | undefined;
 
         if (hasTauriRuntime()) {
             import('@tauri-apps/api/event')
@@ -430,21 +442,21 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (isMobileCompanion() && (mobileConnectionState === 'connected' || mobileConnectionState === 'offline')) {
             const checkForRemoteChanges = async () => {
-                if (disposed) return;
+                if (disposed || syncInFlight) return;
+                syncInFlight = true;
+                if (syncTimeout) clearTimeout(syncTimeout);
 
                 try {
                     const status = await dbService.getSyncStatus();
                     consecutiveSyncFailures = 0;
-                    if (!disposed) setMobileConnectionState('connected');
-                    if (lastDataVersionRef.current === null) {
-                        lastDataVersionRef.current = status.dataVersion;
-                        return;
-                    }
-                    if (status.dataVersion !== lastDataVersionRef.current) {
+                    if (disposed) return;
+                    if (mobileConnectionState === 'offline' || status.dataVersion !== lastDataVersionRef.current) {
+                        await loadBankData({ processScheduled: false });
+                        if (disposed) return;
                         lastDataVersionRef.current = status.dataVersion;
                         notifySettingsRefresh();
-                        await loadBankData({ processScheduled: false });
                     }
+                    setMobileConnectionState('connected');
                 } catch (error) {
                     consecutiveSyncFailures += 1;
                     if (dbService.isOfflineError(error) && !disposed) {
@@ -452,6 +464,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     }
                     console.warn('Mobile sync status unavailable:', error);
                 } finally {
+                    syncInFlight = false;
                     if (!disposed) {
                         const delay = consecutiveSyncFailures === 0
                             ? 2500
@@ -461,11 +474,22 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
             };
 
+            wakeSync = () => {
+                if (document.visibilityState === 'visible') void checkForRemoteChanges();
+            };
+            window.addEventListener('online', wakeSync);
+            window.addEventListener('focus', wakeSync);
+            document.addEventListener('visibilitychange', wakeSync);
             syncTimeout = setTimeout(checkForRemoteChanges, 2500);
         }
 
         return () => {
             disposed = true;
+            if (wakeSync) {
+                window.removeEventListener('online', wakeSync);
+                window.removeEventListener('focus', wakeSync);
+                document.removeEventListener('visibilitychange', wakeSync);
+            }
             if (unlisten) unlisten();
             if (syncTimeout) clearTimeout(syncTimeout);
         };

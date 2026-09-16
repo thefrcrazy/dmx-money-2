@@ -212,6 +212,7 @@ export class DatabaseService {
     private sessionPromise: Promise<void> | null = null;
     private recoveryPromise: Promise<boolean> | null = null;
     private lastRecoveryAt = 0;
+    private mobileOffline = false;
     private readonly requestTimeoutMs = 2500;
     private readonly statusTimeoutMs = 2500;
     private readonly probeTimeoutMs = 1500;
@@ -221,6 +222,18 @@ export class DatabaseService {
 
     async init(): Promise<void> {
         await this.getAccounts();
+    }
+
+    async getCachedBankData() {
+        if (!this.usesHttp()) return null;
+        const [accounts, transactions, categories, scheduled, budgets] = await Promise.all([
+            offlineStore.getData('accounts'), offlineStore.getData('transactions'),
+            offlineStore.getData('categories'), offlineStore.getData('scheduled'),
+            offlineStore.getData('budgets'),
+        ]);
+        if (accounts === null || transactions === null || categories === null || scheduled === null || budgets === null) return null;
+        this.mobileOffline = true;
+        return { accounts, transactions, categories, scheduled, budgets };
     }
 
     private usesHttp() {
@@ -302,6 +315,9 @@ export class DatabaseService {
             window.clearTimeout(timeoutId);
         }
 
+        if ([408, 502, 503, 504].includes(response.status)) {
+            throw new MobileNetworkError('Pont local temporairement indisponible.');
+        }
         if (!response.ok) {
             let message = text || `Erreur HTTP ${response.status}`;
             try {
@@ -525,6 +541,9 @@ export class DatabaseService {
         } finally {
             window.clearTimeout(timeoutId);
         }
+        if ([408, 502, 503, 504].includes(response.status)) {
+            throw new MobileNetworkError('Pont local temporairement indisponible.');
+        }
         if (!response.ok) {
             let message = text || `Erreur HTTP ${response.status}`;
             try {
@@ -714,8 +733,16 @@ export class DatabaseService {
         key: K,
         path: string,
     ): Promise<Awaited<ReturnType<typeof offlineStore.getData<K>>>> {
+        const cached = await offlineStore.getData(key);
+        if (this.mobileOffline && cached !== null) return cached as Awaited<ReturnType<typeof offlineStore.getData<K>>>;
         try {
+            await this.flushPendingMobileMutations();
             const data = await this.request<Awaited<ReturnType<typeof offlineStore.getData<K>>>>(path);
+            // A local edit may have arrived while the GET was in flight.
+            if ((await offlineStore.listMutations()).length > 0) {
+                const latest = await offlineStore.getData(key);
+                if (latest !== null) return latest as Awaited<ReturnType<typeof offlineStore.getData<K>>>;
+            }
             if (data !== null) {
                 await offlineStore.setData(key, data as never);
             }
@@ -1148,10 +1175,16 @@ export class DatabaseService {
 
     async getSyncStatus(): Promise<SyncStatus> {
         if (!this.usesHttp()) return { ok: true, dataVersion: 0 };
-        if (getMobileCsrfToken()) {
+        try {
+            await this.request<SyncStatus>('/api/status', {}, this.statusTimeoutMs);
             await this.flushPendingMobileMutations();
+            const status = await this.request<SyncStatus>('/api/status', {}, this.statusTimeoutMs);
+            this.mobileOffline = false;
+            return status;
+        } catch (error) {
+            if (this.isMobileNetworkError(error)) this.mobileOffline = true;
+            throw error;
         }
-        return this.request<SyncStatus>('/api/status', {}, this.statusTimeoutMs);
     }
 
     // Data Management

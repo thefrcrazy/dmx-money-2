@@ -1,4 +1,4 @@
-const CACHE_NAME = "dmxmoney-shell-2.0.4";
+const CACHE_NAME = "dmxmoney-shell-2.0.5";
 const APP_SHELL = [
   "/",
   "/mobile",
@@ -17,19 +17,23 @@ const isHttpRequest = (request) => {
 const putInCache = async (request, response) => {
   if (!response || !response.ok || !isHttpRequest(request)) return;
   const cache = await caches.open(CACHE_NAME);
-  await cache.put(request, response.clone());
+  await cache.put(request, response.clone()).catch(() => undefined);
 };
 
 const networkFirst = async (request, fallbackPath) => {
   const cache = await caches.open(CACHE_NAME);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2500);
   try {
-    const networkResponse = await fetch(request);
+    const networkResponse = await fetch(request, { cache: "no-store", signal: controller.signal });
     if (networkResponse && networkResponse.ok) {
-      await cache.put(request, networkResponse.clone());
+      await cache.put(request, networkResponse.clone()).catch(() => undefined);
       return networkResponse;
     }
   } catch {
     // Réseau indisponible ou hors-ligne
+  } finally {
+    clearTimeout(timeout);
   }
 
   const cached = (await cache.match(request))
@@ -37,32 +41,24 @@ const networkFirst = async (request, fallbackPath) => {
   return cached || Response.error();
 };
 
-const staleWhileRevalidate = async (request, fallbackPath) => {
-  const cache = await caches.open(CACHE_NAME);
-  const cached = (await cache.match(request))
-    || (fallbackPath ? await cache.match(fallbackPath) : undefined);
-
+const staleWhileRevalidate = async (request, event) => {
+  // Keep the refresh alive even when the cached response is returned immediately.
   const networkPromise = fetch(request)
     .then(async (response) => {
       await putInCache(request, response);
       return response;
     })
     .catch(() => undefined);
-
-  if (cached) {
-    return cached;
-  }
-
-  return (await networkPromise)
-    || (fallbackPath ? await cache.match(fallbackPath) : undefined)
-    || Response.error();
+  event.waitUntil(networkPromise.then(() => undefined));
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
+  return cached || (await networkPromise) || Response.error();
 };
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(APP_SHELL))
-      .catch(() => undefined)
+      .then(cache => cache.addAll(APP_SHELL.map(url => new Request(url, { cache: "reload" }))))
       .then(() => self.skipWaiting())
   );
 });
@@ -70,7 +66,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))))
+      .then(keys => Promise.all(keys.filter(key => key.startsWith("dmxmoney-shell-") && key !== CACHE_NAME).map(key => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });
@@ -80,7 +76,7 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET" || !isHttpRequest(request)) return;
 
   const url = new URL(request.url);
-  if (url.pathname.startsWith("/api/")) return;
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return;
 
   if (request.mode === "navigate") {
     event.respondWith(networkFirst(request, "/mobile"));
@@ -88,7 +84,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (url.origin === self.location.origin) {
-    event.respondWith(staleWhileRevalidate(request));
+    event.respondWith(staleWhileRevalidate(request, event));
   }
 });
 

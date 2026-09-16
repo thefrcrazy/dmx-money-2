@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.5 - 2026-09-16
+
+- PWA : ouverture depuis les données enregistrées même lorsque le pont local est inaccessible hors Wi-Fi.
+- Saisies hors ligne conservées, envoyées avant le rechargement des données à la reconnexion ; première reconnexion et réveil de l’application corrigés.
+- Les erreurs temporaires du pont ne bloquent plus la consultation des données enregistrées.
+- Cache de l’interface renouvelé à chaque build et délai réseau limité pour ouvrir la PWA hors ligne, sans effacer les données ni les modifications en attente.
+
 ## 2.0.4 - 2026-09-16
 
 - macOS Intel/Catalina : quatre onglets dans les paramètres (Général, Compagnon mobile, Données, À propos), comme dans la variante moderne.

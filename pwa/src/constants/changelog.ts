@@ -12,6 +12,16 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.0.5",
+        date: "2026-09-16",
+        title: "Compagnon mobile hors ligne",
+        changes: [
+            "Ouverture avec les dernières données enregistrées lorsque le Mac est inaccessible.",
+            "Modifications conservées hors ligne et synchronisation au retour sur le réseau local.",
+            "Actualisation de la PWA fiabilisée sans effacer les données locales."
+        ]
+    },
+    {
         version: "2.0.4",
         date: "2026-09-16",
         title: "Cohérence des interfaces",

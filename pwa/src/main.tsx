@@ -21,7 +21,12 @@ const registerPwaServiceWorker = () => {
   if (!window.isSecureContext && !isLocalhost) return;
 
   let isRefreshing = false;
+  let wasControlled = Boolean(navigator.serviceWorker.controller);
   navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!wasControlled) {
+      wasControlled = true;
+      return;
+    }
     if (!isRefreshing) {
       isRefreshing = true;
       window.location.reload();
@@ -30,14 +35,25 @@ const registerPwaServiceWorker = () => {
 
   const register = async () => {
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js');
-      void registration.update();
-      // Revérifier lors du retour sur l'app
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-          void registration.update();
+      const registration = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+      let checking = false;
+      const checkForUpdate = async () => {
+        if (checking || document.visibilityState !== 'visible' || !navigator.onLine) return;
+        checking = true;
+        try {
+          await registration.update();
+        } catch {
+          // Offline or temporarily unavailable: retry on the next wake or timer.
+        } finally {
+          checking = false;
         }
-      });
+      };
+      void checkForUpdate();
+      document.addEventListener('visibilitychange', () => void checkForUpdate());
+      window.addEventListener('focus', () => void checkForUpdate());
+      window.addEventListener('pageshow', () => void checkForUpdate());
+      window.addEventListener('online', () => void checkForUpdate());
+      window.setInterval(() => void checkForUpdate(), 60_000);
     } catch {
       // Échec silencieux
     }

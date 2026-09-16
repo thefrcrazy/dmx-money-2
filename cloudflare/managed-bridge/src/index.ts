@@ -174,7 +174,7 @@ function staticHeaders(key: string, env: Env): Headers {
     || key.endsWith(".svg");
   headers.set("cache-control", isStaticMediaOrHashed
     ? "public, max-age=31536000, immutable"
-    : "no-cache");
+    : "no-store, max-age=0");
   return headers;
 }
 
