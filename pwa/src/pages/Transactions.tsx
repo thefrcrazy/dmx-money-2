@@ -674,7 +674,7 @@ const Transactions: React.FC = () => {
                             editType: 'number',
                             render: (t) => (
                                 <span className={t.type === 'income' ? 'text-emerald-600' : 'text-red-600'}>
-                                    {t.type === 'income' ? '+' : '-'}{new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2 }).format(t.amount)} €
+                                    {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
                                 </span>
                             )
                         },
@@ -776,7 +776,7 @@ const Transactions: React.FC = () => {
                                                     </span>
                                                     <span className="mt-0.5 block truncate text-[13px] text-[var(--color-text-secondary)]">{details}</span>
                                                 </button>
-                                                <span className={`shrink-0 text-[17px] font-semibold tabular-nums ${isIncome ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--ios-label)]'}`}>
+                                                <span className={`shrink-0 text-[17px] font-semibold tabular-nums ${isIncome ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                                                     {isIncome ? '+' : '-'}{formatCurrency(transaction.amount)}
                                                 </span>
                                                 {!isSelecting && (

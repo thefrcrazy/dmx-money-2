@@ -32,7 +32,6 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [sidebarTooltip, setSidebarTooltip] = useState<{ label: string; top: number } | null>(null);
-  const [isScrolled, setIsScrolled] = useState(false);
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const mainRef = React.useRef<HTMLElement>(null);
   const pullStartXRef = React.useRef(0);
@@ -153,12 +152,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
     setIsMobileMenuOpen(false);
   };
 
-  // Barre de navigation iOS : le petit titre apparaît quand le grand titre sort de l'écran.
-  const handleMainScroll = (event: React.UIEvent<HTMLElement>) => {
-    setIsScrolled(event.currentTarget.scrollTop > 40);
-  };
-
-  // Chaque page s'ouvre en haut, avec son grand titre.
+  // Chaque page s’ouvre en haut, sous le titre fixe.
   React.useEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = 0;
   }, [activePage]);
@@ -484,50 +478,46 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
           </div>
         </header>
 
-        {/* Barre de navigation iOS : transparente en haut de page, en verre dépoli dès que la page défile. */}
-        <header
-          className={`md:hidden fixed inset-x-0 top-0 z-40 pt-[env(safe-area-inset-top)] transition-[background-color,box-shadow] duration-200 ${
-            isScrolled ? 'ios-material shadow-[inset_0_-0.5px_0_var(--ios-separator)]' : 'bg-transparent'
-          }`}
-        >
-          <div className="relative flex h-11 items-center justify-center px-28">
-            <div
-              className={`truncate text-[17px] font-semibold text-[var(--ios-label)] transition-opacity duration-200 ${isScrolled ? 'opacity-100' : 'opacity-0'}`}
-              aria-hidden="true"
-            >
-              {mobileTitle}
+        {/* Navigation mobile toujours visible : connexion, titre, assistant. */}
+        <header className="md:hidden fixed inset-x-0 top-0 z-40 pt-[env(safe-area-inset-top)] ios-material shadow-[inset_0_-0.5px_0_var(--ios-separator)]">
+          <div className="grid h-12 grid-cols-[1fr_minmax(0,1.4fr)_1fr] items-center gap-2 px-3">
+            <div className="min-w-0 justify-self-start">
+              {isMobileMode && (
+                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium ${
+                  mobileConnectionState === 'offline'
+                    ? 'bg-[#FF9500]/15 text-[#C93400] dark:text-[#FF9F0A]'
+                    : 'bg-[var(--ios-fill-tertiary)] text-[var(--ios-secondary-label)]'
+                }`}>
+                  <MobileSyncIcon className="h-3 w-3 shrink-0" />
+                  {mobileSyncLabel}
+                </span>
+              )}
             </div>
-            {isMobileMode && (
-              <span className={`absolute right-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[13px] font-medium ${
-                mobileConnectionState === 'offline'
-                  ? 'bg-[#FF9500]/15 text-[#C93400] dark:text-[#FF9F0A]'
-                  : 'bg-[var(--ios-fill-tertiary)] text-[var(--ios-secondary-label)]'
-              }`}>
-                <MobileSyncIcon className="h-3.5 w-3.5" />
-                {mobileSyncLabel}
-              </span>
-            )}
+            <h1 className="truncate text-center text-[17px] font-semibold text-[var(--ios-label)]" title={mobileTitle}>
+              {mobileTitle}
+            </h1>
+            <div className="min-w-0 justify-self-end">
+              {isMobileMode && (
+                <button
+                  type="button"
+                  onClick={() => setIsAssistantOpen(true)}
+                  aria-label="Ouvrir l'assistant"
+                  title="Assistant DmxMoney"
+                  className="flex min-h-11 items-center gap-1 text-[11px] font-semibold cursor-pointer active:scale-95 transition-transform"
+                >
+                  <span className="inline-flex items-center gap-1 rounded-full bg-primary-500 px-2 py-1.5 text-white">
+                    <Sparkles className="h-3 w-3 shrink-0" />
+                    Assistant
+                  </span>
+                </button>
+              )}
+            </div>
           </div>
         </header>
 
-        {/* Bouton assistant mobile : accessible partout, placé sous le badge de connexion */}
-        {isMobileMode && (
-          <button
-            type="button"
-            onClick={() => setIsAssistantOpen(true)}
-            aria-label="Ouvrir l'assistant"
-            title="Assistant DmxMoney"
-            className="md:hidden fixed right-4 top-[calc(env(safe-area-inset-top)+48px)] z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary-500 text-white shadow-lg shadow-primary-500/30 active:scale-95 transition-transform cursor-pointer text-[12px] font-semibold"
-          >
-            <Sparkles className="h-3.5 w-3.5 shrink-0" />
-            <span>Assistant</span>
-          </button>
-        )}
-
         <main
           ref={mainRef}
-          onScroll={handleMainScroll}
-          className="relative flex-1 overflow-y-auto overscroll-y-contain scrollbar-thin px-4 pt-[calc(env(safe-area-inset-top)+44px)] pb-[calc(104px+env(safe-area-inset-bottom))] md:px-8 md:py-4 md:pb-4"
+          className="relative flex-1 overflow-y-auto overscroll-y-contain scrollbar-thin px-4 pt-[calc(env(safe-area-inset-top)+60px)] pb-[calc(104px+env(safe-area-inset-bottom))] md:px-8 md:py-4 md:pb-4"
         >
           <div
             className="pointer-events-none sticky top-2 z-30 flex h-0 justify-center md:hidden"
@@ -550,12 +540,8 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
               transition: isPulling ? 'none' : 'transform 200ms ease-out',
             }}
           >
-            {/* Grand titre iOS, solde et filtre des comptes : ils défilent avec la page. */}
+            {/* Solde et filtre des comptes : ils défilent sous le titre fixe. */}
             <div className="md:hidden">
-              <h1 className="truncate pb-3 text-[34px] font-bold leading-[41px] tracking-[-0.022em] text-[var(--ios-label)]">
-                {mobileTitle}
-              </h1>
-
               {hasBalanceWidget && (
                 <div className="mb-4 rounded-[22px] bg-[var(--ios-card)] px-4 py-3.5">
                   <div className="text-[13px] font-medium text-[var(--ios-secondary-label)]">Solde actuel</div>

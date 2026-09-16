@@ -3,7 +3,7 @@ import { fr } from 'date-fns/locale';
 
 export const formatCurrency = (amount: number, minimumFractionDigits: number = 2): string => {
     try {
-        return new Intl.NumberFormat(navigator.language || 'fr-FR', {
+        return new Intl.NumberFormat('fr-FR', {
             style: 'currency',
             currency: 'EUR',
             minimumFractionDigits,
@@ -11,7 +11,7 @@ export const formatCurrency = (amount: number, minimumFractionDigits: number = 2
         }).format(amount);
     } catch (e) {
         // Fallback for very old systems
-        return amount.toFixed(minimumFractionDigits) + ' €';
+        return amount.toFixed(minimumFractionDigits).replace('.', ',') + '\u00a0€';
     }
 };
 

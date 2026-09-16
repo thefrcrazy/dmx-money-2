@@ -267,8 +267,8 @@ const Dashboard: React.FC = () => {
                                             <span className="text-[10px] text-neutral-400 dark:text-neutral-500">{format(new Date(t.date), 'dd MMM', { locale: fr })}</span>
                                         </div>
                                     </div>
-                                    <span className={`text-sm font-bold ${t.type === 'income' ? 'text-emerald-600' : ''}`}>
-                                        {t.type === 'income' ? '+' : ''}{formatCurrency(t.amount)}
+                                    <span className={`text-sm font-bold ${t.type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                        {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
                                     </span>
                                 </div>
                             );
