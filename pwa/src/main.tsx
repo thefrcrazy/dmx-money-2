@@ -20,9 +20,34 @@ const registerPwaServiceWorker = () => {
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
   if (!window.isSecureContext && !isLocalhost) return;
 
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => { });
+  let isRefreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!isRefreshing) {
+      isRefreshing = true;
+      window.location.reload();
+    }
   });
+
+  const register = async () => {
+    try {
+      const registration = await navigator.serviceWorker.register('/sw.js');
+      void registration.update();
+      // Revérifier lors du retour sur l'app
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          void registration.update();
+        }
+      });
+    } catch {
+      // Échec silencieux
+    }
+  };
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    void register();
+  } else {
+    window.addEventListener('load', () => void register());
+  }
 };
 
 const render = () => {

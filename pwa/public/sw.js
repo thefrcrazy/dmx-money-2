@@ -1,4 +1,4 @@
-const CACHE_NAME = "dmxmoney-shell-v35";
+const CACHE_NAME = "dmxmoney-shell-v36";
 const APP_SHELL = [
   "/",
   "/mobile",
@@ -18,6 +18,23 @@ const putInCache = async (request, response) => {
   if (!response || !response.ok || !isHttpRequest(request)) return;
   const cache = await caches.open(CACHE_NAME);
   await cache.put(request, response.clone());
+};
+
+const networkFirst = async (request, fallbackPath) => {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    const networkResponse = await fetch(request);
+    if (networkResponse && networkResponse.ok) {
+      await cache.put(request, networkResponse.clone());
+      return networkResponse;
+    }
+  } catch {
+    // Réseau indisponible ou hors-ligne
+  }
+
+  const cached = (await cache.match(request))
+    || (fallbackPath ? await cache.match(fallbackPath) : undefined);
+  return cached || Response.error();
 };
 
 const staleWhileRevalidate = async (request, fallbackPath) => {
@@ -66,7 +83,7 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/")) return;
 
   if (request.mode === "navigate") {
-    event.respondWith(staleWhileRevalidate(request, "/mobile"));
+    event.respondWith(networkFirst(request, "/mobile"));
     return;
   }
 
@@ -74,3 +91,4 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(staleWhileRevalidate(request));
   }
 });
+

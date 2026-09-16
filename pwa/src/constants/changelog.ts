@@ -12,7 +12,7 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
-        version: "2.0.2",
+        version: "2.0.2-rc.2",
         date: "2026-09-16",
         title: "Compagnon mobile iOS et assistant vocal",
         changes: [

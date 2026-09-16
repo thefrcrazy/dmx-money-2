@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.2-rc.2 - 2026-09-16
+
+### Compagnon mobile & PWA
+
+- Assistant vocal universel : accès direct à l'assistant depuis n'importe quel écran grâce à un bouton dédié sous le badge de synchronisation, avec feuille modale iOS, suggestions rapides et dictée vocale au microphone (compatible Safari iOS).
+- Micro dans l'assistant d'accueil : le widget de la vue d'ensemble intègre désormais un bouton dictée pour dicter et exécuter directement ses requêtes.
+- Cycle de vie PWA et cache : stratégie de navigation Network-First, mise à jour immédiate du Service Worker et rechargement automatique lors de l'activation d'une nouvelle version.
+- Notes de version : mémorisation locale définitive de la consultation des notes pour éviter leur réaffichage à chaque rafraîchissement.
+
 ## 2.0.2-rc.1 - 2026-09-15
 
 ### Interface

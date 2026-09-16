@@ -517,9 +517,10 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
             onClick={() => setIsAssistantOpen(true)}
             aria-label="Ouvrir l'assistant"
             title="Assistant DmxMoney"
-            className="md:hidden fixed right-4 top-[calc(env(safe-area-inset-top)+48px)] z-30 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 dark:bg-[#1c1c1e]/90 shadow-md border border-black/5 dark:border-white/10 backdrop-blur-md text-primary-600 dark:text-primary-400 active:scale-95 transition-transform cursor-pointer"
+            className="md:hidden fixed right-4 top-[calc(env(safe-area-inset-top)+48px)] z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary-500 text-white shadow-lg shadow-primary-500/30 active:scale-95 transition-transform cursor-pointer text-[12px] font-semibold"
           >
-            <Sparkles className="h-4 w-4" />
+            <Sparkles className="h-3.5 w-3.5 shrink-0" />
+            <span>Assistant</span>
           </button>
         )}
 
