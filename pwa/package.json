@@ -1,7 +1,7 @@
 {
   "name": "dmxmoney",
   "private": true,
-  "version": "2.0.5",
+  "version": "2.0.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -49,6 +49,7 @@
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
+    "fake-indexeddb": "6.2.5",
     "globals": "^16.5.0",
     "postcss": "^8.5.28",
     "postcss-preset-env": "^10.6.1",

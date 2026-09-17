@@ -58,7 +58,6 @@ pub use self::settings::{ensure_auto_configuration, load_settings, secure_app_or
 pub use self::status::build_status;
 pub use self::types::{AuthRouteOutput, MobilePasskeyInfo, SecureBridgeSettings, SecureBridgeStatus};
 
-#[cfg(test)]
 pub(crate) use self::util::hash_secret;
 
 use self::auth::list_passkeys;
@@ -70,8 +69,6 @@ use self::managed::{
 use self::settings::{
     can_serve_locally, clear_last_error, degraded_provisioning_message, provision_managed_device, record_last_error,
 };
-#[cfg(not(test))]
-use self::util::hash_secret;
 use self::util::{
     clear_session_cookie, constant_time_eq, extract_cookie, generate_token, get_managed_device_secret,
     get_managed_registration_secret, is_past, map_db_error, normalize_domain, normalize_host, normalize_url,

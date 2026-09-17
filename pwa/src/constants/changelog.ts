@@ -12,6 +12,17 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.0.6",
+        date: "2026-09-17",
+        title: "Synchronisation sans doublons",
+        changes: [
+            "Saisies hors ligne et messages sauvegardés ensemble.",
+            "Pointage et modifications synchronisés sans écraser les autres champs.",
+            "Renvois après coupure et échéances protégés contre les doubles applications.",
+            "État de synchronisation en attente visible en cas d’erreur."
+        ]
+    },
+    {
         version: "2.0.5",
         date: "2026-09-16",
         title: "Compagnon mobile hors ligne",

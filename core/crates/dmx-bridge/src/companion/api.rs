@@ -28,6 +28,8 @@ macro_rules! in_transaction {
 struct TransferPayload {
     from_transaction: Transaction,
     to_transaction: Transaction,
+    #[serde(rename = "_mutationId", default)]
+    mutation_id: Option<String>,
 }
 
 fn ok(status: u16) -> HttpResponse {
@@ -59,9 +61,16 @@ pub(super) async fn route_api_request(
         }
     }
 
+    if method == "PATCH" && resource != "settings" {
+        return super::bank_sync::patch(pool, resource, &request.body).await;
+    }
+
     match (method, resource) {
         ("GET", "status") => Ok((
-            json_response(200, json!({ "ok": true, "dataVersion": get_data_version(pool).await? })),
+            json_response(
+                200,
+                json!({ "ok": true, "dataVersion": get_data_version(pool).await?, "bankSyncVersion": 1 }),
+            ),
             false,
         )),
 
@@ -71,9 +80,12 @@ pub(super) async fn route_api_request(
         )),
         ("POST", "accounts") => {
             let account: Account = parse_json(&request.body)?;
-            in_transaction!(pool, "ajout du compte", |connection| repo::insert_account(
-                connection, &account
-            ));
+            in_transaction!(pool, "ajout mobile", |connection| async {
+                if !is_deleted(connection, "accounts", &account.id).await? {
+                    repo::insert_account(connection, &account).await?;
+                }
+                Ok(())
+            });
             Ok((ok(201), true))
         }
         ("PUT", "accounts") => {
@@ -104,8 +116,11 @@ pub(super) async fn route_api_request(
                     false,
                 ));
             }
-            in_transaction!(pool, "ajout de transaction", |connection| {
-                repo::insert_transaction_if_absent(connection, &transaction)
+            in_transaction!(pool, "ajout mobile", |connection| async {
+                if !is_deleted(connection, "transactions", &transaction.id).await? {
+                    repo::insert_transaction_if_absent(connection, &transaction).await?;
+                }
+                Ok(())
             });
             Ok((ok(201), true))
         }
@@ -163,9 +178,37 @@ pub(super) async fn route_api_request(
         ("POST", "transfers") => {
             let payload: TransferPayload = parse_json(&request.body)?;
             let mut tx = pool
-                .begin()
+                .begin_with("BEGIN IMMEDIATE")
                 .await
                 .map_err(|error| map_db_error(error, "ajout de virement"))?;
+            let fingerprint = secure::hash_secret(&format!("transfers:{}", String::from_utf8_lossy(&request.body)));
+            if let Some(id) = &payload.mutation_id {
+                if id.is_empty() || id.len() > 128 {
+                    return Ok((error_response(400, "Identifiant de modification invalide."), false));
+                }
+                let receipt: Option<String> =
+                    sqlx::query_scalar("SELECT fingerprint FROM mobile_mutation_receipts WHERE id = ?")
+                        .bind(id)
+                        .fetch_optional(&mut *tx)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                if let Some(previous) = receipt {
+                    return Ok(if previous == fingerprint {
+                        (ok(200), false)
+                    } else {
+                        (error_response(409, "Identifiant de modification déjà utilisé."), false)
+                    });
+                }
+            }
+            if is_deleted(&mut tx, "transactions", &payload.from_transaction.id)
+                .await
+                .map_err(core_error)?
+                || is_deleted(&mut tx, "transactions", &payload.to_transaction.id)
+                    .await
+                    .map_err(core_error)?
+            {
+                return Ok((ok(200), false));
+            }
             let from = load_transaction(&mut tx, &payload.from_transaction.id).await?;
             let to = load_transaction(&mut tx, &payload.to_transaction.id).await?;
             if from.is_some() || to.is_some() {
@@ -180,6 +223,14 @@ pub(super) async fn route_api_request(
             repo::insert_transaction_if_absent(&mut tx, &payload.to_transaction)
                 .await
                 .map_err(core_error)?;
+            if let Some(id) = &payload.mutation_id {
+                sqlx::query("INSERT INTO mobile_mutation_receipts (id, fingerprint) VALUES (?, ?)")
+                    .bind(id)
+                    .bind(fingerprint)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
             tx.commit()
                 .await
                 .map_err(|error| map_db_error(error, "ajout de virement"))?;
@@ -192,9 +243,12 @@ pub(super) async fn route_api_request(
         )),
         ("POST", "categories") => {
             let category: Category = parse_json(&request.body)?;
-            in_transaction!(pool, "ajout de catégorie", |connection| repo::insert_category(
-                connection, &category
-            ));
+            in_transaction!(pool, "ajout mobile", |connection| async {
+                if !is_deleted(connection, "categories", &category.id).await? {
+                    repo::insert_category(connection, &category).await?;
+                }
+                Ok(())
+            });
             Ok((ok(201), true))
         }
         ("PUT", "categories") => {
@@ -218,9 +272,12 @@ pub(super) async fn route_api_request(
         )),
         ("POST", "budgets") => {
             let budget: Budget = parse_json(&request.body)?;
-            in_transaction!(pool, "ajout de budget", |connection| repo::insert_budget_if_absent(
-                connection, &budget
-            ));
+            in_transaction!(pool, "ajout mobile", |connection| async {
+                if !is_deleted(connection, "budgets", &budget.id).await? {
+                    repo::insert_budget_if_absent(connection, &budget).await?;
+                }
+                Ok(())
+            });
             Ok((ok(201), true))
         }
         ("PUT", "budgets") => {
@@ -251,8 +308,11 @@ pub(super) async fn route_api_request(
         }
         ("POST", "scheduled") => {
             let scheduled: ScheduledTransaction = parse_json(&request.body)?;
-            in_transaction!(pool, "ajout d'échéance", |connection| {
-                repo::insert_scheduled_if_absent(connection, &scheduled)
+            in_transaction!(pool, "ajout mobile", |connection| async {
+                if !is_deleted(connection, "scheduled", &scheduled.id).await? {
+                    repo::insert_scheduled_if_absent(connection, &scheduled).await?;
+                }
+                Ok(())
             });
             Ok((ok(201), true))
         }
@@ -315,4 +375,14 @@ async fn load_transaction(connection: &mut SqliteConnection, id: &str) -> Result
         .await
         .map_err(|error| map_db_error(error, "lecture de transaction"))?;
     Ok(row.as_ref().map(repo::transaction_from_row))
+}
+
+async fn is_deleted(connection: &mut SqliteConnection, entity: &str, id: &str) -> Result<bool, CoreError> {
+    let deleted: Option<bool> = sqlx::query_scalar("SELECT deleted FROM sync_meta WHERE entity = ? AND record_id = ?")
+        .bind(entity)
+        .bind(id)
+        .fetch_optional(connection)
+        .await
+        .map_err(|error| CoreError::Database(map_db_error(error, "lecture de suppression")))?;
+    Ok(deleted.unwrap_or(false))
 }

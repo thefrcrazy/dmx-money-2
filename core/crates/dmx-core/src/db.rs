@@ -13,7 +13,7 @@ pub type DbPool = SqlitePool;
 pub const DATABASE_FILE_NAME: &str = "dmxmoney2025.db";
 
 /// Version du schéma propre à DmxMoney 2 (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Tables métier suivies par la synchronisation : (entité, table SQL).
 pub const SYNC_ENTITY_TABLES: [(&str, &str); 5] = [
@@ -449,6 +449,10 @@ const COMPANION_TABLES: &[&str] = &[
 ];
 
 const SYNC_TABLES: &[&str] = &[
+    "CREATE TABLE IF NOT EXISTS mobile_mutation_receipts (
+        id TEXT PRIMARY KEY,
+        fingerprint TEXT NOT NULL
+    )",
     "CREATE TABLE IF NOT EXISTS sync_control (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         applying INTEGER NOT NULL DEFAULT 0

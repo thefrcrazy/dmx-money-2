@@ -246,8 +246,10 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [mobileConnectionError, setMobileConnectionError] = useState<string | null>(null);
     const isProcessingScheduledRef = useRef(false);
     const lastDataVersionRef = useRef<number | null>(null);
+    const localEditRevision = useRef(0);
 
     const loadBankData = useCallback(async (options: { processScheduled?: boolean } = {}) => {
+        const startedAtRevision = localEditRevision.current;
         const shouldProcessScheduled = options.processScheduled ?? false;
         const mobileMode = isMobileCompanion();
 
@@ -267,6 +269,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
             dbService.getBudgets()
         ]);
 
+        if (startedAtRevision !== localEditRevision.current) return false;
         let currentAccounts = loadedAccounts;
         let currentTransactions = loadedTransactions;
         let currentCategories = loadedCategories;
@@ -323,11 +326,13 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ? await processDueScheduledItems(currentScheduled, currentTransactions)
             : { processedScheduled: currentScheduled, newTransactions: [] as Transaction[] };
 
+        if (startedAtRevision !== localEditRevision.current) return false;
         setAccounts(currentAccounts);
         setTransactions([...scheduledResult.newTransactions, ...currentTransactions]);
         setCategories(currentCategories);
         setScheduled(scheduledResult.processedScheduled);
         setBudgets(currentBudgets);
+        return true;
     }, []);
 
     // Initialize DB and load data
@@ -450,17 +455,20 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     const status = await dbService.getSyncStatus();
                     consecutiveSyncFailures = 0;
                     if (disposed) return;
-                    if (mobileConnectionState === 'offline' || status.dataVersion !== lastDataVersionRef.current) {
-                        await loadBankData({ processScheduled: false });
-                        if (disposed) return;
+                    if (status.needsRefresh || mobileConnectionState === 'offline' || status.dataVersion !== lastDataVersionRef.current) {
+                        const applied = await loadBankData({ processScheduled: false });
+                        if (disposed || !applied) return;
                         lastDataVersionRef.current = status.dataVersion;
                         notifySettingsRefresh();
                     }
+                    setMobileConnectionError(null);
                     setMobileConnectionState('connected');
                 } catch (error) {
                     consecutiveSyncFailures += 1;
-                    if (dbService.isOfflineError(error) && !disposed) {
+                    if (!disposed) {
                         setMobileConnectionState('offline');
+                        setMobileConnectionError(dbService.isOfflineError(error) ? null :
+                            `Synchronisation en attente. Vos modifications sont conservées sur cet appareil. ${error instanceof Error ? error.message : String(error)}`);
                     }
                     console.warn('Mobile sync status unavailable:', error);
                 } finally {
@@ -506,6 +514,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // --- Accounts ---
     const addAccount = useCallback(async (account: Omit<Account, 'id'>) => {
+        localEditRevision.current += 1;
         const newAccount: Account = {
             ...account,
             id: uuidv4(),
@@ -518,22 +527,25 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const updateAccount = useCallback(async (account: Account) => {
+        localEditRevision.current += 1;
         await dbService.updateAccount(account);
         setAccounts(prev => prev.map(a => a.id === account.id ? account : a));
     }, []);
 
     const deleteAccount = useCallback(async (id: string) => {
+        localEditRevision.current += 1;
         // Rust delete_account already deletes associated transactions and scheduled in a SQL transaction
         await dbService.deleteAccount(id);
         setAccounts(prev => prev.filter(a => a.id !== id));
         setTransactions(prev => prev.filter(t => t.accountId !== id));
-        setScheduled(prev => prev.filter(s => s.accountId !== id));
+        setScheduled(prev => prev.filter(s => s.accountId !== id && s.toAccountId !== id));
         setBudgets(prev => prev.map(b => b.accountId === id ? { ...b, accountId: undefined } : b));
         setFilterAccount(prev => prev.includes(id) ? prev.filter(a => a !== id) : prev);
     }, []);
 
     // --- Transactions ---
     const addTransaction = useCallback(async (transaction: Omit<Transaction, 'id'>) => {
+        localEditRevision.current += 1;
         const newTransaction: Transaction = { ...transaction, id: uuidv4() };
         await dbService.addTransaction(newTransaction);
         setTransactions(prev => [newTransaction, ...prev]);
@@ -541,6 +553,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const addTransfer = useCallback(async (fromAccountId: string, toAccountId: string, amount: number, date: string, description: string) => {
+        localEditRevision.current += 1;
         const fromTxId = uuidv4();
         const toTxId = uuidv4();
 
@@ -560,11 +573,13 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const updateTransaction = useCallback(async (transaction: Transaction) => {
+        localEditRevision.current += 1;
         await dbService.updateTransaction(transaction);
         setTransactions(prev => applyTransactionUpdate(prev, transaction));
     }, []);
 
     const deleteTransaction = useCallback(async (id: string) => {
+        localEditRevision.current += 1;
         const transaction = transactions.find(t => t.id === id);
         const idsToRemove = new Set([id]);
         if (transaction?.linkedTransactionId) {
@@ -576,6 +591,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, [transactions]);
 
     const toggleTransactionCheck = useCallback(async (id: string) => {
+        localEditRevision.current += 1;
         const transaction = transactions.find(t => t.id === id);
         if (!transaction) return;
 
@@ -632,6 +648,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // --- Categories ---
     const addCategory = useCallback(async (category: Omit<Category, 'id'>) => {
+        localEditRevision.current += 1;
         const newCategory: Category = { ...category, id: uuidv4() };
         await dbService.addCategory(newCategory);
         setCategories(prev => [...prev, newCategory]);
@@ -639,34 +656,40 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const updateCategory = useCallback(async (category: Category) => {
+        localEditRevision.current += 1;
         await dbService.updateCategory(category);
         setCategories(prev => prev.map(c => c.id === category.id ? category : c));
     }, []);
 
     const deleteCategory = useCallback(async (id: string) => {
+        localEditRevision.current += 1;
         await dbService.deleteCategory(id);
         setCategories(prev => prev.filter(c => c.id !== id));
     }, []);
 
     // --- Scheduled ---
     const addScheduled = useCallback(async (scheduledTx: Omit<ScheduledTransaction, 'id'>) => {
+        localEditRevision.current += 1;
         const newScheduled: ScheduledTransaction = { ...scheduledTx, id: uuidv4() };
         await dbService.addScheduled(newScheduled);
         setScheduled(prev => [...prev, newScheduled]);
     }, []);
 
     const updateScheduled = useCallback(async (scheduledTx: ScheduledTransaction) => {
+        localEditRevision.current += 1;
         await dbService.updateScheduled(scheduledTx);
         setScheduled(prev => prev.map(s => s.id === scheduledTx.id ? scheduledTx : s));
     }, []);
 
     const deleteScheduled = useCallback(async (id: string) => {
+        localEditRevision.current += 1;
         await dbService.deleteScheduled(id);
         setScheduled(prev => prev.filter(s => s.id !== id));
     }, []);
 
     // --- Budgets ---
     const addBudget = useCallback(async (budget: Omit<Budget, 'id'>) => {
+        localEditRevision.current += 1;
         const newBudget: Budget = { ...budget, id: uuidv4() };
         await dbService.addBudget(newBudget);
         setBudgets(prev => [newBudget, ...prev]);
@@ -674,11 +697,13 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const updateBudget = useCallback(async (budget: Budget) => {
+        localEditRevision.current += 1;
         await dbService.updateBudget(budget);
         setBudgets(prev => prev.map(b => b.id === budget.id ? budget : b));
     }, []);
 
     const deleteBudget = useCallback(async (id: string) => {
+        localEditRevision.current += 1;
         await dbService.deleteBudget(id);
         setBudgets(prev => prev.filter(b => b.id !== id));
         setScheduled(prev => prev.map(s => s.budgetId === id ? { ...s, budgetId: undefined, includeInForecast: false } : s));

@@ -144,8 +144,30 @@ pub async fn process_due(pool: &DbPool, today: NaiveDate) -> CoreResult<ProcessD
 
         let outcome: CoreResult<ProcessDueResult> = async {
             let mut partial = ProcessDueResult::default();
-            let mut tx = pool.begin().await.ctx("traitement des échéances")?;
+            let mut tx = pool
+                .begin_with("BEGIN IMMEDIATE")
+                .await
+                .ctx("traitement des échéances")?;
+            let row = sqlx::query("SELECT * FROM scheduled_transactions WHERE id = ?")
+                .bind(&item.id)
+                .fetch_optional(&mut *tx)
+                .await
+                .ctx("lecture de l'échéance")?;
+            let Some(row) = row else {
+                return Ok(partial);
+            };
+            let item = repo::scheduled_from_row(&row);
+            let plan = plan_due(&item, today);
             for transaction in &plan.transactions {
+                let deleted: Option<bool> =
+                    sqlx::query_scalar("SELECT deleted FROM sync_meta WHERE entity = 'transactions' AND record_id = ?")
+                        .bind(&transaction.id)
+                        .fetch_optional(&mut *tx)
+                        .await
+                        .ctx("lecture d'occurrence supprimée")?;
+                if deleted.unwrap_or(false) {
+                    continue;
+                }
                 if repo::insert_transaction_if_absent(&mut tx, transaction).await? {
                     partial.created_transactions += 1;
                 }

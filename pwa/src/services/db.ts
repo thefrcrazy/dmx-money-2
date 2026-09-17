@@ -1,4 +1,3 @@
-import { applyTransactionUpdate } from '../utils/transactionUpdate';
 import { Account, Transaction, Category, ScheduledTransaction, Settings, Budget } from '../types';
 import { offlineStore, OfflineDataKey } from './offlineStore';
 import {
@@ -50,6 +49,8 @@ interface RawSettings extends Omit<Settings,
 }
 
 interface SyncStatus {
+    bankSyncVersion?: number;
+    needsRefresh?: boolean;
     ok: boolean;
     dataVersion: number;
 }
@@ -213,6 +214,7 @@ export class DatabaseService {
     private recoveryPromise: Promise<boolean> | null = null;
     private lastRecoveryAt = 0;
     private mobileOffline = false;
+    private mobileRefreshPending = false;
     private readonly requestTimeoutMs = 2500;
     private readonly statusTimeoutMs = 2500;
     private readonly probeTimeoutMs = 1500;
@@ -737,16 +739,12 @@ export class DatabaseService {
         if (this.mobileOffline && cached !== null) return cached as Awaited<ReturnType<typeof offlineStore.getData<K>>>;
         try {
             await this.flushPendingMobileMutations();
+            const revision = await offlineStore.getRevision(key);
             const data = await this.request<Awaited<ReturnType<typeof offlineStore.getData<K>>>>(path);
-            // A local edit may have arrived while the GET was in flight.
-            if ((await offlineStore.listMutations()).length > 0) {
-                const latest = await offlineStore.getData(key);
-                if (latest !== null) return latest as Awaited<ReturnType<typeof offlineStore.getData<K>>>;
-            }
-            if (data !== null) {
-                await offlineStore.setData(key, data as never);
-            }
-            return data;
+            if (data === null) return data;
+            const accepted = await offlineStore.acceptRemoteData(key, data as never, revision);
+            if (accepted !== data) this.mobileRefreshPending = true;
+            return accepted as Awaited<ReturnType<typeof offlineStore.getData<K>>>;
         } catch (error) {
             if (!this.isMobileNetworkError(error)) throw error;
 
@@ -774,18 +772,10 @@ export class DatabaseService {
         }, 20000);
     }
 
-    private async commitMobileMutation(
-        path: string,
-        method: string,
-        body: string | undefined,
-        applyLocalChange: () => Promise<void>,
-    ) {
-        await applyLocalChange();
-        await offlineStore.enqueueMutation(path, method, body);
+    private async commitMobileMutation(path: string, method: string, body?: string, settings?: Settings) {
+        await offlineStore.commitBankMutation(path, method, body, settings);
         this.flushPendingMobileMutations().catch(error => {
-            if (!this.isMobileNetworkError(error)) {
-                console.warn('Mobile offline sync failed:', error);
-            }
+            if (!this.isMobileNetworkError(error)) console.warn('Mobile offline sync failed:', error);
         });
     }
 
@@ -834,7 +824,9 @@ export class DatabaseService {
 
                 await this.request(mutation.path, {
                     method: mutation.method,
-                    body: mutation.body,
+                    body: mutation.method === 'PATCH' || mutation.method === 'POST'
+                        ? JSON.stringify({ ...JSON.parse(mutation.body || '{}'), _mutationId: mutation.id })
+                        : mutation.body,
                 }, this.requestTimeoutMs);
                 await offlineStore.removeMutation(mutation.id);
                 index += 1;
@@ -855,9 +847,7 @@ export class DatabaseService {
     async addAccount(account: Account): Promise<void> {
         if (this.usesHttp()) {
             const body = JSON.stringify(account);
-            await this.commitMobileMutation('/api/accounts', 'POST', body, () =>
-                offlineStore.updateCollection<Account>('accounts', items => [...items, account])
-            );
+            await this.commitMobileMutation('/api/accounts', 'POST', body);
             return;
         }
         await this.invoke('add_account', { account });
@@ -866,9 +856,7 @@ export class DatabaseService {
     async updateAccount(account: Account): Promise<void> {
         if (this.usesHttp()) {
             const body = JSON.stringify(account);
-            await this.commitMobileMutation('/api/accounts', 'PUT', body, () =>
-                offlineStore.updateCollection<Account>('accounts', items => items.map(item => item.id === account.id ? account : item))
-            );
+            await this.commitMobileMutation('/api/accounts', 'PUT', body);
             return;
         }
         await this.invoke('update_account', { account });
@@ -876,12 +864,7 @@ export class DatabaseService {
 
     async deleteAccount(id: string): Promise<void> {
         if (this.usesHttp()) {
-            await this.commitMobileMutation(`/api/accounts/${encodeURIComponent(id)}`, 'DELETE', undefined, async () => {
-                await offlineStore.updateCollection<Account>('accounts', items => items.filter(item => item.id !== id));
-                await offlineStore.updateCollection<Transaction>('transactions', items => items.filter(item => item.accountId !== id));
-                await offlineStore.updateCollection<ScheduledTransaction>('scheduled', items => items.filter(item => item.accountId !== id));
-                await offlineStore.updateCollection<Budget>('budgets', items => items.map(item => item.accountId === id ? { ...item, accountId: undefined } : item));
-            });
+            await this.commitMobileMutation(`/api/accounts/${encodeURIComponent(id)}`, 'DELETE', undefined);
             return;
         }
         await this.invoke('delete_account', { id });
@@ -896,9 +879,7 @@ export class DatabaseService {
     async addTransaction(transaction: Transaction): Promise<string> {
         if (this.usesHttp()) {
             const body = JSON.stringify(transaction);
-            await this.commitMobileMutation('/api/transactions', 'POST', body, () =>
-                offlineStore.updateCollection<Transaction>('transactions', items => [transaction, ...items])
-            );
+            await this.commitMobileMutation('/api/transactions', 'POST', body);
             return transaction.id;
         }
         await this.invoke('add_transaction', { transaction });
@@ -908,9 +889,7 @@ export class DatabaseService {
     async addTransfer(fromTransaction: Transaction, toTransaction: Transaction): Promise<void> {
         if (this.usesHttp()) {
             const body = JSON.stringify({ fromTransaction, toTransaction });
-            await this.commitMobileMutation('/api/transfers', 'POST', body, () =>
-                offlineStore.updateCollection<Transaction>('transactions', items => [fromTransaction, toTransaction, ...items])
-            );
+            await this.commitMobileMutation('/api/transfers', 'POST', body);
             return;
         }
 
@@ -923,9 +902,7 @@ export class DatabaseService {
     async updateTransaction(transaction: Transaction): Promise<void> {
         if (this.usesHttp()) {
             const body = JSON.stringify(transaction);
-            await this.commitMobileMutation('/api/transactions', 'PUT', body, () =>
-                offlineStore.updateCollection<Transaction>('transactions', items => applyTransactionUpdate(items, transaction))
-            );
+            await this.commitMobileMutation('/api/transactions', 'PUT', body);
             return;
         }
         await this.invoke('update_transaction', { transaction });
@@ -933,13 +910,7 @@ export class DatabaseService {
 
     async deleteTransaction(id: string): Promise<void> {
         if (this.usesHttp()) {
-            await this.commitMobileMutation(`/api/transactions/${encodeURIComponent(id)}`, 'DELETE', undefined, async () => {
-                const transactions = await offlineStore.getData('transactions') || [];
-                const transaction = transactions.find(item => item.id === id);
-                const idsToRemove = new Set([id]);
-                if (transaction?.linkedTransactionId) idsToRemove.add(transaction.linkedTransactionId);
-                await offlineStore.setData('transactions', transactions.filter(item => !idsToRemove.has(item.id)));
-            });
+            await this.commitMobileMutation(`/api/transactions/${encodeURIComponent(id)}`, 'DELETE', undefined);
             return;
         }
         await this.invoke('delete_transaction', { id });
@@ -954,9 +925,7 @@ export class DatabaseService {
     async addCategory(category: Category): Promise<void> {
         if (this.usesHttp()) {
             const body = JSON.stringify(category);
-            await this.commitMobileMutation('/api/categories', 'POST', body, () =>
-                offlineStore.updateCollection<Category>('categories', items => [...items, category])
-            );
+            await this.commitMobileMutation('/api/categories', 'POST', body);
             return;
         }
         await this.invoke('add_category', { category });
@@ -965,9 +934,7 @@ export class DatabaseService {
     async updateCategory(category: Category): Promise<void> {
         if (this.usesHttp()) {
             const body = JSON.stringify(category);
-            await this.commitMobileMutation('/api/categories', 'PUT', body, () =>
-                offlineStore.updateCollection<Category>('categories', items => items.map(item => item.id === category.id ? category : item))
-            );
+            await this.commitMobileMutation('/api/categories', 'PUT', body);
             return;
         }
         await this.invoke('update_category', { category });
@@ -975,9 +942,7 @@ export class DatabaseService {
 
     async deleteCategory(id: string): Promise<void> {
         if (this.usesHttp()) {
-            await this.commitMobileMutation(`/api/categories/${encodeURIComponent(id)}`, 'DELETE', undefined, () =>
-                offlineStore.updateCollection<Category>('categories', items => items.filter(item => item.id !== id))
-            );
+            await this.commitMobileMutation(`/api/categories/${encodeURIComponent(id)}`, 'DELETE', undefined);
             return;
         }
         await this.invoke('delete_category', { id });
@@ -992,9 +957,7 @@ export class DatabaseService {
     async addBudget(budget: Budget): Promise<void> {
         if (this.usesHttp()) {
             const body = JSON.stringify(budget);
-            await this.commitMobileMutation('/api/budgets', 'POST', body, () =>
-                offlineStore.updateCollection<Budget>('budgets', items => [budget, ...items])
-            );
+            await this.commitMobileMutation('/api/budgets', 'POST', body);
             return;
         }
         await this.invoke('add_budget', { budget });
@@ -1003,9 +966,7 @@ export class DatabaseService {
     async updateBudget(budget: Budget): Promise<void> {
         if (this.usesHttp()) {
             const body = JSON.stringify(budget);
-            await this.commitMobileMutation('/api/budgets', 'PUT', body, () =>
-                offlineStore.updateCollection<Budget>('budgets', items => items.map(item => item.id === budget.id ? budget : item))
-            );
+            await this.commitMobileMutation('/api/budgets', 'PUT', body);
             return;
         }
         await this.invoke('update_budget', { budget });
@@ -1013,10 +974,7 @@ export class DatabaseService {
 
     async deleteBudget(id: string): Promise<void> {
         if (this.usesHttp()) {
-            await this.commitMobileMutation(`/api/budgets/${encodeURIComponent(id)}`, 'DELETE', undefined, async () => {
-                await offlineStore.updateCollection<Budget>('budgets', items => items.filter(item => item.id !== id));
-                await offlineStore.updateCollection<ScheduledTransaction>('scheduled', items => items.map(item => item.budgetId === id ? { ...item, budgetId: undefined, includeInForecast: false } : item));
-            });
+            await this.commitMobileMutation(`/api/budgets/${encodeURIComponent(id)}`, 'DELETE', undefined);
             return;
         }
         await this.invoke('delete_budget', { id });
@@ -1031,9 +989,7 @@ export class DatabaseService {
     async addScheduled(scheduled: ScheduledTransaction): Promise<void> {
         if (this.usesHttp()) {
             const body = JSON.stringify(scheduled);
-            await this.commitMobileMutation('/api/scheduled', 'POST', body, () =>
-                offlineStore.updateCollection<ScheduledTransaction>('scheduled', items => [...items, scheduled])
-            );
+            await this.commitMobileMutation('/api/scheduled', 'POST', body);
             return;
         }
         await this.invoke('add_scheduled', { scheduled });
@@ -1042,9 +998,7 @@ export class DatabaseService {
     async updateScheduled(scheduled: ScheduledTransaction): Promise<void> {
         if (this.usesHttp()) {
             const body = JSON.stringify(scheduled);
-            await this.commitMobileMutation('/api/scheduled', 'PUT', body, () =>
-                offlineStore.updateCollection<ScheduledTransaction>('scheduled', items => items.map(item => item.id === scheduled.id ? scheduled : item))
-            );
+            await this.commitMobileMutation('/api/scheduled', 'PUT', body);
             return;
         }
         await this.invoke('update_scheduled', { scheduled });
@@ -1052,9 +1006,7 @@ export class DatabaseService {
 
     async deleteScheduled(id: string): Promise<void> {
         if (this.usesHttp()) {
-            await this.commitMobileMutation(`/api/scheduled/${encodeURIComponent(id)}`, 'DELETE', undefined, () =>
-                offlineStore.updateCollection<ScheduledTransaction>('scheduled', items => items.filter(item => item.id !== id))
-            );
+            await this.commitMobileMutation(`/api/scheduled/${encodeURIComponent(id)}`, 'DELETE', undefined);
             return;
         }
         await this.invoke('delete_scheduled', { id });
@@ -1152,7 +1104,7 @@ export class DatabaseService {
                 '/api/settings',
                 'PATCH',
                 JSON.stringify(serialized),
-                () => offlineStore.setData('settings', localSettings),
+                localSettings,
             );
             return;
         }
@@ -1176,11 +1128,16 @@ export class DatabaseService {
     async getSyncStatus(): Promise<SyncStatus> {
         if (!this.usesHttp()) return { ok: true, dataVersion: 0 };
         try {
-            await this.request<SyncStatus>('/api/status', {}, this.statusTimeoutMs);
+            const initial = await this.request<SyncStatus>('/api/status', {}, this.statusTimeoutMs);
+            if ((initial.bankSyncVersion || 0) < 1 && (await offlineStore.listMutations()).some(item => item.method === 'PATCH' && item.path !== '/api/settings')) {
+                throw new Error('Mettez à jour DMX Money sur votre ordinateur pour synchroniser ces modifications.');
+            }
             await this.flushPendingMobileMutations();
             const status = await this.request<SyncStatus>('/api/status', {}, this.statusTimeoutMs);
             this.mobileOffline = false;
-            return status;
+            const needsRefresh = this.mobileRefreshPending;
+            this.mobileRefreshPending = false;
+            return { ...status, needsRefresh };
         } catch (error) {
             if (this.isMobileNetworkError(error)) this.mobileOffline = true;
             throw error;

@@ -14,6 +14,12 @@ beforeEach(() => {
     data = { accounts: [], transactions: [], categories: [], scheduled: [], budgets: [] };
     queue = [];
     spyOn(offlineStore, 'getData').mockImplementation(async key => data[key] as never ?? null);
+    spyOn(offlineStore, 'getRevision').mockResolvedValue('revision');
+    spyOn(offlineStore, 'acceptRemoteData').mockImplementation(async (key, value) => {
+        if (queue.length) return data[key] as never;
+        data[key] = value;
+        return value;
+    });
     spyOn(offlineStore, 'setData').mockImplementation(async (key, value) => { data[key] = value; });
     spyOn(offlineStore, 'listMutations').mockImplementation(async () => queue as never);
     spyOn(offlineStore, 'removeMutation').mockImplementation(async id => { queue = queue.filter(item => item.id !== id); });

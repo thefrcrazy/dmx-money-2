@@ -160,7 +160,7 @@ const updateCollection = (items: Array<{ id: string }>, method: string, body?: R
     const id = typeof body?.id === 'string' ? body.id : undefined;
     const index = id ? items.findIndex(item => item.id === id) : -1;
     if (method === 'POST' && id) items.unshift(body as { id: string });
-    if (method === 'PUT' && index >= 0) items[index] = body as { id: string };
+    if ((method === 'PUT' || method === 'PATCH') && index >= 0) items[index] = body as { id: string };
     if (method === 'DELETE' && index >= 0) items.splice(index, 1);
     dataVersion += 1;
 };
@@ -171,7 +171,7 @@ const handle = (url: URL, init?: RequestInit): Response => {
     const [, scope, name, extra] = url.pathname.split('/');
 
     if (scope === 'auth') return json({ ok: true, csrfToken: 'apercu' });
-    if (name === 'status') return json({ ok: true, dataVersion });
+    if (name === 'status') return json({ ok: true, dataVersion, bankSyncVersion: 1 });
     if (name === 'assistant') {
         return json({
             ok: true,

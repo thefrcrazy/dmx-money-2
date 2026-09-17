@@ -20,6 +20,7 @@ use std::{
 
 mod api;
 mod assets;
+mod bank_sync;
 mod http;
 mod response;
 mod settings;

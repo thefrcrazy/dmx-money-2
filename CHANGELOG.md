@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.6 - 2026-09-17
+
+- Synchronisation hors ligne : cache et messages sauvegardés atomiquement ; protection contre les saisies concurrentes et les réponses réseau anciennes.
+- Modifications partielles des comptes, opérations, catégories, budgets et échéances : pointer une opération ne rétablit plus son ancien montant et éditer une échéance ne recule plus sa prochaine date.
+- Accusés de réception persistants pour les modifications partielles et les virements : un renvoi après coupure ne réapplique pas une écriture déjà reçue.
+- Échéances traitées sous verrou transactionnel, occurrences supprimées non recréées et créations retardées respectant les suppressions connues.
+- État de synchronisation en attente visible sans masquer les données locales.
+
 ## 2.0.5 - 2026-09-16
 
 - PWA : ouverture depuis les données enregistrées même lorsque le pont local est inaccessible hors Wi-Fi.

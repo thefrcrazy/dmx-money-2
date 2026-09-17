@@ -1,3 +1,4 @@
+import { applyBankMutation, bankKeys, type BankSnapshot } from './bankMutations';
 import type { Account, Budget, Category, ScheduledTransaction, Settings, Transaction } from '../types';
 import { getMobileApiBaseUrl } from '../utils/runtime';
 
@@ -34,6 +35,7 @@ interface OfflineDataRecord<K extends OfflineDataKey = OfflineDataKey> {
     dataKey: K;
     value: OfflineDataMap[K];
     updatedAt: number;
+    revision?: string;
 }
 
 const DB_NAME = 'dmxmoney-mobile-offline';
@@ -42,7 +44,6 @@ const DATA_STORE = 'data';
 const MUTATION_STORE = 'mutations';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
-let mutationSequence = 0;
 
 const currentScope = () => getMobileApiBaseUrl() || 'unpaired';
 const scopedKey = (key: OfflineDataKey, scope = currentScope()) => `${scope}:${key}`;
@@ -110,31 +111,67 @@ export const offlineStore = {
             dataKey: key,
             value,
             updatedAt: Date.now(),
+            revision: randomId(),
         } satisfies OfflineDataRecord<K>);
         await transactionDone(transaction);
     },
 
-    async updateCollection<T extends { id: string }>(
-        key: Exclude<OfflineDataKey, 'settings'>,
-        updater: (items: T[]) => T[],
-    ): Promise<void> {
-        const current = ((await this.getData(key)) || []) as unknown as T[];
-        await this.setData(key, updater(current) as unknown as OfflineDataMap[typeof key]);
+    async getRevision(key: OfflineDataKey): Promise<string | number | undefined> {
+        const db = await openDb();
+        const record = await requestToPromise<OfflineDataRecord | undefined>(db.transaction(DATA_STORE).objectStore(DATA_STORE).get(scopedKey(key)));
+        return record?.revision ?? record?.updatedAt;
     },
 
-    async enqueueMutation(path: string, method: string, body?: string): Promise<void> {
+    async acceptRemoteData<K extends OfflineDataKey>(key: K, value: OfflineDataMap[K], revision: string | number | undefined): Promise<OfflineDataMap[K]> {
         const db = await openDb();
-        const transaction = db.transaction(MUTATION_STORE, 'readwrite');
-        transaction.objectStore(MUTATION_STORE).put({
-            id: randomId(),
-            scope: currentScope(),
-            path,
-            method,
-            body,
-            createdAt: Date.now(),
-            sequence: ++mutationSequence,
-        } satisfies OfflineMutation);
-        await transactionDone(transaction);
+        const scope = currentScope();
+        const tx = db.transaction([DATA_STORE, MUTATION_STORE], 'readwrite');
+        const done = transactionDone(tx);
+        const data = tx.objectStore(DATA_STORE);
+        const [current, queued] = await Promise.all([
+            requestToPromise<OfflineDataRecord<K> | undefined>(data.get(scopedKey(key, scope))),
+            requestToPromise<OfflineMutation[]>(tx.objectStore(MUTATION_STORE).getAll()),
+        ]);
+        const changed = (current?.revision ?? current?.updatedAt) !== revision || queued.some(item => item.scope === scope);
+        if (changed && current) {
+            await done;
+            return current.value;
+        }
+        data.put({ key: scopedKey(key, scope), scope, dataKey: key, value, updatedAt: Date.now(), revision: randomId() });
+        await done;
+        return value;
+    },
+
+    async commitBankMutation(path: string, method: string, body?: string, settings?: Settings): Promise<void> {
+        const db = await openDb();
+        const scope = currentScope();
+        const transaction = db.transaction([DATA_STORE, MUTATION_STORE], 'readwrite');
+        const done = transactionDone(transaction);
+        const dataStore = transaction.objectStore(DATA_STORE);
+        const requests = bankKeys.map(key => requestToPromise<OfflineDataRecord | undefined>(dataStore.get(scopedKey(key, scope))));
+        const queued = requestToPromise<OfflineMutation[]>(transaction.objectStore(MUTATION_STORE).getAll());
+        try {
+            const [records, pending] = await Promise.all([Promise.all(requests), queued]);
+            const createdAt = pending.reduce((latest, item) => Math.max(latest, item.createdAt), Date.now());
+            const sequence = pending.reduce((latest, item) => Math.max(latest, item.sequence || 0), 0) + 1;
+            const snapshot = Object.fromEntries(bankKeys.map((key, index) => [key, records[index]?.value ?? []])) as unknown as BankSnapshot;
+            const mutation = settings ? { method, body } : applyBankMutation(snapshot, path, method, body);
+            if (settings) dataStore.put({ key: scopedKey('settings', scope), scope, dataKey: 'settings', value: settings, updatedAt: Date.now(), revision: randomId() });
+            bankKeys.forEach((key, index) => {
+                // Don't turn a partial cache into a complete bank snapshot.
+                if (records[index] || snapshot[key].length > 0) {
+                    dataStore.put({ key: scopedKey(key, scope), scope, dataKey: key, value: snapshot[key], updatedAt: Date.now(), revision: randomId() });
+                }
+            });
+            transaction.objectStore(MUTATION_STORE).put({
+                id: randomId(), scope, path, ...mutation, createdAt, sequence,
+            } satisfies OfflineMutation);
+        } catch (error) {
+            transaction.abort();
+            await done.catch(() => undefined);
+            throw error;
+        }
+        await done;
     },
 
     async listMutations(): Promise<OfflineMutation[]> {

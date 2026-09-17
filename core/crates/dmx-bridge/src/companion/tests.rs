@@ -290,3 +290,252 @@ fn transfer_updates_are_atomic_and_cannot_retarget_unrelated_transactions() {
     // Stale retries must not produce a half-old, half-new transfer.
     assert_eq!(harness.request("POST", "/api/transfers", Some(&payload), true).0, 409);
 }
+
+#[test]
+fn offline_field_edits_preserve_desktop_changes_and_replays_are_noops() {
+    let harness = Harness::start();
+    let account = r##"{"id":"sync-account","name":"Courant","type":"Courant","initialBalance":100,"color":"#3b82f6","icon":"Wallet"}"##;
+    assert_eq!(harness.request("POST", "/api/accounts", Some(account), true).0, 201);
+    let base = json!({"id":"sync-tx","date":"2026-09-17","accountId":"sync-account","type":"expense","amount":12.5,"category":"5","description":"Courses","checked":false});
+    assert_eq!(
+        harness
+            .request("POST", "/api/transactions", Some(&base.to_string()), true)
+            .0,
+        201
+    );
+    let mut desktop = base.clone();
+    desktop["amount"] = json!(20.0);
+    assert_eq!(
+        harness
+            .request("PUT", "/api/transactions", Some(&desktop.to_string()), true)
+            .0,
+        200
+    );
+    let mut mobile = base.clone();
+    mobile["checked"] = json!(true);
+    mobile["_base"] = base.clone();
+    mobile["_mutationId"] = json!("offline-check-1");
+    assert_eq!(
+        harness
+            .request("PATCH", "/api/transactions", Some(&mobile.to_string()), true)
+            .0,
+        200
+    );
+    let tx = harness
+        .engine
+        .snapshot()
+        .unwrap()
+        .transactions
+        .iter()
+        .find(|tx| tx.id == "sync-tx")
+        .unwrap()
+        .clone();
+    assert_eq!(tx.amount, 20.0);
+    assert!(tx.checked);
+    // The desktop unchecks it after the first send. A lost acknowledgement must not re-check it.
+    assert_eq!(
+        harness
+            .request("PUT", "/api/transactions", Some(&desktop.to_string()), true)
+            .0,
+        200
+    );
+    assert_eq!(
+        harness
+            .request("PATCH", "/api/transactions", Some(&mobile.to_string()), true)
+            .0,
+        200
+    );
+    assert!(!harness.engine.snapshot().unwrap().transactions[0].checked);
+    mobile["amount"] = json!(999.0);
+    assert_eq!(
+        harness
+            .request("PATCH", "/api/transactions", Some(&mobile.to_string()), true)
+            .0,
+        409
+    );
+    // A delayed creation cannot resurrect a deleted transaction.
+    assert_eq!(
+        harness.request("DELETE", "/api/transactions/sync-tx", None, true).0,
+        200
+    );
+    assert_eq!(
+        harness
+            .request("POST", "/api/transactions", Some(&base.to_string()), true)
+            .0,
+        201
+    );
+    assert!(harness.engine.snapshot().unwrap().transactions.is_empty());
+}
+
+#[test]
+fn replaying_mobile_crud_never_duplicates_or_resurrects_bank_records() {
+    let harness = Harness::start();
+    let account =
+        json!({"id":"a-sync","name":"Courant","type":"Courant","initialBalance":100,"color":"#007AFF","icon":"Wallet"});
+    let category = json!({"id":"c-sync","name":"Test","color":"#007AFF","icon":"Tag"});
+    let budget = json!({"id":"b-sync","name":"Budget","amount":100,"category":"5","accountId":"a-sync"});
+    let scheduled = json!({"id":"s-sync","description":"Loyer","amount":10,"type":"expense","frequency":"monthly","accountId":"a-sync","nextDate":"2026-09-01","category":"5"});
+    for (resource, item) in [
+        ("accounts", account),
+        ("categories", category),
+        ("budgets", budget),
+        ("scheduled", scheduled.clone()),
+    ] {
+        let path = format!("/api/{resource}");
+        for _ in 0..3 {
+            assert_eq!(harness.request("POST", &path, Some(&item.to_string()), true).0, 201);
+        }
+        let (_, _, body) = harness.request("GET", &path, None, true);
+        let records: Vec<serde_json::Value> = serde_json::from_str(&body).unwrap();
+        assert_eq!(records.iter().filter(|row| row["id"] == item["id"]).count(), 1);
+        let mut edited = item.clone();
+        edited["_base"] = item.clone();
+        edited["_mutationId"] = json!(format!("edit-{resource}"));
+        if resource == "scheduled" {
+            edited["description"] = json!("Nouveau libellé");
+        } else {
+            edited["name"] = json!("Nouveau libellé");
+        }
+        assert_eq!(harness.request("PATCH", &path, Some(&edited.to_string()), true).0, 200);
+    }
+    let today = dmx_core::dates::today_local();
+    harness.engine.process_due_scheduled(today).unwrap();
+    let count = harness.engine.snapshot().unwrap().transactions.len();
+    assert!(count > 0);
+    // Both the phone and desktop request processing of the same occurrence.
+    for _ in 0..3 {
+        assert_eq!(harness.request("POST", "/api/scheduled/process-due", None, true).0, 200);
+        harness.engine.process_due_scheduled(today).unwrap();
+    }
+    let mut stale_edit = scheduled.clone();
+    stale_edit["description"] = json!("Libellé hors ligne");
+    stale_edit["_base"] = scheduled;
+    stale_edit["_mutationId"] = json!("edit-after-due");
+    assert_eq!(
+        harness
+            .request("PATCH", "/api/scheduled", Some(&stale_edit.to_string()), true)
+            .0,
+        200
+    );
+    harness.engine.process_due_scheduled(today).unwrap();
+    assert_eq!(harness.engine.snapshot().unwrap().transactions.len(), count);
+    assert!(harness
+        .engine
+        .snapshot()
+        .unwrap()
+        .scheduled
+        .iter()
+        .all(|item| item.next_date > today.to_string()));
+    for (resource, id) in [
+        ("scheduled", "s-sync"),
+        ("budgets", "b-sync"),
+        ("categories", "c-sync"),
+        ("accounts", "a-sync"),
+    ] {
+        assert_eq!(
+            harness
+                .request("DELETE", &format!("/api/{resource}/{id}"), None, true)
+                .0,
+            200
+        );
+        assert_eq!(
+            harness
+                .request("DELETE", &format!("/api/{resource}/{id}"), None, true)
+                .0,
+            200
+        );
+    }
+}
+
+#[test]
+fn a_receipted_transfer_retry_preserves_later_desktop_edits() {
+    let harness = Harness::start();
+    for id in ["from-account", "to-account"] {
+        let account =
+            json!({"id":id,"name":id,"type":"Courant","initialBalance":100,"color":"#007AFF","icon":"Wallet"});
+        assert_eq!(
+            harness
+                .request("POST", "/api/accounts", Some(&account.to_string()), true)
+                .0,
+            201
+        );
+    }
+    let from = json!({"id":"out","date":"2026-09-17","accountId":"from-account","type":"expense","amount":10,"category":"transfer","description":"Virement","checked":false,"isTransfer":true,"linkedTransactionId":"in"});
+    let mut to = from.clone();
+    to["id"] = json!("in");
+    to["accountId"] = json!("to-account");
+    to["type"] = json!("income");
+    to["linkedTransactionId"] = json!("out");
+    let payload = json!({"fromTransaction":from,"toTransaction":to,"_mutationId":"transfer-retry"});
+    assert_eq!(
+        harness
+            .request("POST", "/api/transfers", Some(&payload.to_string()), true)
+            .0,
+        201
+    );
+    let mut edit = payload["fromTransaction"].clone();
+    edit["amount"] = json!(20);
+    edit["checked"] = json!(true);
+    assert_eq!(
+        harness
+            .request("PUT", "/api/transactions", Some(&edit.to_string()), true)
+            .0,
+        200
+    );
+    for _ in 0..3 {
+        assert_eq!(
+            harness
+                .request("POST", "/api/transfers", Some(&payload.to_string()), true)
+                .0,
+            200
+        );
+    }
+    let snapshot = harness.engine.snapshot().unwrap();
+    assert_eq!(snapshot.transactions.len(), 2);
+    assert!(snapshot.transactions.iter().all(|tx| tx.amount == 20.0 && tx.checked));
+}
+
+#[test]
+fn an_acknowledgement_lost_after_a_once_occurrence_cannot_recreate_it() {
+    let harness = Harness::start();
+    let account = json!({"id":"once-account","name":"Courant","type":"Courant","initialBalance":100,"color":"#007AFF","icon":"Wallet"});
+    assert_eq!(
+        harness
+            .request("POST", "/api/accounts", Some(&account.to_string()), true)
+            .0,
+        201
+    );
+    let scheduled = json!({"id":"once","description":"Unique","amount":10,"type":"expense","frequency":"once","accountId":"once-account","nextDate":"2026-09-01","category":"5"});
+    assert_eq!(
+        harness
+            .request("POST", "/api/scheduled", Some(&scheduled.to_string()), true)
+            .0,
+        201
+    );
+    std::thread::scope(|scope| {
+        let first = scope.spawn(|| {
+            harness
+                .engine
+                .process_due_scheduled(dmx_core::dates::today_local())
+                .unwrap()
+        });
+        let second = scope.spawn(|| {
+            harness
+                .engine
+                .process_due_scheduled(dmx_core::dates::today_local())
+                .unwrap()
+        });
+        first.join().unwrap();
+        second.join().unwrap();
+    });
+    assert_eq!(
+        harness
+            .request("POST", "/api/scheduled", Some(&scheduled.to_string()), true)
+            .0,
+        201
+    );
+    assert_eq!(harness.request("POST", "/api/scheduled/process-due", None, true).0, 200);
+    let snapshot = harness.engine.snapshot().unwrap();
+    assert_eq!(snapshot.transactions.len(), 1);
+    assert!(snapshot.scheduled.is_empty());
+}
