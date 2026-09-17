@@ -50,3 +50,10 @@ test('successive offline edits preserve the right base for each queued patch', a
     const pending = await offlineStore.listMutations();
     expect(pending.map(item => JSON.parse(item.body!)._base.amount)).toEqual([10, 20]);
 });
+test('editing a budget leaves unrelated cached collections untouched', async () => {
+    await offlineStore.setData('accounts', []);
+    const revision = await offlineStore.getRevision('accounts');
+    await offlineStore.commitBankMutation('/api/budgets', 'POST', '{"id":"budget","amount":10}');
+    expect(await offlineStore.getRevision('accounts')).toBe(revision);
+    expect(await offlineStore.getData('transactions')).toBeNull();
+});

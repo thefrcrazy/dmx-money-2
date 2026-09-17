@@ -1,4 +1,4 @@
-import { applyBankMutation, bankKeys, type BankSnapshot } from './bankMutations';
+import { applyBankMutation, bankKeys, type BankSnapshot, type BankKey } from './bankMutations';
 import type { Account, Budget, Category, ScheduledTransaction, Settings, Transaction } from '../types';
 import { getMobileApiBaseUrl } from '../utils/runtime';
 
@@ -148,16 +148,22 @@ export const offlineStore = {
         const transaction = db.transaction([DATA_STORE, MUTATION_STORE], 'readwrite');
         const done = transactionDone(transaction);
         const dataStore = transaction.objectStore(DATA_STORE);
-        const requests = bankKeys.map(key => requestToPromise<OfflineDataRecord | undefined>(dataStore.get(scopedKey(key, scope))));
+        const resource = path.split('/')[2];
+        const affected: BankKey[] = settings ? []
+            : resource === 'transfers' ? ['transactions']
+            : resource === 'accounts' && method === 'DELETE' ? ['accounts', 'transactions', 'scheduled', 'budgets']
+            : resource === 'budgets' && method === 'DELETE' ? ['budgets', 'scheduled']
+            : bankKeys.filter(key => key === resource);
+        const requests = affected.map(key => requestToPromise<OfflineDataRecord | undefined>(dataStore.get(scopedKey(key, scope))));
         const queued = requestToPromise<OfflineMutation[]>(transaction.objectStore(MUTATION_STORE).getAll());
         try {
             const [records, pending] = await Promise.all([Promise.all(requests), queued]);
             const createdAt = pending.reduce((latest, item) => Math.max(latest, item.createdAt), Date.now());
             const sequence = pending.reduce((latest, item) => Math.max(latest, item.sequence || 0), 0) + 1;
-            const snapshot = Object.fromEntries(bankKeys.map((key, index) => [key, records[index]?.value ?? []])) as unknown as BankSnapshot;
+            const snapshot = Object.fromEntries(bankKeys.map(key => [key, records[affected.indexOf(key)]?.value ?? []])) as unknown as BankSnapshot;
             const mutation = settings ? { method, body } : applyBankMutation(snapshot, path, method, body);
             if (settings) dataStore.put({ key: scopedKey('settings', scope), scope, dataKey: 'settings', value: settings, updatedAt: Date.now(), revision: randomId() });
-            bankKeys.forEach((key, index) => {
+            affected.forEach((key, index) => {
                 // Don't turn a partial cache into a complete bank snapshot.
                 if (records[index] || snapshot[key].length > 0) {
                     dataStore.put({ key: scopedKey(key, scope), scope, dataKey: key, value: snapshot[key], updatedAt: Date.now(), revision: randomId() });
