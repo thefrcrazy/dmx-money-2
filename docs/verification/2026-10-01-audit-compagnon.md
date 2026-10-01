@@ -17,6 +17,12 @@ Le nouveau Worker et sa PWA sont publiés sur
 **Aucune nouvelle release desktop ni aucun installeur Windows signé n’a été publié.**
 Les applications déjà installées nécessitent une nouvelle build pour utiliser ce relais.
 
+La [CI du code `0f40717`](https://github.com/thefrcrazy/dmx-money-2/actions/runs/36876164473)
+a validé Rust, PWA/Workers, Linux, Apple et Windows. Elle reconstruit les bindings et les
+binaires à partir des nouvelles sources : GTK en release avec installation et métadonnées,
+WinUI x64 avec tests et démarrage/navigation, macOS moderne et Intel ciblant 10.15,
+captures AppKit et iOS simulateur arm64. Ce passage ne publie pas d’installeur signé.
+
 ## Défauts et corrections
 
 | Zone | Problème constaté | Correction |
@@ -94,11 +100,13 @@ assimilés à une preuve de vulnérabilité exploitable dans l’application.
   valide ne garantit pas l’absence de tout avertissement SmartScreen lié à la réputation.
   Voir [la procédure de signature](../release.md#signature-windows-et-smart-app-control).
 - **Compilation native** : les builds Swift locaux utilisent le XCFramework préexistant ;
-  les nouvelles sources Rust sont testées séparément. Reconstruire noyau, bindings et binaires
-  de distribution avant livraison. WinUI complet doit être compilé/exécuté sur Windows.
+  les nouvelles sources Rust sont testées séparément en local. La CI a ensuite reconstruit
+  noyau, bindings et applications Apple/Windows/Linux, avec démarrage WinUI. Une release
+  signée et des essais d’installation restent nécessaires avant distribution publique.
 - **Catalina** : Xcode 27 installé refuse la cible 10.15. La même interface AppKit compile
   avec une cible 12.0 temporaire en ligne de commande ; la cible projet 10.15 reste conservée.
-  Pas de validation sur macOS Catalina réel. Pas de test iCloud réel avec changement d’Apple ID.
+  La CI avec son Xcode compatible a réussi la compilation Intel ciblant 10.15. Pas de
+  validation sur macOS Catalina réel. Pas de test iCloud réel avec changement d’Apple ID.
 - **Confidentialité** : le Worker ne reçoit pas la clé maîtresse ou les données financières
   en clair, mais voit IP, routage, horaires et tailles. Un opérateur qui modifie le JavaScript
   de la PWA peut compromettre le client ; une URL cachée n’est pas une barrière de sécurité.

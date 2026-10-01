@@ -22,6 +22,11 @@
 - **34 tests .NET sur 34 réussis**, aucun ignoré : suite complète
   `windows/tests/DmxMoney.Tests`, incluant noyau/interops, modèles de vue, 17 contrôles de
   l'updater et 2 régressions du compagnon distant. Interops et modèles recompilés sur macOS.
+- **CI Windows x64 réussie** sur le commit `0f40717` : compilation Rust, bindings C#,
+  application WinUI, suite .NET, démarrage et navigation automatique dans toutes les pages.
+  Le job publie seulement la version de développement avec `-SkipInstaller` ; il ne produit
+  aucune prétendue signature ni installeur officiel. Preuve :
+  [job Windows du run 36876164473](https://github.com/thefrcrazy/dmx-money-2/actions/runs/36876164473/job/110416260391).
 - Parsing PowerShell des trois scripts de distribution et tests de refus réussis : version
   contenant une injection, signature absente/incomplète, combinaison excluant la vérification
   de l'installeur et endpoint de signature HTTP. Le runtime PowerShell portable officiel
@@ -79,8 +84,9 @@ L'audit par restauration et le contrôle du catalogue ci-dessus ont donc été u
   le rôle de signature et les variables GitHub décrits dans `docs/release.md`.
 - Exécuter le pipeline Windows, vérifier les signatures réelles et essayer installation,
   désinstallation et mise à jour x64/arm64 sous Windows 11 avec Smart App Control actif.
-- Compiler/exécuter les interfaces WinUI et GTK sur leurs systèmes. Leurs builds complets
-  et parcours visuels ne sont pas validés par ces tests sur macOS.
+- Compiler/exécuter GTK et valider Windows arm64 sur leurs systèmes. La CI Windows x64
+  réussie confirme compilation et démarrage des pages, mais ne remplace pas une revue visuelle
+  ni les essais de synchronisation mobile ou de signature/distribution.
 
 Smart App Control exige une signature publiquement reconnue lorsque la réputation ne suffit
 pas. SmartScreen gère séparément sa réputation : une signature valide, y compris EV ou

@@ -106,6 +106,15 @@ Le workflow utilise **Azure Artifact Signing**, profil **Public Trust**, avec au
 OIDC et aucun export de clé privée. La validation d'identité Microsoft et le compte Azure
 doivent être configurés réellement avant la première release signée :
 
+Public Trust accepte les organisations de l’Union européenne ; les validations individuelles
+sont actuellement limitées aux États-Unis et au Canada. Pour Developmax, utiliser l’identité
+légale justifiée de l’organisation, sous réserve d’acceptation par Microsoft. Le nom d’un
+certificat autosigné ne remplace pas cette validation. Microsoft affiche Basic à
+9,99 USD/mois pour 5 000 signatures, avec tarification locale à vérifier avant souscription.
+Aucun abonnement de signature n’a été créé pendant cet audit. Sources :
+[éligibilité](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart),
+[tarif](https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-change-sku).
+
 1. Créer le compte Artifact Signing, faire valider l'identité et créer un profil Public Trust.
 2. Créer l'environnement GitHub `windows-signing`. Configurer une identité Azure fédérée dont
    le sujet est `repo:thefrcrazy/dmx-money-2:environment:windows-signing`, audience
