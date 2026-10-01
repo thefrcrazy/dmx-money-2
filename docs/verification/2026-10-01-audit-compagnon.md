@@ -18,11 +18,15 @@ L’ancien Worker `managed-bridge` reste séparé.
 **Aucune nouvelle release desktop ni aucun installeur Windows signé n’a été publié.**
 Les applications déjà installées nécessitent une nouvelle build pour utiliser ce relais.
 
-La [CI du code `0f40717`](https://github.com/thefrcrazy/dmx-money-2/actions/runs/36876164473)
+La [CI du code `a2b2e1e`](https://github.com/thefrcrazy/dmx-money-2/actions/runs/36890917651)
 a validé Rust, PWA/Workers, Linux, Apple et Windows. Elle reconstruit les bindings et les
 binaires à partir des nouvelles sources : GTK en release avec installation et métadonnées,
 WinUI x64 avec tests et démarrage/navigation, macOS moderne et Intel ciblant 10.15,
-captures AppKit et iOS simulateur arm64. Ce passage ne publie pas d’installeur signé.
+captures AppKit et iOS simulateur arm64. Le job Windows a aussi construit et vérifié
+un installeur autosigné de test et ses 277 binaires : 46 signatures de développement
+épinglées (Setup inclus) et 232 signatures fournisseurs publiques. Les 54 tests .NET,
+dont le verrou de fichier Windows réel, et le démarrage de toutes les pages ont réussi.
+Ce passage ne publie pas de release desktop.
 
 ## Défauts et corrections
 

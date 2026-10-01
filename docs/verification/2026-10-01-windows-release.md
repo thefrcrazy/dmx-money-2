@@ -13,15 +13,27 @@
   de l'utilisateur : identité locale `Developmax / Collignon Maxim`, clé RSA 3072 bits non
   exportable dans `CurrentUser/My`, export public `.cer` seulement, aucun ajout de confiance.
   Il est incompatible avec `-RequireSigning` et Artifact Signing, et produit ses paquets
-  dans `target/windows/development-releases`. Il vérifie la signature CMS avec le certificat
-  embarqué épinglé, le digest PE via le SIP Windows et le jeton d'horodatage RFC 3161.
+  dans `target/windows/development-releases`. Setup et les fichiers DmxMoney/Rust exigent
+  la signature CMS avec le certificat embarqué épinglé, le digest PE via le SIP Windows
+  et le jeton d'horodatage RFC 3161. Les autres binaires, y compris Squirrel/Update,
+  exigent soit cette signature de développement, soit une vraie signature publique
+  vérifiée par SignTool `/pa /all /tw`, car Velopack conserve les signatures fournisseurs
+  déjà approuvées. Aucun autre certificat autosigné non approuvé n'est accepté.
   Cette vérification d'intégrité ne certifie ni confiance publique ni autorisation SAC.
 - L'updater cible V2, exige HTTPS et SHA-256, conserve les canaux x64/arm64 et distingue
   vérification, téléchargement et confirmation du redémarrage. Les installations stables
   n'activent plus les préversions par défaut.
+- Les mises à jour téléchargent uniquement le paquet complet. L'application vérifie la
+  taille et le SHA-256 avant application, y compris en cas de fichier déjà en cache, puis
+  maintient le flux ouvert avec `FileShare.Read` jusqu'au lancement d'Update.exe. Un cache
+  invalide est retiré pour le prochain téléchargement. Les deltas sont désactivés car leur
+  reconstruction recomprime le ZIP et ne garantit pas l'empreinte du paquet complet.
+  Sources épinglées :
+  [cache et contrôle Velopack](https://github.com/velopack/velopack/blob/ed8600eee530a38d2669444b03eb240e56bc5aa3/src/lib-csharp/UpdateManager.cs),
+  [reconstruction des deltas](https://github.com/velopack/velopack/blob/ed8600eee530a38d2669444b03eb240e56bc5aa3/src/bins/src/commands/patch.rs).
 - Les empreintes du flux Velopack sont vérifiées sous leur format réel : **64 chiffres
   hexadécimaux SHA-256**. Le commentaire XML de `CalculateStreamSHA256` de Velopack
-  `0.0.1298` indique à tort base64 ; son implémentation et le paquet construit produisent
+  `0.0.1298` indique à tort base64 ; son implémentation produit
   de l'hexadécimal. Source :
   [implémentation officielle](https://github.com/velopack/velopack/blob/0.0.1298/src/lib-csharp/Util/IoUtil.cs).
 - Les interfaces du compagnon WinUI, GTK, SwiftUI moderne et DmxKit reconnaissent le relais
@@ -31,14 +43,22 @@
 
 ## Vérifications achevées
 
-- **41 tests .NET sur 41 réussis**, aucun ignoré : suite complète
-  `windows/tests/DmxMoney.Tests`, incluant noyau/interops, modèles de vue, 24 contrôles de
+- **54 tests .NET sur 54 réussis sur macOS et Windows**, aucun ignoré sous Windows : suite complète
+  `windows/tests/DmxMoney.Tests`, incluant noyau/interops, modèles de vue, 37 contrôles de
   l'updater et 2 régressions du compagnon distant. Interops et modèles recompilés sur macOS.
-- **CI Windows x64 réussie** sur le commit `0f40717` : compilation Rust, bindings C#,
-  application WinUI, suite .NET, démarrage et navigation automatique dans toutes les pages.
-  Le job publie seulement la version de développement avec `-SkipInstaller` ; il ne produit
-  aucune prétendue signature ni installeur officiel. Preuve :
-  [job Windows du run 36876164473](https://github.com/thefrcrazy/dmx-money-2/actions/runs/36876164473/job/110416260391).
+  Six contrôles de flux couvrent taille, empreinte, cache altéré, verrou et annulation ;
+  les noms de paquets invalides sont testés séparément. Le refus de suppression d'un fichier verrouillé a été réellement
+  exécuté sous Windows ; le résultat macOS seul ne valide pas cette sémantique spécifique.
+- **CI Windows x64 intégralement réussie** sur le commit `a2b2e1e` : compilation Rust,
+  bindings C#, application WinUI, vrai empaquetage Velopack `0.0.1298`, suite .NET et
+  navigation automatique dans toutes les pages. Le vérificateur a contrôlé **Setup et
+  277 binaires** : **46 signatures de développement épinglées (Setup inclus)** et
+  **232 signatures fournisseurs publiquement approuvées**, ainsi que les tailles et
+  SHA-256 HEX du vrai flux de paquets. Le certificat et sa clé de test ont été supprimés
+  en fin de build ; aucun certificat de confiance n'a été importé et aucune release
+  officielle n'a été publiée. L'artefact uploadé contient la publication native d'origine,
+  qui peut rester non signée : Velopack signe les copies de staging. Preuve :
+  [job Windows du run 36890917651](https://github.com/thefrcrazy/dmx-money-2/actions/runs/36890917651/job/110466530551).
 - Parsing PowerShell des six scripts de distribution/tests et compilation du helper C#
   Authenticode réussis sur macOS. Les 10 tests de refus d'options ont réussi : version
   contenant une injection, signature absente/incomplète, combinaison excluant la vérification
@@ -46,13 +66,13 @@
   Ces contrôles portables n'exécutent pas les API cryptographiques Windows.
   Le runtime PowerShell portable officiel
   `7.6.6`, conservé dans `/tmp`, a été vérifié contre le SHA-256 de son asset GitHub.
-- **Fixtures Authenticode réussies sous Windows** sur `fa6eb44` : certificat RSA 3072
+- **Fixtures Authenticode réussies sous Windows** sur `a2b2e1e` : certificat RSA 3072
   non exportable réellement non approuvé, signature CMS épinglée et digest PE vérifiés,
   mauvais certificat et fichier non signé refusés, PE/CMS altérés refusés, horodatage
   RFC 3161 Microsoft réel accepté et jeton altéré refusé. Le mode Public Trust a refusé
   cette fixture autosignée malgré une variable de développement héritée. Aucun ajout de
   confiance. Preuve : étape « Contrôles des scripts de distribution Windows » du
-  [job Windows 110448597857](https://github.com/thefrcrazy/dmx-money-2/actions/runs/36885613814/job/110448597857).
+  [job Windows 110466530551](https://github.com/thefrcrazy/dmx-money-2/actions/runs/36890917651/job/110466530551).
   Les deux premiers essais ont révélé le mode de décodage PKCS#7 et le diagnostic
   `CRYPT_E_ATTRIBUTES_MISSING`, corrigés sans réduire les contrôles d'intégrité.
 - Le code officiel Velopack `0.0.1298` confirme que `SHA256` du flux est un **HEX de
@@ -110,16 +130,14 @@ L'audit par restauration et le contrôle du catalogue ci-dessus ont donc été u
 
 ## Vérifications restant nécessaires
 
-- Valider la construction complète d'un paquet de développement autosigné dans la CI.
-  Sur `fa6eb44`, les fixtures et la compilation WinUI réussissent, mais l'empaquetage n'a
-  pas été exécuté car `vpk` manquait dans ce job qui utilisait auparavant `-SkipInstaller`.
-  La CI installe désormais le CLI `0.0.1298` avant l'empaquetage ; le résultat final du
-  paquet doit encore confirmer signatures de tous les binaires, horodatage et flux HEX.
-- Configurer réellement le compte Azure, la validation d'identité, le profil Public Trust,
-  le rôle de signature et les variables GitHub décrits dans `docs/release.md`.
-- Exécuter le pipeline Windows, vérifier les signatures réelles et essayer installation,
+- Pour une distribution avec signature publique, configurer le fournisseur reconnu choisi.
+  La voie Azure nécessite la validation d'identité, le profil Public Trust, le rôle de
+  signature et les variables GitHub décrits dans `docs/release.md`.
+- Exécuter le pipeline de release avec cette vraie identité publique et essayer installation,
   désinstallation et mise à jour x64/arm64 sous Windows 11 avec Smart App Control actif.
-- Compiler/exécuter GTK et valider Windows arm64 sur leurs systèmes. La CI Windows x64
+  Le paquet autosigné de test et le runner Windows ne valident pas cette autorisation SAC.
+- Exécuter GTK sur un bureau Linux réel et valider Windows arm64. La compilation GTK
+  a réussi dans la CI ; elle ne valide pas son exécution graphique. La CI Windows x64
   réussie confirme compilation et démarrage des pages, mais ne remplace pas une revue visuelle
   ni les essais de synchronisation mobile ou de signature/distribution.
 
