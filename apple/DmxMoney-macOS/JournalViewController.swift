@@ -47,6 +47,7 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
     private let tableView = JournalTableView()
     private var emptyView: NSView?
     private var rows: [JournalRow] = []
+    private var rowIndexes: [String: Int] = [:]
     private var cancellables = Set<AnyCancellable>()
     private var isApplyingSelection = false
 
@@ -139,16 +140,14 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
     private func reload() {
         guard isViewLoaded else { return }
         rows = model.rows
+        rowIndexes = Dictionary(rows.enumerated().map { ($0.element.transaction.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
         tableView.reloadData()
         applySelection()
         emptyView?.isHidden = !rows.isEmpty
     }
 
     private func applySelection() {
-        var indexes = IndexSet()
-        for (index, row) in rows.enumerated() where model.selection.contains(row.transaction.id) {
-            indexes.insert(index)
-        }
+        let indexes = IndexSet(model.selection.compactMap { rowIndexes[$0] })
         guard indexes != tableView.selectedRowIndexes else { return }
         isApplyingSelection = true
         tableView.selectRowIndexes(indexes, byExtendingSelection: false)

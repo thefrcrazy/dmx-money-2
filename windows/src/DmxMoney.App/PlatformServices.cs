@@ -13,10 +13,8 @@ namespace DmxMoney.App;
 /// <summary>Sélecteurs de fichiers, presse-papiers et mises à jour Velopack.</summary>
 public sealed class WindowsPlatformServices : IPlatformServices
 {
-    private const string DefaultUpdateUrl = "https://github.com/TheFRcRaZy/dmx-money-2/releases/latest/download";
-
     private readonly Window window;
-    private readonly UpdateManager? manager;
+    private UpdateManager? pendingManager;
     private UpdateInfo? pending;
     private bool isUpdating;
 
@@ -24,22 +22,6 @@ public sealed class WindowsPlatformServices : IPlatformServices
     {
         this.window = window;
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        var url = Environment.GetEnvironmentVariable("DMXMONEY_UPDATE_URL");
-        try
-        {
-            if (!string.IsNullOrWhiteSpace(url))
-            {
-                manager = new UpdateManager(new SimpleWebSource(url));
-            }
-            else
-            {
-                manager = new UpdateManager(new GithubSource("https://github.com/TheFRcRaZy/dmx-money-2", null, prerelease: true));
-            }
-        }
-        catch (Exception)
-        {
-            manager = null;
-        }
     }
 
     public bool UpdateAvailable => pending is not null;
@@ -51,15 +33,17 @@ public sealed class WindowsPlatformServices : IPlatformServices
             try
             {
                 var raw = ApplicationData.Current.LocalSettings.Values["DmxIncludePrereleases"];
-                return raw is bool b ? b : true;
+                return raw is bool b ? b : AppInfo.Version.Contains('-');
             }
             catch (Exception)
             {
-                return true;
+                return AppInfo.Version.Contains('-');
             }
         }
         set
         {
+            pending = null;
+            pendingManager = null;
             try
             {
                 ApplicationData.Current.LocalSettings.Values["DmxIncludePrereleases"] = value;
@@ -148,6 +132,16 @@ public sealed class WindowsPlatformServices : IPlatformServices
             pending = null;
             App.Store.ShowToast("Le téléchargement de la mise à jour a expiré. Réessayez.");
         }
+        catch (ArgumentException)
+        {
+            pending = null;
+            App.Store.ShowToast("Source de mise à jour invalide : DMXMONEY_UPDATE_URL doit utiliser HTTPS.");
+        }
+        catch (InvalidDataException)
+        {
+            pending = null;
+            App.Store.ShowToast("Mise à jour refusée : paquet ou empreinte SHA-256 invalide.");
+        }
         catch (Exception)
         {
             pending = null;
@@ -161,21 +155,30 @@ public sealed class WindowsPlatformServices : IPlatformServices
 
     private async Task InstallAvailableUpdateAsync()
     {
-        var url = Environment.GetEnvironmentVariable("DMXMONEY_UPDATE_URL");
-        var activeManager = manager;
-        if (string.IsNullOrWhiteSpace(url))
+        if (pending is not null && pendingManager is not null)
         {
-            try
+            var confirmation = new Microsoft.UI.Xaml.Controls.ContentDialog
             {
-                activeManager = new UpdateManager(new GithubSource("https://github.com/TheFRcRaZy/dmx-money-2", null, prerelease: IncludePrereleases));
-            }
-            catch (Exception)
-            {
-                activeManager = manager;
-            }
+                XamlRoot = (window.Content as FrameworkElement)?.XamlRoot,
+                Title = "Installer la mise à jour ?",
+                Content = "DmxMoney va télécharger la nouvelle version puis redémarrer.",
+                PrimaryButtonText = "Installer et redémarrer",
+                CloseButtonText = "Annuler",
+                DefaultButton = Microsoft.UI.Xaml.Controls.ContentDialogButton.Close,
+            };
+            if (await confirmation.ShowAsync() != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary) return;
+            App.Store.ShowToast("Téléchargement de la mise à jour…");
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+            // Velopack vérifie la taille et le SHA-256 de chaque paquet téléchargé avant application.
+            await pendingManager.DownloadUpdatesAsync(pending, null, timeout.Token);
+            pendingManager.ApplyUpdatesAndRestart(pending);
+            return;
         }
-
-        if (activeManager is null || !activeManager.IsInstalled)
+        var url = UpdatePolicy.ValidateSourceOverride(Environment.GetEnvironmentVariable("DMXMONEY_UPDATE_URL"));
+        var activeManager = url is not null
+            ? new UpdateManager(new SimpleWebSource(url))
+            : new UpdateManager(new GithubSource(UpdatePolicy.RepositoryUrl, null, prerelease: IncludePrereleases));
+        if (!activeManager.IsInstalled)
         {
             App.Store.ShowToast("Mise à jour automatique disponible sur la version installée.");
             return;
@@ -186,10 +189,13 @@ public sealed class WindowsPlatformServices : IPlatformServices
             App.Store.ShowToast("L'application est à jour.");
             return;
         }
-        App.Store.ShowToast("Téléchargement de la mise à jour…");
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        await activeManager.DownloadUpdatesAsync(pending, null, timeout.Token);
-        activeManager.ApplyUpdatesAndRestart(pending);
+        foreach (var asset in pending.DeltasToTarget.Prepend(pending.TargetFullRelease))
+        {
+            if (!UpdatePolicy.IsValidPackage(asset.FileName, asset.SHA256, asset.Size))
+                throw new InvalidDataException("Paquet de mise à jour invalide.");
+        }
+        pendingManager = activeManager;
+        App.Store.ShowToast("Nouvelle version disponible. Cliquez sur Installer pour télécharger et redémarrer.");
     }
 }
 

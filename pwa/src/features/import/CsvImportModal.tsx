@@ -38,7 +38,7 @@ const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose, file, 
     const [finalBalance, setFinalBalance] = useState('');
     const [categoryMapping, setCategoryMapping] = useState<Record<string, string>>({});
     const [isImporting, setIsImporting] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [importError, setError] = useState<string | null>(null);
 
     // Reset state when file changes or modal opens
     useEffect(() => {
@@ -59,19 +59,19 @@ const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose, file, 
         }
     }, [isOpen, file]);
 
-    const parsedData = useMemo(() => {
-        if (!file) return [];
+    const parsedResult = useMemo(() => {
+        if (!file) return { data: [], error: null };
         try {
             const rows = parseDelimitedRows(file.content, separator, hasHeader);
             if (rows.length === 0) throw new Error(hasHeader ? "Le fichier ne contient que l'en-tête." : "Le fichier est vide.");
 
-            return rows;
-        } catch (e: any) {
-            console.error("CSV Parsing error:", e);
-            setError(e.message || "Erreur lors de la lecture du fichier CSV");
-            return [];
+            return { data: rows, error: null };
+        } catch (error) {
+            return { data: [], error: error instanceof Error ? error.message : 'Erreur lors de la lecture du fichier CSV' };
         }
     }, [file, separator, hasHeader]);
+    const parsedData = parsedResult.data;
+    const error = importError || parsedResult.error;
 
     const previewData = useMemo(() => parsedData.slice(0, 5), [parsedData]);
 
@@ -134,8 +134,8 @@ const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose, file, 
         try {
             // 1. Parse transactions
             let processedTransactions = parsedData.map(row => {
-                const amount = parseBankAmount(row[mapping.amount]);
-                const date = parseBankDate(row[mapping.date]);
+                const amount = parseBankAmount(row[mapping.amount] || '');
+                const date = parseBankDate(row[mapping.date] || '');
                 const description = row[mapping.description] || 'Import CSV';
                 const rawCategory = mapping.category !== -1 ? row[mapping.category] : undefined;
 
@@ -160,10 +160,7 @@ const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose, file, 
                         return sum + (tx.type === 'income' ? tx.amount : -tx.amount);
                     }, 0);
 
-                    const final = parseFloat(finalBalance.replace(',', '.'));
-                    if (!isNaN(final)) {
-                        initialBalance = final - netChange;
-                    }
+                    initialBalance = parseBankAmount(finalBalance) - netChange;
                 }
 
                 targetAccountId = await addAccount({

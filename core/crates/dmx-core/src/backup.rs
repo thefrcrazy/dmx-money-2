@@ -76,17 +76,17 @@ pub fn summarize(file: &BackupFile) -> BackupSummary {
 }
 
 pub async fn build_backup(pool: &DbPool) -> CoreResult<BackupFile> {
-    let settings = settings::load_app_settings(pool).await?;
+    let snapshot = crate::snapshot::load(pool).await?;
     Ok(BackupFile {
         version: BACKUP_VERSION,
         timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         data: BackupData {
-            accounts: repo::list_accounts(pool).await?,
-            transactions: repo::list_transactions(pool).await?,
-            categories: repo::list_categories(pool).await?,
-            scheduled: repo::list_scheduled(pool).await?,
-            budgets: repo::list_budgets(pool).await?,
-            settings: Some(serde_json::to_value(settings).map_err(|error| CoreError::Io(error.to_string()))?),
+            accounts: snapshot.accounts,
+            transactions: snapshot.transactions,
+            categories: snapshot.categories,
+            scheduled: snapshot.scheduled,
+            budgets: snapshot.budgets,
+            settings: Some(serde_json::to_value(snapshot.settings).map_err(|error| CoreError::Io(error.to_string()))?),
         },
     })
 }
@@ -125,8 +125,14 @@ pub fn decode_backup(content: &str) -> CoreResult<BackupFile> {
     if !value.get("data").is_some_and(Value::is_object) {
         return Err(invalid_format());
     }
-    serde_json::from_value(value)
-        .map_err(|error| CoreError::import(format!("Le fichier de sauvegarde est corrompu. ({error})")))
+    let file: BackupFile = serde_json::from_value(value)
+        .map_err(|error| CoreError::import(format!("Le fichier de sauvegarde est corrompu. ({error})")))?;
+    if file.version > BACKUP_VERSION {
+        return Err(CoreError::import(
+            "Version de sauvegarde non supportée. Mettez l'application à jour.",
+        ));
+    }
+    Ok(file)
 }
 
 fn merge_by_id<T: Clone>(current: Vec<T>, incoming: &[T], id: impl Fn(&T) -> &str) -> Vec<T> {
@@ -161,6 +167,10 @@ fn settings_json_field(settings: &Value, key: &str) -> Option<String> {
 pub async fn restore_backup(pool: &DbPool, content: &str, mode: RestoreMode) -> CoreResult<BackupSummary> {
     let file = decode_backup(content)?;
     let summary = summarize(&file);
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .ctx("restauration de la sauvegarde")?;
 
     let data = match mode {
         RestoreMode::Replace => AppData {
@@ -171,21 +181,25 @@ pub async fn restore_backup(pool: &DbPool, content: &str, mode: RestoreMode) -> 
             budgets: file.data.budgets.clone(),
         },
         RestoreMode::Merge => AppData {
-            accounts: merge_by_id(repo::list_accounts(pool).await?, &file.data.accounts, |item| &item.id),
-            transactions: merge_by_id(repo::list_transactions(pool).await?, &file.data.transactions, |item| {
+            accounts: merge_by_id(repo::list_accounts(&mut *tx).await?, &file.data.accounts, |item| {
                 &item.id
             }),
-            categories: merge_by_id(repo::list_categories(pool).await?, &file.data.categories, |item| {
+            transactions: merge_by_id(
+                repo::list_transactions(&mut *tx).await?,
+                &file.data.transactions,
+                |item| &item.id,
+            ),
+            categories: merge_by_id(repo::list_categories(&mut *tx).await?, &file.data.categories, |item| {
                 &item.id
             }),
-            scheduled: merge_by_id(repo::list_scheduled(pool).await?, &file.data.scheduled, |item| &item.id),
-            budgets: merge_by_id(repo::list_budgets(pool).await?, &file.data.budgets, |item| &item.id),
+            scheduled: merge_by_id(repo::list_scheduled(&mut *tx).await?, &file.data.scheduled, |item| {
+                &item.id
+            }),
+            budgets: merge_by_id(repo::list_budgets(&mut *tx).await?, &file.data.budgets, |item| &item.id),
         },
     };
 
-    let mut tx = pool.begin().await.ctx("restauration de la sauvegarde")?;
     repo::replace_all_data(&mut tx, &data).await?;
-    tx.commit().await.ctx("restauration de la sauvegarde")?;
 
     if let (RestoreMode::Replace, Some(settings_value)) = (mode, file.data.settings.as_ref()) {
         let values = SettingsValuesPatch {
@@ -200,8 +214,8 @@ pub async fn restore_backup(pool: &DbPool, content: &str, mode: RestoreMode) -> 
             || values.custom_groups_order.is_some()
             || values.accounts_order.is_some()
         {
-            settings::apply_settings_patch(
-                pool,
+            settings::apply_settings_patch_locked(
+                &mut tx,
                 SettingsPatch {
                     schema_version: 2,
                     base_revision: i64::MAX,
@@ -213,6 +227,7 @@ pub async fn restore_backup(pool: &DbPool, content: &str, mode: RestoreMode) -> 
         }
     }
 
+    tx.commit().await.ctx("restauration de la sauvegarde")?;
     Ok(summary)
 }
 
@@ -311,6 +326,83 @@ mod tests {
         assert_eq!(snapshot.categories.len(), crate::seed::DEFAULT_CATEGORIES.len());
     }
 
+    #[tokio::test]
+    async fn settings_failure_rolls_back_the_restored_accounts_and_transactions() {
+        let source = populated_pool().await;
+        let encoded = export_backup(&source).await.unwrap();
+        let target = populated_pool().await;
+        let before = crate::snapshot::load(&target).await.unwrap();
+        sqlx::query("CREATE TRIGGER reject_settings_restore BEFORE UPDATE ON settings BEGIN SELECT RAISE(ABORT, 'test settings failure'); END")
+            .execute(&target).await.unwrap();
+        assert!(restore_backup(&target, &encoded, RestoreMode::Replace).await.is_err());
+        let after = crate::snapshot::load(&target).await.unwrap();
+        assert_eq!(after.accounts, before.accounts);
+        assert_eq!(after.transactions, before.transactions);
+        assert_eq!(after.settings.account_groups, before.settings.account_groups);
+        assert_eq!(after.data_version, before.data_version);
+    }
+
+    #[tokio::test]
+    async fn invalid_business_dates_and_negative_operation_amounts_do_not_replace_data() {
+        let pool = populated_pool().await;
+        let before = crate::snapshot::load(&pool).await.unwrap();
+        let file = build_backup(&pool).await.unwrap();
+        let mut negative_transaction = file.clone();
+        negative_transaction.data.transactions[0].amount = -12.5;
+        let mut invalid_transaction_date = file.clone();
+        invalid_transaction_date.data.transactions[0].date = "2026-02-31".into();
+        let mut negative_budget = file.clone();
+        negative_budget.data.budgets.push(Budget {
+            id: "bad-budget".into(),
+            name: "Invalid".into(),
+            amount: -20.0,
+            category: "5".into(),
+            account_id: None,
+        });
+        let mut invalid_scheduled = file.clone();
+        invalid_scheduled.data.scheduled.push(ScheduledTransaction {
+            id: "bad-scheduled".into(),
+            description: "Invalid".into(),
+            amount: 10.0,
+            transaction_type: TransactionType::Expense,
+            frequency: crate::models::Periodicity::Monthly,
+            account_id: before.accounts[0].id.clone(),
+            next_date: "2026-09-10".into(),
+            category: "5".into(),
+            to_account_id: None,
+            include_in_forecast: Some(true),
+            budget_id: None,
+            end_date: Some("2026-02-31".into()),
+        });
+        for invalid in [
+            negative_transaction,
+            invalid_transaction_date,
+            negative_budget,
+            invalid_scheduled,
+        ] {
+            assert!(
+                restore_backup(&pool, &encode_backup(&invalid).unwrap(), RestoreMode::Replace)
+                    .await
+                    .is_err()
+            );
+            let after = crate::snapshot::load(&pool).await.unwrap();
+            assert_eq!(after.accounts, before.accounts);
+            assert_eq!(after.transactions, before.transactions);
+            assert_eq!(after.data_version, before.data_version);
+        }
+
+        let mut negative_initial_balance = file;
+        negative_initial_balance.data.accounts[0].initial_balance = -100.0;
+        restore_backup(
+            &pool,
+            &encode_backup(&negative_initial_balance).unwrap(),
+            RestoreMode::Replace,
+        )
+        .await
+        .unwrap();
+        assert_eq!(repo::list_accounts(&pool).await.unwrap()[0].initial_balance, -100.0);
+    }
+
     #[test]
     fn rejects_invalid_content() {
         assert_eq!(
@@ -321,5 +413,6 @@ mod tests {
             decode_backup("%%%").unwrap_err().to_string(),
             "Le fichier de sauvegarde est corrompu."
         );
+        assert!(decode_backup("{\"version\":999,\"data\":{}}").is_err());
     }
 }

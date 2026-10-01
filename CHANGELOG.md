@@ -1,5 +1,13 @@
 # Changelog
 
+## Non publié
+
+- Compagnon Internet : relais Cloudflare commun, connexion WSS sortante du bureau, messages chiffrés AES-GCM et appairage par QR/passkey sans configuration DNS individuelle.
+- Journal : affichage mobile progressif, calculs et mises à jour de listes natives optimisés sur SwiftUI/AppKit, WinUI et GTK.
+- Imports et restauration : validation des dates et montants avant écriture, transactions atomiques et conservation des dépenses distinctes identiques.
+- Synchronisation : protection des accusés de réception CloudKit, changement de compte iCloud, cohérence des snapshots et validation des mutations distantes.
+- Distribution Windows : signature Authenticode publique exigée avant publication, contrôle des exécutables/DLL et des paquets, installation des mises à jour après confirmation.
+
 ## 2.0.6 - 2026-09-17
 
 - Synchronisation hors ligne : cache et messages sauvegardés atomiquement ; protection contre les saisies concurrentes et les réponses réseau anciennes.

@@ -22,6 +22,7 @@ mod api;
 mod assets;
 mod bank_sync;
 mod http;
+pub(crate) mod relay;
 mod response;
 mod settings;
 mod state;

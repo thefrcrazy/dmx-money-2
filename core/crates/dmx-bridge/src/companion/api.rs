@@ -101,6 +101,7 @@ pub(super) async fn route_api_request(
             Ok((ok(200), true))
         }
 
+        ("GET", "transactions") if id == Some("page") => transaction_page(pool, &request.path).await,
         ("GET", "transactions") => Ok((
             json_response(200, repo::list_transactions(pool).await.map_err(core_error)?),
             false,
@@ -350,6 +351,61 @@ pub(super) async fn route_api_request(
 
         _ => Ok((error_response(404, "Route introuvable"), false)),
     }
+}
+
+/// Each page is one SQLite read snapshot; a changed bank version rejects the next page
+/// rather than returning an inconsistent mix of two different journals.
+async fn transaction_page(pool: &DbPool, path: &str) -> Result<(HttpResponse, bool), String> {
+    let query = path.split_once('?').map(|(_, query)| query).unwrap_or_default();
+    let parameters: HashMap<_, _> = ::url::form_urlencoded::parse(query.as_bytes()).into_owned().collect();
+    let parse = |key: &str, default: i64| -> Result<i64, ()> {
+        parameters
+            .get(key)
+            .map(|value| value.parse::<i64>().map_err(|_| ()))
+            .unwrap_or(Ok(default))
+    };
+    let (Ok(offset), Ok(limit), Ok(version)) = (parse("offset", 0), parse("limit", 2000), parse("version", -1)) else {
+        return Ok((error_response(400, "Pagination invalide"), false));
+    };
+    if !(0..=i32::MAX as i64).contains(&offset) || !(1..=2000).contains(&limit) || version < -1 {
+        return Ok((error_response(400, "Pagination invalide"), false));
+    }
+    let mut read = pool
+        .begin()
+        .await
+        .map_err(|error| map_db_error(error, "lecture du journal paginé"))?;
+    let data_version = dmx_core::db::data_version(&mut *read).await.map_err(core_error)?;
+    if version != -1 && version != data_version {
+        return Ok((
+            error_response(
+                409,
+                "Le journal a changé pendant sa lecture ; recommencez la synchronisation",
+            ),
+            false,
+        ));
+    }
+    let rows = sqlx::query("SELECT * FROM transactions ORDER BY date DESC, rowid DESC LIMIT $1 OFFSET $2")
+        .bind(limit + 1)
+        .bind(offset)
+        .fetch_all(&mut *read)
+        .await
+        .map_err(|error| map_db_error(error, "lecture du journal paginé"))?;
+    let next_offset = (rows.len() > limit as usize).then_some(offset + limit);
+    let transactions: Vec<_> = rows
+        .iter()
+        .take(limit as usize)
+        .map(repo::transaction_from_row)
+        .collect();
+    read.commit()
+        .await
+        .map_err(|error| map_db_error(error, "lecture du journal paginé"))?;
+    Ok((
+        json_response(
+            200,
+            json!({ "transactions": transactions, "dataVersion": data_version, "nextOffset": next_offset }),
+        ),
+        false,
+    ))
 }
 
 fn parse_json<T: DeserializeOwned>(body: &[u8]) -> Result<T, String> {

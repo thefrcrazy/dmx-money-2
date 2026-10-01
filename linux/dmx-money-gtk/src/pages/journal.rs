@@ -1,6 +1,7 @@
 //! Journal : tableau des opérations, édition en ligne, sélection multiple, filtres.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -254,25 +255,18 @@ impl Page {
             let selection_label = page.selection_label.clone();
             let selected_ids = page.selected_ids.clone();
             let model = page.model.clone();
+            let syncing = syncing.clone();
             selection.connect_selection_changed(move |selection, _, _| {
-                let mut ids = Vec::new();
-                for index in 0..model.n_items() {
-                    if selection.is_selected(index) {
-                        if let Some(row) = row_at(&model, index) {
-                            ids.push(row.transaction.id.clone());
-                        }
-                    }
+                if syncing.get() {
+                    return;
                 }
-                selection_label.set_text(&format!(
-                    "{} {}",
-                    ids.len(),
-                    if ids.len() > 1 {
-                        "sélectionnées"
-                    } else {
-                        "sélectionnée"
-                    }
-                ));
-                selection_bar.set_visible(!ids.is_empty());
+                let selected = selection.selection();
+                let ids = gtk::BitsetIter::init_first(&selected)
+                    .into_iter()
+                    .flat_map(|(rest, first)| std::iter::once(first).chain(rest))
+                    .filter_map(|index| transaction_id_at(&model, index))
+                    .collect::<Vec<_>>();
+                update_selection_bar(&selection_bar, &selection_label, ids.len());
                 *selected_ids.borrow_mut() = ids;
             });
         }
@@ -377,32 +371,43 @@ impl Page {
         let category_count = filters.categories.len();
         drop(filters);
 
-        let Some(view) = self.store.read(|engine| engine.journal(&query)) else {
+        let Some(mut view) = self.store.read(|engine| engine.journal(&query)) else {
             return;
         };
 
         self.syncing.set(true);
-        let selected = self.selected_ids.borrow().clone();
-        self.model.remove_all();
-        for row in &view.rows {
-            self.model.append(&glib::BoxedAnyObject::new(row.clone()));
-        }
+        let selected: HashSet<_> = self.selected_ids.borrow().iter().cloned().collect();
+        let row_count = view.rows.len();
+        let mut kept = Vec::with_capacity(selected.len());
+        let mut selected_indexes = Vec::with_capacity(selected.len());
         for (index, row) in view.rows.iter().enumerate() {
             if selected.contains(&row.transaction.id) {
-                self.selection.select_item(index as u32, false);
+                selected_indexes.push(index as u32);
+                kept.push(row.transaction.id.clone());
             }
         }
+        // Une notification du modèle, sans copier les données de chaque ligne.
+        let objects: Vec<_> = std::mem::take(&mut view.rows)
+            .into_iter()
+            .map(glib::BoxedAnyObject::new)
+            .collect();
+        self.model.splice(0, self.model.n_items(), &objects);
+        for index in selected_indexes {
+            self.selection.select_item(index, false);
+        }
         self.syncing.set(false);
+        update_selection_bar(&self.selection_bar, &self.selection_label, kept.len());
+        *self.selected_ids.borrow_mut() = kept;
 
         self.summary.set_text(&format!(
             "{} / {} lignes · Net {}{}",
-            view.rows.len(),
+            row_count,
             view.total_transaction_count,
             if view.visible_net >= 0.0 { "+" } else { "" },
             format::money(view.visible_net)
         ));
 
-        let is_empty = view.rows.is_empty();
+        let is_empty = row_count == 0;
         self.empty.set_visible(is_empty);
         self.table.set_visible(!is_empty);
         self.empty_message.set_text(if view.has_filters {
@@ -420,11 +425,19 @@ impl Page {
     }
 }
 
-fn row_at(model: &gio::ListStore, index: u32) -> Option<JournalRow> {
+fn update_selection_bar(bar: &gtk::Box, label: &gtk::Label, count: usize) {
+    label.set_text(&format!(
+        "{count} {}",
+        if count > 1 { "sélectionnées" } else { "sélectionnée" }
+    ));
+    bar.set_visible(count > 0);
+}
+
+fn transaction_id_at(model: &gio::ListStore, index: u32) -> Option<String> {
     model
         .item(index)
         .and_downcast::<glib::BoxedAnyObject>()
-        .map(|object| object.borrow::<JournalRow>().clone())
+        .map(|object| object.borrow::<JournalRow>().transaction.id.clone())
 }
 
 fn multi_select_button(

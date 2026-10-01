@@ -219,7 +219,7 @@ fn parse_content_length(header_text: &str) -> Result<usize, String> {
     Ok(length.unwrap_or(0))
 }
 
-fn handle_request(request: HttpRequest, host: &BridgeHost, security: &ServerSecurity) -> HttpResponse {
+pub(super) fn handle_request(request: HttpRequest, host: &BridgeHost, security: &ServerSecurity) -> HttpResponse {
     let path = strip_query(&request.path);
 
     if request.method == "OPTIONS" {

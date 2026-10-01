@@ -81,7 +81,7 @@ impl Page {
         let bridge_labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
         bridge_labels.set_hexpand(true);
         let bridge_title_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let bridge_title = gtk::Label::new(Some("Accès mobile local + PWA"));
+        let bridge_title = gtk::Label::new(Some("Accès depuis votre téléphone"));
         bridge_title.add_css_class("heading");
         bridge_title_row.append(&bridge_title);
         let bridge_badge = gtk::Label::new(None);
@@ -98,8 +98,8 @@ impl Page {
 
         let urls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         urls.set_homogeneous(true);
-        let (app_url_card, app_url) = url_tile("PWA mobile", "Globe2");
-        let (api_url_card, api_url) = url_tile("API locale sécurisée", "Server");
+        let (app_url_card, app_url) = url_tile("Compagnon mobile", "Globe2");
+        let (api_url_card, api_url) = url_tile("Connexion au bureau", "Server");
         urls.append(&app_url_card);
         urls.append(&api_url_card);
         bridge_content.append(&urls);
@@ -140,7 +140,7 @@ impl Page {
         copy_button.set_visible(false);
         right.append(&copy_button);
         right.append(&widgets::caption(
-            "Ouvre la PWA sur mobile, puis appaire le téléphone avec ce QR. Génère un QR par appareil : plusieurs mobiles peuvent rester appairés.",
+            "Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. En accès Internet, le Wi-Fi, la 4G et la 5G fonctionnent ; l’ordinateur doit rester allumé et connecté. Un QR par appareil.",
         ));
         bridge_body.append(&right);
         bridge_content.append(&bridge_body);
@@ -399,6 +399,10 @@ impl Page {
         let enabled = secure.as_ref().map(|bridge| bridge.enabled).unwrap_or(false);
         let active = secure.as_ref().map(|bridge| bridge.active).unwrap_or(false);
         let certificate_ready = secure.as_ref().map(|bridge| bridge.certificate_ready).unwrap_or(false);
+        let is_remote = secure
+            .as_ref()
+            .and_then(|bridge| bridge.api_url.as_deref())
+            .is_some_and(|url| url.contains("/relay/"));
 
         self.bridge_switch.set_sensitive(false);
         self.bridge_switch.set_active(enabled);
@@ -407,7 +411,12 @@ impl Page {
         let (badge, detail) = if !enabled {
             (
                 "Désactivé",
-                "Active le mode pour préparer le pont HTTPS et le QR mobile.",
+                "Activez le compagnon, puis appairez votre téléphone avec le QR.",
+            )
+        } else if is_remote {
+            (
+                if active { "Prêt à appairer" } else { "Connexion Internet" },
+                "Accès en Wi-Fi, 4G ou 5G, avec chiffrement entre vos appareils. L’ordinateur doit rester allumé et connecté.",
             )
         } else if active {
             ("Prêt à appairer", "La PWA peut se connecter à l’API locale sécurisée.")
@@ -424,18 +433,26 @@ impl Page {
         };
         self.bridge_badge.set_text(badge);
         self.bridge_detail.set_text(detail);
-        self.app_url.set_text(
+        self.app_url.set_text(if is_remote {
+            "Application mobile disponible"
+        } else {
             secure
                 .as_ref()
                 .and_then(|bridge| bridge.app_url.as_deref())
-                .unwrap_or("Provisionnement automatique en attente"),
-        );
-        self.api_url.set_text(
+                .unwrap_or("En préparation")
+        });
+        self.api_url.set_text(if is_remote {
+            if active {
+                "Accès Internet chiffré"
+            } else {
+                "Connexion Internet en cours"
+            }
+        } else {
             secure
                 .as_ref()
                 .and_then(|bridge| bridge.api_url.as_deref())
-                .unwrap_or("Non active"),
-        );
+                .unwrap_or("Non active")
+        });
 
         let local_label = if status.as_ref().map(|status| status.active).unwrap_or(false) {
             "Actif"
@@ -449,70 +466,98 @@ impl Page {
             .as_ref()
             .and_then(|bridge| bridge.dns_record_id.clone())
             .is_some();
-        let steps = [
-            (
-                "PWA publique",
-                if secure.as_ref().and_then(|bridge| bridge.app_url.clone()).is_some() {
-                    "Disponible"
-                } else {
-                    "En attente"
-                },
-                secure.as_ref().and_then(|bridge| bridge.app_url.clone()).is_some(),
-                "Globe2",
-            ),
-            (
-                "Provisionnement",
-                if provisioning_ready {
-                    "Prêt"
-                } else if !enabled {
-                    "En attente d’activation"
-                } else {
-                    "En cours ou indisponible"
-                },
-                provisioning_ready,
-                "KeyRound",
-            ),
-            (
-                "DNS local",
-                if dns_ready {
-                    "Configuré"
-                } else if secure
-                    .as_ref()
-                    .map(|bridge| bridge.managed_credential_ready)
-                    .unwrap_or(false)
-                {
-                    "Prêt"
-                } else if enabled {
-                    "En attente"
-                } else {
-                    "En attente d’activation"
-                },
-                dns_ready,
-                "Wifi",
-            ),
-            (
-                "Certificat HTTPS",
-                if certificate_ready {
-                    "Prêt"
-                } else if enabled {
-                    "En génération"
-                } else {
-                    "Absent"
-                },
-                certificate_ready,
-                "ShieldCheck",
-            ),
-            (
-                "API locale",
-                if secure.as_ref().and_then(|bridge| bridge.api_url.clone()).is_some() {
-                    local_label
-                } else {
-                    "Non active"
-                },
-                active,
-                "Server",
-            ),
-        ];
+        let encryption_ready = secure
+            .as_ref()
+            .map(|bridge| bridge.managed_credential_ready)
+            .unwrap_or(false);
+        let steps = if is_remote {
+            vec![
+                ("Compagnon mobile", "Disponible", true, "Globe2"),
+                (
+                    "Chiffrement entre appareils",
+                    if encryption_ready { "Prêt" } else { "En préparation" },
+                    encryption_ready,
+                    "ShieldCheck",
+                ),
+                (
+                    "Connexion Internet",
+                    if active { "Connectée" } else { "Reconnexion en cours" },
+                    active,
+                    "Wifi",
+                ),
+                (
+                    "Relais sécurisé",
+                    if provisioning_ready { "Prêt" } else { "En préparation" },
+                    provisioning_ready,
+                    "Server",
+                ),
+            ]
+        } else {
+            vec![
+                (
+                    "PWA publique",
+                    if secure.as_ref().and_then(|bridge| bridge.app_url.clone()).is_some() {
+                        "Disponible"
+                    } else {
+                        "En attente"
+                    },
+                    secure.as_ref().and_then(|bridge| bridge.app_url.clone()).is_some(),
+                    "Globe2",
+                ),
+                (
+                    "Provisionnement",
+                    if provisioning_ready {
+                        "Prêt"
+                    } else if !enabled {
+                        "En attente d’activation"
+                    } else {
+                        "En cours ou indisponible"
+                    },
+                    provisioning_ready,
+                    "KeyRound",
+                ),
+                (
+                    "DNS local",
+                    if dns_ready {
+                        "Configuré"
+                    } else if secure
+                        .as_ref()
+                        .map(|bridge| bridge.managed_credential_ready)
+                        .unwrap_or(false)
+                    {
+                        "Prêt"
+                    } else if enabled {
+                        "En attente"
+                    } else {
+                        "En attente d’activation"
+                    },
+                    dns_ready,
+                    "Wifi",
+                ),
+                (
+                    "Certificat HTTPS",
+                    if certificate_ready {
+                        "Prêt"
+                    } else if enabled {
+                        "En génération"
+                    } else {
+                        "Absent"
+                    },
+                    certificate_ready,
+                    "ShieldCheck",
+                ),
+                (
+                    "API locale",
+                    if secure.as_ref().and_then(|bridge| bridge.api_url.clone()).is_some() {
+                        local_label
+                    } else {
+                        "Non active"
+                    },
+                    active,
+                    "Server",
+                ),
+            ]
+        };
         widgets::clear(&self.steps);
         for (label, value, ready, icon) in steps {
             self.steps.append(&step_row(label, value, ready, icon, enabled));
@@ -530,7 +575,11 @@ impl Page {
                 label.set_text(if active {
                     "Nouveau QR"
                 } else if enabled {
-                    "Préparation HTTPS"
+                    if is_remote {
+                        "Connexion…"
+                    } else {
+                        "Préparation HTTPS"
+                    }
                 } else {
                     "Activer d’abord"
                 });
@@ -558,6 +607,12 @@ impl Page {
                 self.qr_empty.set_visible(true);
                 self.qr_empty.set_text(if !enabled {
                     "Le QR sera disponible après activation."
+                } else if is_remote {
+                    if active {
+                        "Générez un QR pour appairer un mobile."
+                    } else {
+                        "Connexion Internet en cours."
+                    }
                 } else if !certificate_ready {
                     "Certificat HTTPS en cours de génération."
                 } else if !active {

@@ -1,14 +1,18 @@
 import { format, parseISO, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
+const currencyFormatters = new Map<number, Intl.NumberFormat>();
+
 export const formatCurrency = (amount: number, minimumFractionDigits: number = 2): string => {
     try {
-        return new Intl.NumberFormat('fr-FR', {
-            style: 'currency',
-            currency: 'EUR',
-            minimumFractionDigits,
-            maximumFractionDigits: 2
-        }).format(amount);
+        let formatter = currencyFormatters.get(minimumFractionDigits);
+        if (!formatter) {
+            formatter = new Intl.NumberFormat('fr-FR', {
+                style: 'currency', currency: 'EUR', minimumFractionDigits, maximumFractionDigits: 2
+            });
+            currencyFormatters.set(minimumFractionDigits, formatter);
+        }
+        return formatter.format(amount);
     } catch (e) {
         // Fallback for very old systems
         return amount.toFixed(minimumFractionDigits).replace('.', ',') + '\u00a0€';

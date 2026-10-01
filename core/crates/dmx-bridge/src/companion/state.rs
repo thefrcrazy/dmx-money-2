@@ -4,11 +4,18 @@ use super::*;
 ///
 /// Les méthodes synchrones bloquent le thread appelant ; elles ne doivent pas être appelées depuis
 /// le runtime tokio fourni par l'hôte.
+struct RelayRuntime {
+    stop: Arc<AtomicBool>,
+    task: tokio::task::JoinHandle<()>,
+    connected: Arc<AtomicBool>,
+}
+
 pub struct MobileCompanion {
     host: BridgeHost,
     runtime: Mutex<Option<ServerRuntime>>,
     secure_pairing: Mutex<Option<(String, String)>>,
     maintenance_started: AtomicBool,
+    relay_runtime: Mutex<Option<RelayRuntime>>,
 }
 
 impl MobileCompanion {
@@ -18,6 +25,7 @@ impl MobileCompanion {
             runtime: Mutex::new(None),
             secure_pairing: Mutex::new(None),
             maintenance_started: AtomicBool::new(false),
+            relay_runtime: Mutex::new(None),
         })
     }
 
@@ -51,6 +59,7 @@ impl MobileCompanion {
     /// Arrête le serveur local (fermeture de l'application).
     pub fn shutdown(&self) {
         self.stop_server();
+        self.stop_relay();
     }
 
     pub async fn bootstrap_async(self: &Arc<Self>) -> Result<(), String> {
@@ -60,7 +69,13 @@ impl MobileCompanion {
             .map(|settings| settings.enabled)
             .unwrap_or(false);
         if settings.enabled || secure_enabled {
-            self.start_server(settings.port).await?;
+            if let Some(config) = relay::load_config(&self.host.pool).await? {
+                if secure_enabled {
+                    self.start_relay(config);
+                }
+            } else {
+                self.start_server(settings.port).await?;
+            }
         }
         self.spawn_secure_bridge_maintenance();
         Ok(())
@@ -72,6 +87,32 @@ impl MobileCompanion {
             .await
             .map(|settings| settings.enabled)
             .unwrap_or(false);
+        if let Some(config) = relay::load_config(&self.host.pool).await? {
+            if secure_enabled {
+                self.start_relay(config.clone());
+            } else {
+                self.stop_relay();
+            }
+            self.stop_server();
+            let active = secure_enabled
+                && self
+                    .relay_runtime
+                    .lock()
+                    .map_err(|e| e.to_string())?
+                    .as_ref()
+                    .is_some_and(|current| current.connected.load(Ordering::SeqCst));
+            let pairing = self.secure_pairing.lock().map_err(|e| e.to_string())?.clone();
+            let bridge = relay::build_status(&self.host.pool, &config, secure_enabled, active, pairing).await?;
+            return Ok(MobileCompanionStatus {
+                enabled: secure_enabled,
+                active,
+                host: None,
+                port: None,
+                url: bridge.app_url.clone(),
+                data_version: get_data_version(&self.host.pool).await?,
+                secure_bridge: Some(bridge),
+            });
+        }
         if secure_enabled {
             let _ = secure::ensure_auto_configuration(&self.host.pool, &self.host.data_dir).await;
         }
@@ -196,6 +237,15 @@ impl MobileCompanion {
             .await
             .map_err(|error| map_db_error(error, "liaison du mode compagnon sécurisé"))?;
 
+        if let Some(config) = relay::load_config(&self.host.pool).await? {
+            self.stop_server();
+            if enabled {
+                self.start_relay(config);
+            } else {
+                self.stop_relay();
+            }
+            return self.status_async().await;
+        }
         let settings = load_mobile_settings(&self.host.pool).await?;
         if settings.enabled || enabled {
             self.stop_server();
@@ -207,6 +257,32 @@ impl MobileCompanion {
             self.stop_server();
         }
         self.status_async().await
+    }
+
+    fn start_relay(&self, config: relay::RelayConfig) {
+        let Ok(mut current) = self.relay_runtime.lock() else {
+            return;
+        };
+        if current.as_ref().is_some_and(|current| !current.task.is_finished()) {
+            return;
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let connected = Arc::new(AtomicBool::new(false));
+        let task = self
+            .host
+            .runtime
+            .spawn(relay::run(self.host.clone(), config, stop.clone(), connected.clone()));
+        *current = Some(RelayRuntime { stop, task, connected });
+    }
+
+    fn stop_relay(&self) {
+        if let Ok(mut current) = self.relay_runtime.lock() {
+            if let Some(current) = current.take() {
+                current.stop.store(true, Ordering::SeqCst);
+                current.connected.store(false, Ordering::SeqCst);
+                current.task.abort();
+            }
+        }
     }
 
     fn spawn_secure_bridge_refresh(&self) {
@@ -288,5 +364,6 @@ impl MobileCompanion {
 impl Drop for MobileCompanion {
     fn drop(&mut self) {
         self.stop_server();
+        self.stop_relay();
     }
 }

@@ -7,7 +7,7 @@ test('navigation falls back to the saved shell when the LAN server times out', a
     const handlers: Record<string, (event: unknown) => void> = {};
     const cached = new Response('saved app');
     runInNewContext(source, {
-        self: { addEventListener: (name: string, handler: (event: unknown) => void) => { handlers[name] = handler; } },
+        self: { location: { href: 'https://desktop.test/mobile/sw.js' }, addEventListener: (name: string, handler: (event: unknown) => void) => { handlers[name] = handler; } },
         caches: { open: async () => ({ match: async () => cached }) },
         fetch: (_: unknown, { signal }: RequestInit) => new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('timeout')))),
         AbortController, URL, Response,
@@ -16,6 +16,20 @@ test('navigation falls back to the saved shell when the LAN server times out', a
     let result: Promise<Response> | undefined;
     handlers.fetch({ request: { url: 'https://desktop.test/mobile/', method: 'GET', mode: 'navigate' }, respondWith: (value: Promise<Response>) => { result = value; } });
     expect(await (await result!).text()).toBe('saved app');
+});
+
+test('installation resolves every shell asset under the mobile deployment prefix', async () => {
+    const handlers: Record<string, (event: unknown) => void> = {};
+    const urls: string[] = [];
+    runInNewContext(source, {
+        self: { location: { href: 'https://sync.test/mobile/sw.js' }, addEventListener: (name: string, handler: (event: unknown) => void) => { handlers[name] = handler; }, skipWaiting: async () => {} },
+        caches: { open: async () => ({ addAll: async (requests: Request[]) => { urls.push(...requests.map(request => request.url)); } }) },
+        URL, Request,
+    });
+    let done: Promise<void> | undefined;
+    handlers.install({ waitUntil: (value: Promise<void>) => { done = value; } });
+    await done;
+    expect(urls).toEqual(['https://sync.test/mobile/', 'https://sync.test/mobile/logo.png', 'https://sync.test/mobile/manifest.webmanifest', 'https://sync.test/mobile/pwa-192.png', 'https://sync.test/mobile/pwa-512.png']);
 });
 test('activation removes only obsolete application shell caches', async () => {
     const handlers: Record<string, (event: unknown) => void> = {};

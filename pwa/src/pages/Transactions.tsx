@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef, useDeferredValue } from 'react';
 import { Plus, Search, Trash2, Edit2, CheckCircle2, ArrowRightLeft, Tag, Circle, Check } from 'lucide-react';
 import Button from '../components/ui/Button';
 import { useBank } from '../context/BankContext';
@@ -15,6 +15,7 @@ import { useFinancialMetrics } from '../hooks/useFinancialMetrics';
 import { formatCurrency, formatDate } from '../utils/format';
 
 type TransactionWithBalance = Transaction & { balance: number };
+const MOBILE_BATCH_SIZE = 80;
 
 const normalizeSearchValue = (value: unknown) => String(value ?? '')
     .toLowerCase()
@@ -59,6 +60,9 @@ const Transactions: React.FC = () => {
     const { relevantTransactions } = useFinancialMetrics();
 
     const [searchTerm, setSearchTerm] = useState('');
+    const deferredSearchTerm = useDeferredValue(searchTerm);
+    const [mobileVisibleCount, setMobileVisibleCount] = useState(MOBILE_BATCH_SIZE);
+    const mobileLoadMoreRef = useRef<HTMLDivElement>(null);
     const [filterCategories, setFilterCategories] = useState<string[]>([]);
     const [filterTypes, setFilterTypes] = useState<string[]>([]);
     const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
@@ -110,16 +114,21 @@ const Transactions: React.FC = () => {
         }, new Map<string, number>());
     }, [transactions]);
 
+    const budgetsByScope = useMemo(() => {
+        const index = new Map<string, (typeof budgets)[number]>();
+        for (const budget of budgets) {
+            const key = `${budget.category}|${budget.accountId || ''}`;
+            if (!index.has(key)) index.set(key, budget);
+        }
+        return index;
+    }, [budgets]);
+
     const getApplicableBudget = useCallback((transaction: Transaction) => {
         if (transaction.type !== 'expense' || transaction.category === 'transfer') return undefined;
 
-        const matchingBudgets = budgets.filter(budget => (
-            budget.category === transaction.category && (!budget.accountId || budget.accountId === transaction.accountId)
-        ));
-
-        return matchingBudgets.find(budget => budget.accountId === transaction.accountId)
-            || matchingBudgets.find(budget => !budget.accountId);
-    }, [budgets]);
+        return budgetsByScope.get(`${transaction.category}|${transaction.accountId}`)
+            || budgetsByScope.get(`${transaction.category}|`);
+    }, [budgetsByScope]);
 
     const getTransactionBudgetRemaining = useCallback((transaction: Transaction) => {
         const budget = getApplicableBudget(transaction);
@@ -149,7 +158,7 @@ const Transactions: React.FC = () => {
         const allSorted = transactions
             .map((transaction, index) => ({ transaction, index }))
             .sort((a, b) => {
-                const dateDiff = new Date(a.transaction.date).getTime() - new Date(b.transaction.date).getTime();
+                const dateDiff = a.transaction.date < b.transaction.date ? -1 : a.transaction.date > b.transaction.date ? 1 : 0;
                 return dateDiff || b.index - a.index;
             })
             .map(({ transaction }) => transaction);
@@ -169,7 +178,7 @@ const Transactions: React.FC = () => {
 
     const displayTransactions = useMemo(() => {
         const relevantIds = new Set(relevantTransactions.map(transaction => transaction.id));
-        const searchTokens = normalizeSearchValue(searchTerm).split(/\s+/).filter(Boolean);
+        const searchTokens = normalizeSearchValue(deferredSearchTerm).split(/\s+/).filter(Boolean);
 
         return transactionsWithBalance.filter(transaction => {
             if (!relevantIds.has(transaction.id)) return false;
@@ -226,7 +235,7 @@ const Transactions: React.FC = () => {
         filterTypes,
         filterStatuses,
         filterBudgets,
-        searchTerm,
+        deferredSearchTerm,
         accountMap,
         getCategoryDetails,
         isTransactionBudgeted,
@@ -235,9 +244,11 @@ const Transactions: React.FC = () => {
 
     const mobileGroupedTransactions = useMemo(() => {
         const groups = new Map<string, TransactionWithBalance[]>();
-        displayTransactions.forEach(transaction => {
+        displayTransactions.slice(0, mobileVisibleCount).forEach(transaction => {
             const key = transaction.date;
-            groups.set(key, [...(groups.get(key) || []), transaction]);
+            const items = groups.get(key);
+            if (items) items.push(transaction);
+            else groups.set(key, [transaction]);
         });
 
         return Array.from(groups.entries()).map(([date, items]) => ({
@@ -245,7 +256,21 @@ const Transactions: React.FC = () => {
             label: formatDate(date, 'EEEE d MMM'),
             items
         }));
-    }, [displayTransactions]);
+    }, [displayTransactions, mobileVisibleCount]);
+
+    useEffect(() => {
+        setMobileVisibleCount(MOBILE_BATCH_SIZE);
+    }, [deferredSearchTerm, filterCategories, filterTypes, filterStatuses, filterBudgets, filterAccount]);
+
+    useEffect(() => {
+        const sentinel = mobileLoadMoreRef.current;
+        if (!sentinel || mobileVisibleCount >= displayTransactions.length || !('IntersectionObserver' in window)) return;
+        const observer = new IntersectionObserver(entries => {
+            if (entries.some(entry => entry.isIntersecting)) setMobileVisibleCount(count => count + MOBILE_BATCH_SIZE);
+        }, { root: sentinel.closest('main'), rootMargin: '200px' });
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+    }, [displayTransactions.length, mobileVisibleCount]);
 
     const activeFilterCount = filterCategories.length + filterTypes.length + filterStatuses.length + filterBudgets.length;
     const mobileVisibleNet = useMemo(() => displayTransactions.reduce((sum, transaction) => (
@@ -811,6 +836,14 @@ const Transactions: React.FC = () => {
                     </div>
                 )}
             </div>
+
+            {mobileVisibleCount < displayTransactions.length && (
+                <div ref={mobileLoadMoreRef} className="md:hidden pb-4 text-center">
+                    <Button variant="ghost" onClick={() => setMobileVisibleCount(count => count + MOBILE_BATCH_SIZE)}>
+                        Afficher les opérations suivantes
+                    </Button>
+                </div>
+            )}
 
             <FormPopup
                 isOpen={isModalOpen}

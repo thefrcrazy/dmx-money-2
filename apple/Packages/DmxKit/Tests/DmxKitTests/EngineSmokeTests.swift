@@ -144,6 +144,31 @@ final class EngineSmokeTests: XCTestCase {
         XCTAssertTrue(store.isSelected(accountId: id))
     }
 
+    func testJournalClearsFiltersWithOneRefreshAndDefersHiddenChanges() throws {
+        let store = AppStore(engine: try DmxEngine.openInMemory())
+        let journal = JournalModel(store: store)
+        journal.search = "test"
+        journal.categories = ["5"]
+        journal.types = ["expense"]
+        journal.statuses = ["unchecked"]
+        journal.budgetStatuses = ["budgeted"]
+        var refreshes = 0
+        journal.onChange = { refreshes += 1 }
+        journal.clearFilters()
+        XCTAssertEqual(refreshes, 1)
+        XCTAssertFalse(journal.hasFilters)
+        journal.clearFilters()
+        XCTAssertEqual(refreshes, 1)
+
+        journal.isActive = false
+        journal.search = "nouvelle recherche"
+        journal.types = ["income"]
+        XCTAssertEqual(refreshes, 1)
+        journal.isActive = true
+        XCTAssertEqual(refreshes, 2)
+        XCTAssertTrue(journal.hasFilters)
+    }
+
     func testVersionComparison() {
         XCTAssertTrue(AppInfo.isVersion("2.0.1", newerThan: "2.0.0"))
         XCTAssertTrue(AppInfo.isVersion("2.0.10", newerThan: "2.0.9"))

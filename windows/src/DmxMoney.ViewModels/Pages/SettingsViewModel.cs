@@ -65,6 +65,8 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     public bool BridgeSwitchOn => SecureBridge?.Enabled ?? false;
 
+    public bool IsRemoteBridge => SecureBridge?.ApiUrl?.Contains("/relay/", StringComparison.Ordinal) == true;
+
     public IReadOnlyList<PasskeyInfo> Passkeys => SecureBridge is null
         ? []
         : [.. SecureBridge.Passkeys.Where(passkey => passkey.RevokedAt is null)];
@@ -73,12 +75,16 @@ public sealed partial class SettingsViewModel : PageViewModel
         ? "Désactivé"
         : SecureBridge?.Active == true
             ? "Prêt à appairer"
+            : IsRemoteBridge
+                ? "Connexion Internet"
             : SecureBridge?.CertificateReady == true
                 ? "Démarrage local"
                 : "Préparation HTTPS";
 
     public string BridgeStateDetail => !BridgeSwitchOn
-        ? "Active le mode pour préparer le pont HTTPS et le QR mobile."
+        ? "Activez le compagnon, puis appairez votre téléphone avec le QR."
+        : IsRemoteBridge
+            ? "Accès en Wi-Fi, 4G ou 5G, avec chiffrement entre vos appareils. L’ordinateur doit rester allumé et connecté."
         : SecureBridge?.Active == true
             ? "La PWA peut se connecter à l’API locale sécurisée."
             : SecureBridge?.CertificateReady == true
@@ -93,6 +99,18 @@ public sealed partial class SettingsViewModel : PageViewModel
         {
             var bridge = SecureBridge;
             var enabled = BridgeSwitchOn;
+            if (IsRemoteBridge)
+            {
+                var connected = bridge?.Active == true;
+                var encryptionReady = bridge?.ManagedCredentialReady == true;
+                return
+                [
+                    ("Compagnon mobile", bridge?.AppUrl is not null ? "Disponible" : "En attente", bridge?.AppUrl is not null, "Globe2"),
+                    ("Chiffrement entre appareils", encryptionReady ? "Prêt" : "En préparation", encryptionReady, "ShieldCheck"),
+                    ("Connexion Internet", connected ? "Connectée" : "Reconnexion en cours", connected, "Wifi"),
+                    ("Relais sécurisé", bridge?.Configured == true ? "Prêt" : "En préparation", bridge?.Configured == true, "Server"),
+                ];
+            }
             var provisioningReady = bridge?.Configured ?? false;
             var provisioning = provisioningReady ? "Prêt" : !enabled ? "En attente d’activation" : "En cours ou indisponible";
             var dns = bridge?.DnsRecordId is not null
@@ -112,10 +130,12 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     public string PairingButtonLabel => SecureBridge?.Active == true
         ? "Nouveau QR"
-        : BridgeSwitchOn ? "Préparation HTTPS" : "Activer d’abord";
+        : BridgeSwitchOn ? IsRemoteBridge ? "Connexion…" : "Préparation HTTPS" : "Activer d’abord";
 
     public string QrEmptyMessage => !BridgeSwitchOn
         ? "Le QR sera disponible après activation."
+        : IsRemoteBridge
+            ? SecureBridge?.Active == true ? "Générez un QR pour appairer un mobile." : "Connexion Internet en cours."
         : SecureBridge?.CertificateReady != true
             ? "Certificat HTTPS en cours de génération."
             : SecureBridge?.Active != true
@@ -236,6 +256,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             {
                 Store.Platform.IncludePrereleases = value;
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(UpdateAvailable));
             }
         }
     }
@@ -244,5 +265,9 @@ public sealed partial class SettingsViewModel : PageViewModel
     private void ShowWhatsNew() => Store.Present(new FormRequest.WhatsNew());
 
     [RelayCommand]
-    private Task CheckForUpdatesAsync() => Store.Platform.CheckForUpdatesAsync();
+    private async Task CheckForUpdatesAsync()
+    {
+        await Store.Platform.CheckForUpdatesAsync();
+        OnPropertyChanged(nameof(UpdateAvailable));
+    }
 }

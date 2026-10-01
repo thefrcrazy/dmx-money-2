@@ -1,5 +1,5 @@
-//! Pont compagnon mobile de DmxMoney : serveur HTTPS local servant l'API de la PWA,
-//! authentification par clé d'accès et provisionnement DNS/ACME via le service managé.
+//! Compagnon mobile DmxMoney : relais Internet chiffré à connexion sortante et passkeys,
+//! avec maintien du serveur HTTPS local et du provisionnement DNS/ACME historiques.
 //!
 //! Port de `src-tauri/src/mobile_companion` et `src-tauri/src/secure_bridge` (1.x). Le contrat
 //! HTTP est inchangé pour que la PWA existante fonctionne sans modification ; les dépendances à

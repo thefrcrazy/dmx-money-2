@@ -44,9 +44,10 @@ git tag v2.0.1 && git push origin v2.0.1
 
 ## Secrets attendus
 
-Aucun secret n'est nécessaire pour la CI. Pour une release complète, tout est optionnel : les
-étapes concernées sont simplement sautées si le secret est absent (build non signé, pas
-d'appcast).
+Aucun secret n'est nécessaire pour la CI. La release Windows exige une identité de signature
+publique configurée dans l'environnement GitHub `windows-signing` (voir ci-dessous) : sans
+elle, la publication échoue avant de distribuer un installeur non signé. Les secrets Apple
+restent optionnels ; leur absence produit des builds macOS non signés.
 
 | Secret | Usage |
 |---|---|
@@ -84,9 +85,62 @@ empêcherait le lancement sous Catalina.
 
 ## Windows
 
-`scripts/build-windows.ps1` produit la publication autonome puis l'installeur Velopack. Les
-mises à jour se lisent depuis l'URL Velopack par défaut, remplaçable à l'exécution par
-`DMXMONEY_UPDATE_URL`.
+`scripts/build-windows.ps1` produit la publication autonome puis l'installeur Velopack, avec
+un canal distinct `win-x64` / `win-arm64`. L'updater consulte le dépôt V2
+`https://github.com/thefrcrazy/dmx-money-2`. Les préversions sont désactivées par défaut sur
+une version stable ; les installations de préversion les activent par défaut. Le premier clic
+vérifie la disponibilité ; « Installer » confirme le téléchargement et le redémarrage.
+`DMXMONEY_UPDATE_URL` accepte une source personnalisée HTTPS sans identifiants ni paramètres.
+L'updater exige une empreinte SHA-256 et Velopack la vérifie avec la taille avant d'appliquer
+chaque paquet. Cette empreinte protège l'intégrité ; elle ne remplace pas la signature du code.
+
+### Signature Windows et Smart App Control
+
+Le message « éditeur invérifiable » de Smart App Control concerne la confiance dans les
+binaires distribués. Il faut une vraie identité Authenticode publique ; un nom d'éditeur dans
+le projet ou un certificat auto-signé ne corrige pas ce blocage. La signature doit couvrir
+l'application, le noyau Rust, les DLL et les exécutables générés par Velopack, dont Setup et
+Update. Voir [Microsoft : Smart App Control](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/overview).
+
+Le workflow utilise **Azure Artifact Signing**, profil **Public Trust**, avec authentification
+OIDC et aucun export de clé privée. La validation d'identité Microsoft et le compte Azure
+doivent être configurés réellement avant la première release signée :
+
+1. Créer le compte Artifact Signing, faire valider l'identité et créer un profil Public Trust.
+2. Créer l'environnement GitHub `windows-signing`. Configurer une identité Azure fédérée dont
+   le sujet est `repo:thefrcrazy/dmx-money-2:environment:windows-signing`, audience
+   `api://AzureADTokenExchange`, et limiter l'environnement aux références de release voulues.
+3. Donner à cette identité le rôle **Artifact Signing Certificate Profile Signer** uniquement
+   sur le profil concerné (les installations Azure plus anciennes affichent « Trusted Signing
+   Certificate Profile Signer »). Aucun rôle de gestion de l'abonnement n'est nécessaire.
+4. Ajouter les variables de cet environnement :
+
+| Variable | Valeur |
+|---|---|
+| `AZURE_CLIENT_ID` | identifiant de l'application Azure fédérée |
+| `AZURE_TENANT_ID` | identifiant du tenant |
+| `AZURE_SUBSCRIPTION_ID` | identifiant de l'abonnement contenant le compte |
+| `WINDOWS_SIGNING_ENDPOINT` | endpoint HTTPS de la région, par exemple `https://weu.codesigning.azure.net` |
+| `WINDOWS_SIGNING_ACCOUNT` | nom du compte Artifact Signing |
+| `WINDOWS_SIGNING_PROFILE` | nom du profil Public Trust validé |
+
+`prepare-windows-signing.ps1` utilise le SignTool x64 du SDK Windows et le client Microsoft
+Artifact Signing `1.0.128`, dont il vérifie la signature NuGet. Les signatures Authenticode et
+leur horodatage SHA-256 sont ajoutés par Velopack pendant l'empaquetage. Sa version `0.0.1298`
+ne fournit pas le dlib Azure : le script lui passe un template SignTool avec les chemins
+absolus du SDK et du client Microsoft. `verify-windows-release.ps1` vérifie ensuite la chaîne
+de confiance et l'horodatage de l'installeur et de chaque EXE/DLL du paquet complet, ainsi que
+les tailles et empreintes du flux ; tout échec bloque la publication. Les builds locaux sans
+`-RequireSigning` restent possibles pour le développement.
+
+Tester ensuite une vraie installation et une mise à jour sous Windows 11 avec Smart App
+Control actif, pour x64 et arm64. Le runner et macOS ne remplacent pas cette vérification.
+La signature n'offre pas une garantie d'absence d'avertissements SmartScreen : sa réputation
+se construit séparément, même avec EV ou Artifact Signing. Ne pas désactiver les protections
+Windows pour résoudre un défaut de distribution. Sources :
+[intégration Artifact Signing](https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-signing-integrations),
+[réputation SmartScreen](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation),
+[tests Smart App Control](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/test-your-app-with-smart-app-control).
 
 ## Linux
 

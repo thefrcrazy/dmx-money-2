@@ -16,7 +16,7 @@ edition = "2021"
 rust-version = "1.88"
 license = "MIT"
 authors = ["Maxim Collignon"]
-repository = "https://github.com/thefrcrazy/Dmx-Money"
+repository = "https://github.com/thefrcrazy/dmx-money-2"
 
 [workspace.dependencies]
 base64 = "0.22"

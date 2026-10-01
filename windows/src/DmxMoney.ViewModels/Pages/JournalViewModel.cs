@@ -26,6 +26,7 @@ public sealed partial class JournalViewModel : PageViewModel
     ];
 
     private readonly HashSet<string> selection = [];
+    private bool updatingFilters;
 
     [ObservableProperty]
     private JournalView? view;
@@ -82,23 +83,33 @@ public sealed partial class JournalViewModel : PageViewModel
         _ => null,
     };
 
-    partial void OnSearchChanged(string value) => Refresh();
+    partial void OnSearchChanged(string value) => FiltersChanged();
 
-    partial void OnCategoriesChanged(IReadOnlyList<string> value) => Refresh();
+    partial void OnCategoriesChanged(IReadOnlyList<string> value) => FiltersChanged();
 
-    partial void OnTypesChanged(IReadOnlyList<string> value) => Refresh();
+    partial void OnTypesChanged(IReadOnlyList<string> value) => FiltersChanged();
 
-    partial void OnStatusesChanged(IReadOnlyList<string> value) => Refresh();
+    partial void OnStatusesChanged(IReadOnlyList<string> value) => FiltersChanged();
 
-    partial void OnBudgetStatusesChanged(IReadOnlyList<string> value) => Refresh();
+    partial void OnBudgetStatusesChanged(IReadOnlyList<string> value) => FiltersChanged();
+
+    private void FiltersChanged()
+    {
+        if (!updatingFilters)
+        {
+            SetNeedsRefresh();
+        }
+    }
 
     public void SetSelection(IEnumerable<string> ids)
     {
-        selection.Clear();
-        foreach (var id in ids)
+        var next = ids.ToHashSet();
+        if (selection.SetEquals(next))
         {
-            selection.Add(id);
+            return;
         }
+        selection.Clear();
+        selection.UnionWith(next);
         NotifySelection();
     }
 
@@ -110,11 +121,18 @@ public sealed partial class JournalViewModel : PageViewModel
 
     public void ClearFilters()
     {
+        if (Search.Length == 0 && Categories.Count == 0 && Types.Count == 0 && Statuses.Count == 0 && BudgetStatuses.Count == 0)
+        {
+            return;
+        }
+        updatingFilters = true;
         Search = string.Empty;
         Categories = [];
         Types = [];
         Statuses = [];
         BudgetStatuses = [];
+        updatingFilters = false;
+        SetNeedsRefresh();
     }
 
     [RelayCommand]

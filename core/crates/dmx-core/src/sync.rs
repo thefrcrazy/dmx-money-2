@@ -9,6 +9,7 @@ use crate::db::{DbPool, SYNCED_SETTINGS_COLUMNS, SYNC_ENTITY_TABLES};
 use crate::error::{CoreError, CoreResult, DbContext};
 use crate::models::{Account, Budget, Category, ScheduledTransaction, Transaction};
 use crate::repo;
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::{Row, SqliteConnection};
@@ -115,7 +116,7 @@ async fn record_payload(
 
 /// Changements locaux à envoyer, le plus ancien d'abord, un seul par enregistrement.
 pub async fn pending_changes(pool: &DbPool, limit: u32) -> CoreResult<Vec<SyncChange>> {
-    let mut connection = pool.acquire().await.ctx("lecture des changements")?;
+    let mut connection = pool.begin().await.ctx("lecture des changements")?;
     let rows = sqlx::query(
         "SELECT o.entity AS entity, o.record_id AS record_id, MAX(o.seq) AS seq,
                 m.updated_at AS updated_at, m.deleted AS deleted
@@ -151,6 +152,7 @@ pub async fn pending_changes(pool: &DbPool, limit: u32) -> CoreResult<Vec<SyncCh
             payload,
         });
     }
+    connection.commit().await.ctx("lecture des changements")?;
     Ok(changes)
 }
 
@@ -218,8 +220,25 @@ fn parse_payload<T: for<'de> Deserialize<'de>>(change: &RemoteChange) -> CoreRes
         .payload
         .as_deref()
         .ok_or_else(|| CoreError::validation("Changement distant sans contenu."))?;
-    serde_json::from_str(payload)
+    let value: Value = serde_json::from_str(payload)
+        .map_err(|error| CoreError::validation(format!("Changement distant illisible : {error}")))?;
+    if change.entity != SETTINGS_ENTITY && value.get("id").and_then(Value::as_str) != Some(change.record_id.as_str()) {
+        return Err(CoreError::validation("Identifiant du changement distant incohérent."));
+    }
+    serde_json::from_value(value)
         .map_err(|error| CoreError::validation(format!("Changement distant illisible : {error}")))
+}
+
+fn valid_remote_date(value: &str) -> bool {
+    value.len() == 10 && crate::dates::parse_date(value).is_some()
+}
+
+fn validate_positive_money(value: f64) -> CoreResult<()> {
+    if crate::metrics::is_valid_money(value) && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(CoreError::validation("Montant distant invalide."))
+    }
 }
 
 async fn apply_upsert(connection: &mut SqliteConnection, change: &RemoteChange) -> CoreResult<()> {
@@ -269,6 +288,7 @@ async fn apply_upsert(connection: &mut SqliteConnection, change: &RemoteChange) 
         }
         "budgets" => {
             let budget: Budget = parse_payload(change)?;
+            validate_positive_money(budget.amount)?;
             if record_exists(connection, "budgets", &budget.id).await? {
                 repo::update_budget(connection, &budget).await?;
             } else {
@@ -277,6 +297,15 @@ async fn apply_upsert(connection: &mut SqliteConnection, change: &RemoteChange) 
         }
         "scheduled" => {
             let scheduled: ScheduledTransaction = parse_payload(change)?;
+            validate_positive_money(scheduled.amount)?;
+            if !valid_remote_date(&scheduled.next_date)
+                || scheduled
+                    .end_date
+                    .as_deref()
+                    .is_some_and(|date| !valid_remote_date(date))
+            {
+                return Err(CoreError::validation("Date de l'échéance distante invalide."));
+            }
             if record_exists(connection, "scheduled_transactions", &scheduled.id).await? {
                 repo::update_scheduled(connection, &scheduled).await?;
             } else {
@@ -285,6 +314,10 @@ async fn apply_upsert(connection: &mut SqliteConnection, change: &RemoteChange) 
         }
         "transactions" => {
             let transaction: Transaction = parse_payload(change)?;
+            validate_positive_money(transaction.amount)?;
+            if !valid_remote_date(&transaction.date) {
+                return Err(CoreError::validation("Date de la transaction distante invalide."));
+            }
             if record_exists(connection, "transactions", &transaction.id).await? {
                 repo::update_transaction(connection, &transaction).await?;
             } else {
@@ -312,6 +345,20 @@ async fn apply_locked(connection: &mut SqliteConnection, mut changes: Vec<Remote
         .ctx("application des changements")?;
 
     let mut report = ApplyReport::default();
+    changes.retain_mut(|change| {
+        let valid_entity = table_for(&change.entity).is_some()
+            || (change.entity == SETTINGS_ENTITY && change.record_id == SETTINGS_RECORD_ID);
+        let timestamp = DateTime::parse_from_rfc3339(&change.updated_at);
+        if !valid_entity || change.record_id.is_empty() || timestamp.is_err() {
+            report.skipped += 1;
+            return false;
+        }
+        change.updated_at = timestamp
+            .unwrap()
+            .with_timezone(&Utc)
+            .to_rfc3339_opts(SecondsFormat::Millis, true);
+        true
+    });
     for change in &changes {
         let local: Option<String> =
             sqlx::query_scalar("SELECT updated_at FROM sync_meta WHERE entity = $1 AND record_id = $2")
@@ -375,10 +422,10 @@ pub async fn apply_remote_changes(pool: &DbPool, changes: Vec<RemoteChange>) -> 
         .execute(&mut *connection)
         .await
         .ctx("application des changements")?;
-    sqlx::query("BEGIN IMMEDIATE")
-        .execute(&mut *connection)
-        .await
-        .ctx("application des changements")?;
+    if let Err(error) = sqlx::query("BEGIN IMMEDIATE").execute(&mut *connection).await {
+        let _ = sqlx::query("PRAGMA foreign_keys = ON").execute(&mut *connection).await;
+        return Err(CoreError::Database(format!("Application des changements : {error}")));
+    }
 
     let result = apply_locked(&mut connection, changes).await;
     let finish = match &result {
@@ -505,5 +552,114 @@ mod tests {
             .await
             .unwrap();
         assert!(enqueue_all(&device_b).await.unwrap() >= 1);
+    }
+
+    #[tokio::test]
+    async fn remote_payload_cannot_write_another_record_or_freeze_its_timestamp() {
+        let pool = open_memory_pool().await.unwrap();
+        let id = ops::save_account(
+            &pool,
+            AccountDraft {
+                name: "Courant".into(),
+                ..ops::new_account_draft()
+            },
+        )
+        .await
+        .unwrap();
+        let mut account = crate::snapshot::load(&pool).await.unwrap().accounts.remove(0);
+        account.name = "Modifié".into();
+        let change = RemoteChange {
+            entity: "accounts".into(),
+            record_id: "another-id".into(),
+            deleted: false,
+            updated_at: "2026-12-01T00:00:00.000Z".into(),
+            payload: Some(to_json(&account).unwrap()),
+        };
+        let report = apply_remote_changes(&pool, vec![change.clone()]).await.unwrap();
+        assert_eq!((report.applied, report.skipped), (0, 1));
+        let invalid = RemoteChange {
+            record_id: id,
+            updated_at: "not-a-timestamp".into(),
+            ..change
+        };
+        let report = apply_remote_changes(&pool, vec![invalid]).await.unwrap();
+        assert_eq!((report.applied, report.skipped), (0, 1));
+        assert_eq!(repo::list_accounts(&pool).await.unwrap()[0].name, "Courant");
+        let foreign_keys: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(foreign_keys, 1);
+    }
+
+    #[tokio::test]
+    async fn remote_timestamps_compare_instants_across_timezones() {
+        let pool = open_memory_pool().await.unwrap();
+        let id = ops::save_account(
+            &pool,
+            AccountDraft {
+                name: "Local récent".into(),
+                ..ops::new_account_draft()
+            },
+        )
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE sync_meta SET updated_at = '2026-09-10T10:00:00.000Z' WHERE entity = 'accounts' AND record_id = $1",
+        )
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut account = repo::list_accounts(&pool).await.unwrap().remove(0);
+        account.name = "Distant ancien".into();
+        let change = RemoteChange {
+            entity: "accounts".into(),
+            record_id: id,
+            deleted: false,
+            updated_at: "2026-09-10T11:00:00.000+02:00".into(),
+            payload: Some(to_json(&account).unwrap()),
+        };
+        let report = apply_remote_changes(&pool, vec![change]).await.unwrap();
+        assert_eq!((report.applied, report.skipped), (0, 1));
+        assert_eq!(repo::list_accounts(&pool).await.unwrap()[0].name, "Local récent");
+    }
+
+    #[tokio::test]
+    async fn malformed_remote_transactions_do_not_reach_the_database() {
+        let pool = open_memory_pool().await.unwrap();
+        let account = ops::save_account(
+            &pool,
+            AccountDraft {
+                name: "Courant".into(),
+                ..ops::new_account_draft()
+            },
+        )
+        .await
+        .unwrap();
+        for (date, amount) in [("2026-02-31", 10.0), ("2026-09-15", -10.0)] {
+            let transaction = Transaction {
+                id: "remote-tx".into(),
+                date: date.into(),
+                account_id: account.clone(),
+                transaction_type: TransactionType::Expense,
+                amount,
+                category: "5".into(),
+                description: "Test".into(),
+                checked: false,
+                is_transfer: false,
+                linked_transaction_id: None,
+            };
+            let change = RemoteChange {
+                entity: "transactions".into(),
+                record_id: transaction.id.clone(),
+                deleted: false,
+                updated_at: "2026-12-01T00:00:00.000Z".into(),
+                payload: Some(to_json(&transaction).unwrap()),
+            };
+            let report = apply_remote_changes(&pool, vec![change]).await.unwrap();
+            assert_eq!((report.applied, report.skipped), (0, 1));
+            assert!(repo::list_transactions(&pool).await.unwrap().is_empty());
+        }
     }
 }

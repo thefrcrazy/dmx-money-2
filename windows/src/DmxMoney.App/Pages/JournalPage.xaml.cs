@@ -46,7 +46,7 @@ public sealed partial class JournalPage : Page
 
     private void OnViewModelChanged(object? sender, PropertyChangedEventArgs args)
     {
-        if (args.PropertyName is nameof(JournalViewModel.View) or nameof(JournalViewModel.Rows) or nameof(JournalViewModel.SelectionCount))
+        if (args.PropertyName is nameof(JournalViewModel.Rows) or nameof(JournalViewModel.SelectionCount))
         {
             UpdateVisuals();
         }
@@ -55,9 +55,20 @@ public sealed partial class JournalPage : Page
     private void UpdateVisuals()
     {
         var view = ViewModel.View;
-        syncing = true;
-        Rows.ItemsSource = ViewModel.Rows;
-        syncing = false;
+        if (!ReferenceEquals(Rows.ItemsSource, ViewModel.Rows))
+        {
+            syncing = true;
+            Rows.ItemsSource = ViewModel.Rows;
+            var selected = ViewModel.Selection.ToHashSet();
+            foreach (var row in ViewModel.Rows)
+            {
+                if (selected.Contains(row.Transaction.Id))
+                {
+                    Rows.SelectedItems.Add(row);
+                }
+            }
+            syncing = false;
+        }
 
         var count = ViewModel.Rows.Count;
         var total = view?.TotalTransactionCount ?? 0;

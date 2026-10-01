@@ -96,6 +96,53 @@ public class ViewModelTests
     }
 
     [Fact]
+    public void JournalClearsFiltersOnceAndDefersHiddenChanges()
+    {
+        using var store = NewStore();
+        using var journal = new JournalViewModel(store);
+        journal.Search = "test";
+        journal.Categories = ["5"];
+        journal.Types = ["expense"];
+        journal.Statuses = ["unchecked"];
+        journal.BudgetStatuses = ["budgeted"];
+        var refreshes = 0;
+        journal.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(JournalViewModel.Rows)) { refreshes++; }
+        };
+        journal.ClearFilters();
+        Assert.Equal(1, refreshes);
+        Assert.False(journal.HasFilters);
+        journal.ClearFilters();
+        Assert.Equal(1, refreshes);
+
+        journal.IsActive = false;
+        journal.Search = "nouvelle recherche";
+        journal.Types = ["income"];
+        Assert.Equal(1, refreshes);
+        journal.IsActive = true;
+        Assert.Equal(2, refreshes);
+        Assert.True(journal.HasFilters);
+    }
+
+    [Fact]
+    public void JournalSelectionDoesNotNotifyWhenTheSameIdsAreSelectedAgain()
+    {
+        using var store = NewStore();
+        using var journal = new JournalViewModel(store);
+        var notifications = 0;
+        journal.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(JournalViewModel.SelectionCount)) { notifications++; }
+        };
+        journal.SetSelection(["a", "b"]);
+        journal.SetSelection(["b", "a", "a"]);
+        Assert.Equal(1, notifications);
+        journal.SetSelection([]);
+        Assert.Equal(2, notifications);
+    }
+
+    [Fact]
     public void AccountFormRejectsInvalidAmountAndSavesGroup()
     {
         using var store = NewStore();

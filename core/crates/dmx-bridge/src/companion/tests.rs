@@ -115,6 +115,88 @@ fn api_requires_a_finalized_session() {
 }
 
 #[test]
+fn revoking_a_mobile_invalidates_its_existing_sessions_immediately() {
+    let harness = Harness::start();
+    assert_eq!(harness.request("GET", "/api/accounts", None, true).0, 200);
+    harness
+        .engine
+        .block_on(secure::revoke_passkey(harness.engine.pool(), "pk1".into()))
+        .unwrap();
+    assert_eq!(harness.request("GET", "/api/accounts", None, true).0, 401);
+    assert_eq!(harness.request("POST", "/api/accounts", Some("{}"), true).0, 401);
+}
+
+#[test]
+fn concurrent_pairing_requests_can_consume_a_qr_only_once() {
+    let engine = Engine::open_in_memory().unwrap();
+    let (token, _) = engine
+        .block_on(secure::regenerate_pairing_token(engine.pool()))
+        .unwrap();
+    let results = engine.block_on(async {
+        let payload = serde_json::to_vec(&json!({ "token": token, "deviceLabel": "Test" })).unwrap();
+        let headers = HashMap::new();
+        tokio::join!(
+            secure::handle_auth_request(engine.pool(), "POST", "/auth/pairing/start", &headers, &payload),
+            secure::handle_auth_request(engine.pool(), "POST", "/auth/pairing/start", &headers, &payload),
+        )
+    });
+    assert_eq!(usize::from(results.0.is_ok()) + usize::from(results.1.is_ok()), 1);
+}
+
+#[test]
+fn transaction_pages_are_bounded_and_reject_a_bank_changed_between_pages() {
+    let harness = Harness::start();
+    harness.engine.block_on(async {
+        let mut transaction = harness.engine.pool().begin().await.unwrap();
+        sqlx::query("INSERT INTO accounts (id, name, type, \"initialBalance\", color, icon) VALUES ('paged', 'Paged', 'Courant', 0, '#123456', 'Wallet')").execute(&mut *transaction).await.unwrap();
+        for index in 0..2001 {
+            sqlx::query("INSERT INTO transactions (id, date, \"accountId\", type, amount, category, description, checked, \"isTransfer\") VALUES ($1, '2026-10-01', 'paged', 'expense', 1, 'transfer', 'Test', 0, 0)")
+                .bind(format!("page-{index}")).execute(&mut *transaction).await.unwrap();
+        }
+        transaction.commit().await.unwrap();
+    });
+    let (status, _, body) = harness.request("GET", "/api/transactions/page?limit=2000", None, true);
+    assert_eq!(status, 200);
+    let page: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(page["transactions"].as_array().unwrap().len(), 2000);
+    assert_eq!(page["nextOffset"], 2000);
+    let version = page["dataVersion"].as_i64().unwrap();
+    let (status, _, body) = harness.request(
+        "GET",
+        &format!("/api/transactions/page?offset=2000&version={version}"),
+        None,
+        true,
+    );
+    assert_eq!(status, 200);
+    let page: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(page["transactions"].as_array().unwrap().len(), 1);
+    assert!(page["nextOffset"].is_null());
+    harness
+        .engine
+        .block_on(sqlx::query("UPDATE transactions SET checked=1 WHERE id='page-0'").execute(harness.engine.pool()))
+        .unwrap();
+    assert_eq!(
+        harness
+            .request(
+                "GET",
+                &format!("/api/transactions/page?offset=2000&version={version}"),
+                None,
+                true
+            )
+            .0,
+        409
+    );
+    for query in ["limit=2001", "offset=-1", "version=oops"] {
+        assert_eq!(
+            harness
+                .request("GET", &format!("/api/transactions/page?{query}"), None, true)
+                .0,
+            400
+        );
+    }
+}
+
+#[test]
 fn the_assistant_answers_a_sentence_from_the_pwa() {
     let harness = Harness::start();
     let account =

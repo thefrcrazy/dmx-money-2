@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Account, Transaction, Category, ScheduledTransaction, BankContextType, AppData, Budget } from '../types';
 import { dbService } from '../services/db';
 import { hasTauriRuntime, isMobileCompanion } from '../utils/runtime';
+import { getMobileRelayEndpoint, isMobileRelayUnlocked, MOBILE_RELAY_LOCK_EVENT } from '../services/relayTransport';
 
 const BankContext = createContext<BankContextType | undefined>(undefined);
 const SETTINGS_REFRESH_EVENT = 'dmxmoney-settings-refresh';
@@ -247,6 +248,29 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const isProcessingScheduledRef = useRef(false);
     const lastDataVersionRef = useRef<number | null>(null);
     const localEditRevision = useRef(0);
+
+    useEffect(() => {
+        const lock = () => {
+            if (!getMobileRelayEndpoint() || isMobileRelayUnlocked()) return;
+            localEditRevision.current += 1;
+            setAccounts([]);
+            setTransactions([]);
+            setCategories([]);
+            setScheduled([]);
+            setBudgets([]);
+            lastDataVersionRef.current = null;
+            setMobileConnectionState('error');
+            setMobileConnectionError('Session mobile verrouillée. Reconnectez-vous avec votre clé d’accès.');
+        };
+        window.addEventListener(MOBILE_RELAY_LOCK_EVENT, lock);
+        window.addEventListener('focus', lock);
+        document.addEventListener('visibilitychange', lock);
+        return () => {
+            window.removeEventListener(MOBILE_RELAY_LOCK_EVENT, lock);
+            window.removeEventListener('focus', lock);
+            document.removeEventListener('visibilitychange', lock);
+        };
+    }, []);
 
     const loadBankData = useCallback(async (options: { processScheduled?: boolean } = {}) => {
         const startedAtRevision = localEditRevision.current;

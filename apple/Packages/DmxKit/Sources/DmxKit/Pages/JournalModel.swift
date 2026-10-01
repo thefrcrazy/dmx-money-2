@@ -20,27 +20,27 @@ public final class JournalModel: PageModel {
 
     public var search = "" {
         willSet { objectWillChange.send() }
-        didSet { refresh() }
+        didSet { if oldValue != search { filtersChanged() } }
     }
 
     public var categories: [String] = [] {
         willSet { objectWillChange.send() }
-        didSet { refresh() }
+        didSet { if oldValue != categories { filtersChanged() } }
     }
 
     public var types: [String] = [] {
         willSet { objectWillChange.send() }
-        didSet { refresh() }
+        didSet { if oldValue != types { filtersChanged() } }
     }
 
     public var statuses: [String] = [] {
         willSet { objectWillChange.send() }
-        didSet { refresh() }
+        didSet { if oldValue != statuses { filtersChanged() } }
     }
 
     public var budgetStatuses: [String] = [] {
         willSet { objectWillChange.send() }
-        didSet { refresh() }
+        didSet { if oldValue != budgetStatuses { filtersChanged() } }
     }
 
     public var selection: Set<String> = [] {
@@ -50,6 +50,13 @@ public final class JournalModel: PageModel {
     public private(set) var view: JournalView? = nil {
         willSet { objectWillChange.send() }
     }
+
+    /// Invalide le tri des vues uniquement quand les données affichées ont été recalculées.
+    public private(set) var rowsRevision: UInt64 = 0 {
+        willSet { objectWillChange.send() }
+    }
+
+    private var updatingFilters = false
 
     /// Appelé après chaque recalcul (le tableau AppKit recharge ses lignes).
     public var onChange: (() -> Void)?
@@ -69,6 +76,7 @@ public final class JournalModel: PageModel {
             budgetStatuses: budgetStatuses.map { $0 == "budgeted" ? .budgeted : .unbudgeted }
         )
         view = store.read { engine in try engine.journal(query: query) }
+        rowsRevision &+= 1
         let visible = Set(view?.rows.map { $0.transaction.id } ?? [])
         let kept = selection.intersection(visible)
         if kept != selection {
@@ -82,11 +90,19 @@ public final class JournalModel: PageModel {
     public var hasFilters: Bool { view?.hasFilters ?? false }
 
     public func clearFilters() {
+        guard !search.isEmpty || !categories.isEmpty || !types.isEmpty || !statuses.isEmpty || !budgetStatuses.isEmpty else { return }
+        updatingFilters = true
         search = ""
         categories = []
         types = []
         statuses = []
         budgetStatuses = []
+        updatingFilters = false
+        setNeedsRefresh()
+    }
+
+    private func filtersChanged() {
+        if !updatingFilters { setNeedsRefresh() }
     }
 
     private static func transactionType(_ key: String) -> TransactionType? {

@@ -604,9 +604,9 @@ pub async fn create_tables(pool: &DbPool) -> CoreResult<()> {
 }
 
 /// Compteur incrémenté à chaque écriture (y compris celles du pont PWA).
-pub async fn data_version(pool: &DbPool) -> CoreResult<i64> {
+pub async fn data_version<'e>(executor: impl sqlx::Executor<'e, Database = sqlx::Sqlite>) -> CoreResult<i64> {
     sqlx::query_scalar("SELECT version FROM sync_state WHERE id = 1")
-        .fetch_one(pool)
+        .fetch_one(executor)
         .await
         .ctx("lecture de la version des données")
 }

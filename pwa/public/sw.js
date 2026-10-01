@@ -1,14 +1,13 @@
 const CACHE_NAME = "dmxmoney-shell-2.0.6";
 const BUILD_ASSETS = [];
 const APP_SHELL = [
-  "/",
-  "/mobile",
-  "/mobile/",
-  "/logo.png",
-  "/manifest.webmanifest",
-  "/pwa-192.png",
-  "/pwa-512.png",
+  "./",
+  "logo.png",
+  "manifest.webmanifest",
+  "pwa-192.png",
+  "pwa-512.png",
 ];
+const assetUrl = (path) => new URL(path, self.location.href).toString();
 
 const isHttpRequest = (request) => {
   const url = new URL(request.url);
@@ -59,7 +58,7 @@ const staleWhileRevalidate = async (request, event) => {
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll([...APP_SHELL, ...BUILD_ASSETS].map(url => new Request(url, { cache: "reload" }))))
+      .then(cache => cache.addAll([...APP_SHELL, ...BUILD_ASSETS].map(path => new Request(assetUrl(path), { cache: "reload" }))))
       .then(() => self.skipWaiting())
   );
 });
@@ -77,10 +76,10 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET" || !isHttpRequest(request)) return;
 
   const url = new URL(request.url);
-  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return;
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/") || url.pathname.startsWith("/relay/")) return;
 
   if (request.mode === "navigate") {
-    event.respondWith(networkFirst(request, "/mobile"));
+    event.respondWith(networkFirst(request, assetUrl("./")));
     return;
   }
 
@@ -88,4 +87,3 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(staleWhileRevalidate(request, event));
   }
 });
-

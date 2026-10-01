@@ -17,8 +17,6 @@ export type ImportTransactionInput = {
     checked?: boolean;
 };
 
-const todayIsoDate = () => new Date().toISOString().split('T')[0];
-
 const decodeEntities = (value: string) => value
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
@@ -79,6 +77,7 @@ export const parseDelimitedRows = (content: string, separator: string, hasHeader
         cell += char;
     }
 
+    if (inQuotes) throw new Error('Le fichier CSV contient un champ entre guillemets non terminé.');
     if (cell.length > 0 || row.length > 0) {
         pushRow();
     }
@@ -93,7 +92,7 @@ export const parseBankAmount = (value: string) => {
         .replace(/[€$£]/g, '')
         .trim();
 
-    if (!cleaned) return 0;
+    if (!cleaned) throw new Error('Montant bancaire manquant.');
 
     const lastComma = cleaned.lastIndexOf(',');
     const lastDot = cleaned.lastIndexOf('.');
@@ -104,27 +103,39 @@ export const parseBankAmount = (value: string) => {
         : cleaned.replace(',', '.');
 
     const amount = Number(normalized);
-    return Number.isFinite(amount) ? amount : 0;
+    if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(normalized) || !Number.isFinite(amount)) {
+        throw new Error(`Montant bancaire invalide : ${value}`);
+    }
+    return amount;
+};
+
+const validatedDate = (year: string, month: string, day: string) => {
+    const result = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    const date = new Date(`${result}T00:00:00Z`);
+    if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== result) {
+        throw new Error(`Date bancaire invalide : ${result}`);
+    }
+    return result;
 };
 
 export const parseBankDate = (value: string) => {
     const raw = value.trim();
-    if (!raw) return todayIsoDate();
+    if (!raw) throw new Error('Date bancaire manquante.');
 
-    const isoMatch = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    const isoMatch = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:$|T\d{2}:\d{2})/);
     if (isoMatch) {
         const [, year, month, day] = isoMatch;
-        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+        return validatedDate(year, month, day);
     }
 
     const frenchMatch = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
     if (frenchMatch) {
         const [, day, month, inputYear] = frenchMatch;
         const year = inputYear.length === 2 ? `20${inputYear}` : inputYear;
-        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+        return validatedDate(year, month, day);
     }
 
-    return todayIsoDate();
+    throw new Error(`Date bancaire invalide : ${value}`);
 };
 
 export const parseQifDate = (value: string) => {
@@ -139,9 +150,10 @@ export const parseQifTransactions = (content: string): ParsedStatementTransactio
     const commitCurrent = () => {
         if (Object.keys(current).length === 0) return;
 
+        if (!current.date || current.amount === undefined) throw new Error('Transaction QIF sans date ou montant.');
         transactions.push({
-            date: current.date || todayIsoDate(),
-            amount: current.amount ?? 0,
+            date: current.date,
+            amount: current.amount,
             description: current.description || 'Transaction QIF',
             category: current.category
         });
@@ -183,8 +195,8 @@ const getOfxTagValue = (block: string, tag: string) => {
 };
 
 const parseOfxDate = (value: string) => {
-    if (!value || value.length < 8) return todayIsoDate();
-    return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+    if (!/^\d{8}/.test(value)) throw new Error('Date OFX manquante ou invalide.');
+    return validatedDate(value.slice(0, 4), value.slice(4, 6), value.slice(6, 8));
 };
 
 export const parseOfxTransactions = (content: string): ParsedStatementTransaction[] => {
@@ -232,18 +244,25 @@ export const filterDuplicateTransactions = <T extends ImportTransactionInput>(
     existing: Transaction[],
     fallbackAccountId: string
 ) => {
-    const seen = new Set(existing.map(transaction => transactionFingerprint(transaction)));
+    // Match occurrences, not just values: two identical purchases on a statement
+    // are legitimate. Re-importing the same statement must still add neither twice.
+    const remaining = new Map<string, number>();
+    existing.forEach(transaction => {
+        const key = transactionFingerprint(transaction);
+        remaining.set(key, (remaining.get(key) || 0) + 1);
+    });
     const unique: T[] = [];
     let duplicateCount = 0;
 
     incoming.forEach(transaction => {
         const key = transactionFingerprint(transaction, fallbackAccountId);
-        if (seen.has(key)) {
+        const count = remaining.get(key) || 0;
+        if (count > 0) {
+            remaining.set(key, count - 1);
             duplicateCount++;
             return;
         }
 
-        seen.add(key);
         unique.push(transaction);
     });
 

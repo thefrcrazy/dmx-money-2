@@ -337,12 +337,12 @@ const SettingsPage: React.FC = () => {
                 type: 'error',
                 technicalDetails: error instanceof Error ? error.message : String(error)
             });
-        } finally {
-            setIsCsvImportModalOpen(false);
-            setIsQifImportModalOpen(false);
-            setIsOfxImportModalOpen(false);
-            setImportFile(null);
+            throw error;
         }
+        setIsCsvImportModalOpen(false);
+        setIsQifImportModalOpen(false);
+        setIsOfxImportModalOpen(false);
+        setImportFile(null);
     };
 
     const colors = [

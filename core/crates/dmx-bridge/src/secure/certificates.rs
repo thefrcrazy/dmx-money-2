@@ -58,7 +58,7 @@ pub fn certificate_fingerprint(data_dir: &Path, settings: &SecureBridgeSettings)
 pub async fn refresh_infrastructure(pool: &DbPool, data_dir: &Path, force_certificate: bool) -> Result<(), String> {
     ensure_auto_configuration(pool, data_dir).await?;
     let mut settings = load_settings(pool).await?;
-    if !settings.enabled {
+    if !settings.enabled || settings.local_host.is_none() {
         return Ok(());
     }
 

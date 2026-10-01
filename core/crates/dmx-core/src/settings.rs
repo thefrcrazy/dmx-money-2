@@ -13,7 +13,7 @@ use crate::models::{
 use crate::repo::{row_bool, row_f64, row_i64, row_opt_string, row_string};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{sqlite::SqliteRow, Row, SqliteConnection};
+use sqlx::{sqlite::SqliteRow, Executor, Row, Sqlite, SqliteConnection};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -193,9 +193,11 @@ fn record_from_row(row: &SqliteRow) -> SettingsRecord {
     }
 }
 
-pub async fn get_settings_record(pool: &DbPool) -> CoreResult<Option<SettingsRecord>> {
+pub async fn get_settings_record<'e>(
+    executor: impl Executor<'e, Database = Sqlite>,
+) -> CoreResult<Option<SettingsRecord>> {
     let row = sqlx::query("SELECT * FROM settings WHERE id = 1")
-        .fetch_optional(pool)
+        .fetch_optional(executor)
         .await
         .ctx("récupération des paramètres")?;
     Ok(row.as_ref().map(record_from_row))
@@ -296,25 +298,13 @@ pub async fn apply_settings_patch(pool: &DbPool, patch: SettingsPatch) -> CoreRe
         ));
     }
 
-    let mut connection = pool.acquire().await.ctx("mise à jour des paramètres")?;
-    sqlx::query("BEGIN IMMEDIATE")
-        .execute(&mut *connection)
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .ctx("mise à jour des paramètres")?;
-
-    match apply_settings_patch_locked(&mut connection, patch).await {
-        Ok(result) => {
-            sqlx::query("COMMIT")
-                .execute(&mut *connection)
-                .await
-                .ctx("mise à jour des paramètres")?;
-            Ok(result)
-        }
-        Err(error) => {
-            let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
-            Err(error)
-        }
-    }
+    let result = apply_settings_patch_locked(&mut tx, patch).await?;
+    tx.commit().await.ctx("mise à jour des paramètres")?;
+    Ok(result)
 }
 
 /// Patch envoyé par les anciennes PWA (schéma 1) : seules les fusions additives sont conservées.
@@ -379,7 +369,7 @@ pub fn legacy_desktop_settings_patch(settings: SettingsRecord) -> SettingsPatch 
     }
 }
 
-async fn apply_settings_patch_locked(
+pub(crate) async fn apply_settings_patch_locked(
     connection: &mut SqliteConnection,
     mut patch: SettingsPatch,
 ) -> CoreResult<SettingsPatchResult> {
@@ -1258,8 +1248,8 @@ pub fn change_to_patch(current: &AppSettings, change: SettingsChange) -> CoreRes
     Ok(patch)
 }
 
-pub async fn load_app_settings(pool: &DbPool) -> CoreResult<AppSettings> {
-    Ok(AppSettings::from_record(get_settings_record(pool).await?.as_ref()))
+pub async fn load_app_settings<'e>(executor: impl Executor<'e, Database = Sqlite>) -> CoreResult<AppSettings> {
+    Ok(AppSettings::from_record(get_settings_record(executor).await?.as_ref()))
 }
 
 pub async fn apply_change(pool: &DbPool, change: SettingsChange) -> CoreResult<SettingsPatchResult> {

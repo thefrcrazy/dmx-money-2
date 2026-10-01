@@ -1,6 +1,6 @@
 [package]
 name = "dmx-bridge"
-description = "Pont compagnon mobile de DmxMoney : API HTTPS locale, passkeys et provisionnement managé"
+description = "Compagnon mobile DmxMoney : relais Internet chiffré, API locale et passkeys"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -25,6 +25,10 @@ rcgen = "0.14"
 reqwest = { version = "0.13", features = ["json", "query"] }
 rustls = { version = "0.23.45", features = ["ring"] }
 sha2 = "0.10"
+aes-gcm = "0.10"
+hkdf = "0.12"
+futures-util = { version = "0.3", features = ["sink"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 subtle = "2.6"
 url = "2.5"
 

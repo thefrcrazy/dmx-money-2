@@ -7,6 +7,7 @@ struct ModernJournal: View {
     @ObservedObject var model: JournalModel
     @EnvironmentObject private var store: AppStore
     @State private var sort: [KeyPathComparator<JournalRow>] = []
+    @State private var rows: [JournalRow] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,6 +15,9 @@ struct ModernJournal: View {
             Divider()
             table
         }
+        .onAppear(perform: updateRows)
+        .onChange(of: model.rowsRevision) { _, _ in updateRows() }
+        .onChange(of: sort) { _, _ in updateRows() }
     }
 
     // MARK: Filtres
@@ -223,9 +227,9 @@ struct ModernJournal: View {
         }
     }
 
-    private var rows: [JournalRow] {
+    private func updateRows() {
         let rows = model.rows
-        return sort.isEmpty ? rows : rows.sorted(using: sort)
+        self.rows = sort.isEmpty ? rows : rows.sorted(using: sort)
     }
 
     private func color(_ kind: TransactionType) -> Color {

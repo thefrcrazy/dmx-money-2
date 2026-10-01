@@ -123,6 +123,11 @@
             SelectionChanged="OnSelectionChanged"
             DoubleTapped="OnRowDoubleTapped"
             Margin="0,0,0,0">
+            <ListView.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <ItemsStackPanel Orientation="Vertical" />
+                </ItemsPanelTemplate>
+            </ListView.ItemsPanel>
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />

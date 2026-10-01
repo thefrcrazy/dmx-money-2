@@ -2,14 +2,13 @@ import CoreImage.CIFilterBuiltins
 import DmxKit
 import SwiftUI
 
-/// Compagnon mobile : pont HTTPS local, QR d'appairage et mobiles appairés — en natif.
-///
-/// L'app embarque le client PWA : le QR pointe vers le pont local, pas vers la PWA publique.
+/// Compagnon mobile : accès Internet chiffré ou pont local, QR et appareils appairés.
 struct ModernCompanion: View {
     @EnvironmentObject private var store: AppStore
     @State private var isWorking = false
 
     private var bridge: SecureBridgeInfo? { store.bridgeStatus?.secureBridge }
+    private var isRemote: Bool { bridge?.apiUrl?.contains("/relay/") == true }
 
     var body: some View {
         PageBody {
@@ -58,7 +57,7 @@ struct ModernCompanion: View {
                     Text(detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     if bridge?.enabled == true {
                         ProgressView(value: Double(readyCount), total: Double(stepList.count)) {
-                            Text("Provisionnement \(readyCount)/\(stepList.count)")
+                            Text("Connexion \(readyCount)/\(stepList.count)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -99,13 +98,17 @@ struct ModernCompanion: View {
         guard let bridge else { return "Désactivé" }
         if !bridge.enabled { return "Désactivé" }
         if bridge.active { return "Prêt à appairer" }
+        if isRemote { return "Connexion Internet" }
         if bridge.certificateReady { return "Démarrage local" }
         return "Préparation HTTPS"
     }
 
     private var detail: String {
         guard let bridge, bridge.enabled else {
-            return "Active le mode pour préparer le pont HTTPS et le QR d'appairage."
+            return "Activez le compagnon, puis appairez votre téléphone avec le QR."
+        }
+        if isRemote {
+            return "Accès en Wi-Fi, 4G ou 5G, avec chiffrement entre vos appareils. Ce Mac doit rester allumé et connecté."
         }
         if bridge.active {
             return "Le client PWA embarqué est servi par ce Mac ; vos mobiles s'y connectent en HTTPS."
@@ -116,7 +119,7 @@ struct ModernCompanion: View {
     // MARK: Étapes
 
     private var steps: some View {
-        Card("Provisionnement", systemImage: "checklist") {
+        Card("Connexion sécurisée", systemImage: "checklist") {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(stepList.enumerated()), id: \.element.title) { item in
                     if item.offset > 0 { Divider() }
@@ -139,7 +142,7 @@ struct ModernCompanion: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
-                if let api = bridge?.apiUrl {
+                if !isRemote, let api = bridge?.apiUrl {
                     Divider()
                     LabeledContent("Adresse servie") {
                         Text(api).font(.caption.monospaced()).textSelection(.enabled)
@@ -169,6 +172,16 @@ struct ModernCompanion: View {
     private var stepList: [Step] {
         let bridge = self.bridge
         let enabled = bridge?.enabled ?? false
+        if isRemote {
+            let connected = bridge?.active ?? false
+            let encryptionReady = bridge?.managedCredentialReady ?? false
+            return [
+                Step(title: "Compagnon mobile", value: bridge?.appUrl == nil ? "En attente" : "Disponible", ready: bridge?.appUrl != nil, icon: "globe"),
+                Step(title: "Chiffrement entre appareils", value: encryptionReady ? "Prêt" : "En préparation", ready: encryptionReady, icon: "lock.shield"),
+                Step(title: "Connexion Internet", value: connected ? "Connectée" : "Reconnexion en cours", ready: connected, icon: "wifi"),
+                Step(title: "Relais sécurisé", value: (bridge?.configured ?? false) ? "Prêt" : "En préparation", ready: bridge?.configured ?? false, icon: "server.rack"),
+            ]
+        }
         return [
             Step(
                 title: "Client PWA",
@@ -218,7 +231,7 @@ struct ModernCompanion: View {
                         .overlay {
                             RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator, lineWidth: 0.5)
                         }
-                    Text("Scannez ce QR avec l'appareil photo du mobile, puis suivez l'appairage.")
+                    Text("Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. En accès Internet, le Wi-Fi, la 4G et la 5G fonctionnent ; ce Mac doit rester allumé et connecté.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -257,6 +270,9 @@ struct ModernCompanion: View {
 
     private var pairingHint: String {
         guard let bridge, bridge.enabled else { return "Active le compagnon pour obtenir un QR." }
+        if isRemote {
+            return bridge.active ? "Générez un QR pour appairer un mobile." : "Connexion Internet en cours."
+        }
         if !bridge.certificateReady { return "Certificat HTTPS en cours de génération." }
         if !bridge.active { return "Serveur local en démarrage." }
         return "Génère un QR pour appairer un mobile."

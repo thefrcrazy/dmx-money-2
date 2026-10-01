@@ -17,6 +17,9 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   # Secret d'enregistrement du pont managé : compilé dans le noyau (option_env!).
@@ -32,13 +35,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: resolve
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            version="${{ inputs.version }}"
+          if [ -n "$REQUESTED_VERSION" ]; then
+            version="$REQUESTED_VERSION"
           elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
           else
             version="$(cat VERSION)"
+          fi
+          if ! [[ "$version" =~ ^2\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::Version invalide : 2.x.y ou 2.x.y-prerelease requis."
+            exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "==> version $version"
@@ -159,21 +168,60 @@ jobs:
     needs: version
     # Visual Studio 2026, comme dans ci.yml : compilation XAML en processus et ciblage de .NET 10.
     runs-on: windows-2025-vs2026
+    environment: windows-signing
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       matrix:
         rid: [win-x64, win-arm64]
     steps:
       - uses: actions/checkout@v4
+      - name: Configuration de signature Windows obligatoire
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          SIGNING_ENDPOINT: ${{ vars.WINDOWS_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.WINDOWS_SIGNING_ACCOUNT }}
+          SIGNING_PROFILE: ${{ vars.WINDOWS_SIGNING_PROFILE }}
+        run: |
+          foreach ($name in @('AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID', 'SIGNING_ENDPOINT', 'SIGNING_ACCOUNT', 'SIGNING_PROFILE')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Signature Windows non configurée ($name). Créez un profil Azure Artifact Signing Public Trust et les variables de l'environnement windows-signing ; la release ne publiera pas d'installeur non signé."
+            }
+          }
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          # Le client de signature Microsoft nécessite le runtime .NET 8 x64.
+          dotnet-version: |
+            8.0.x
+            10.0.x
       - run: cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.11.0+v0.31.0 --locked
       # Même version que le paquet Velopack de l'app (DmxMoney.App.csproj).
       - run: dotnet tool install -g vpk --version 0.0.1298
+      - name: Client Microsoft et métadonnées de signature
+        id: signing
+        env:
+          SIGNING_ENDPOINT: ${{ vars.WINDOWS_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.WINDOWS_SIGNING_ACCOUNT }}
+          SIGNING_PROFILE: ${{ vars.WINDOWS_SIGNING_PROFILE }}
+        run: |
+          ./scripts/prepare-windows-signing.ps1 -Endpoint $env:SIGNING_ENDPOINT -AccountName $env:SIGNING_ACCOUNT -CertificateProfileName $env:SIGNING_PROFILE -OutputDirectory (Join-Path $env:RUNNER_TEMP 'windows-signing')
       - name: Application et installeur Velopack
-        run: pwsh scripts/build-windows.ps1 -Rid ${{ matrix.rid }} -Version ${{ needs.version.outputs.version }}
+        env:
+          SIGN_TOOL: ${{ steps.signing.outputs.signtool }}
+          SIGNING_DLIB: ${{ steps.signing.outputs.dlib }}
+          SIGNING_METADATA: ${{ steps.signing.outputs.metadata }}
+        run: |
+          ./scripts/build-windows.ps1 -Rid ${{ matrix.rid }} -Version ${{ needs.version.outputs.version }} -RequireSigning -SignToolPath $env:SIGN_TOOL -SigningDlibPath $env:SIGNING_DLIB -SigningMetadataPath $env:SIGNING_METADATA
       - uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.rid }}

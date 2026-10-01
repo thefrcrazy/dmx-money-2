@@ -265,11 +265,13 @@ public struct SettingsPage: View {
         let enabled = bridge?.enabled ?? false
         let active = bridge?.active ?? false
         let certificateReady = bridge?.certificateReady ?? false
+        let isRemote = bridge?.apiUrl?.contains("/relay/") == true
         let passkeys = bridge?.passkeys.filter { $0.revokedAt == nil } ?? []
         let localLabel = (status?.active ?? false) ? "Actif" : (enabled ? "Démarrage" : "Inactif")
 
         let state: (label: String, detail: String, color: Color) = {
-            if !enabled { return ("Désactivé", "Active le mode pour préparer le pont HTTPS et le QR mobile.", .secondary) }
+            if !enabled { return ("Désactivé", "Activez le compagnon, puis appairez votre téléphone avec le QR.", .secondary) }
+            if isRemote { return (active ? "Prêt à appairer" : "Connexion Internet", "Accès en Wi-Fi, 4G ou 5G, avec chiffrement entre vos appareils. L’ordinateur doit rester allumé et connecté.", active ? DmxColors.income : DmxColors.warning) }
             if active { return ("Prêt à appairer", "La PWA peut se connecter à l’API locale sécurisée.", DmxColors.income) }
             if certificateReady { return ("Démarrage local", "Le certificat est prêt, le serveur local termine son démarrage.", Color(hex: "#3b82f6")) }
             return ("Préparation HTTPS", "DNS et certificat sont préparés automatiquement en arrière-plan.", DmxColors.warning)
@@ -278,17 +280,23 @@ public struct SettingsPage: View {
         let provisioningReady = bridge?.configured ?? false
         let provisioningLabel = provisioningReady ? "Prêt" : (!enabled ? "En attente d’activation" : "En cours ou indisponible")
         let dnsLabel = bridge?.dnsRecordId != nil ? "Configuré" : ((bridge?.managedCredentialReady ?? false) ? "Prêt" : (enabled ? "En attente" : "En attente d’activation"))
-        let steps: [(label: String, value: String, ready: Bool, icon: String)] = [
+        let steps: [(label: String, value: String, ready: Bool, icon: String)] = isRemote ? [
+            ("Compagnon mobile", bridge?.appUrl != nil ? "Disponible" : "En attente", bridge?.appUrl != nil, "Globe2"),
+            ("Chiffrement entre appareils", (bridge?.managedCredentialReady ?? false) ? "Prêt" : "En préparation", bridge?.managedCredentialReady ?? false, "ShieldCheck"),
+            ("Connexion Internet", active ? "Connectée" : "Reconnexion en cours", active, "Wifi"),
+            ("Relais sécurisé", provisioningReady ? "Prêt" : "En préparation", provisioningReady, "Server"),
+        ] : [
             ("PWA publique", bridge?.appUrl != nil ? "Disponible" : "En attente", bridge?.appUrl != nil, "Globe2"),
             ("Provisionnement", provisioningLabel, provisioningReady, "KeyRound"),
             ("DNS local", dnsLabel, bridge?.dnsRecordId != nil, "Wifi"),
             ("Certificat HTTPS", certificateReady ? "Prêt" : (enabled ? "En génération" : "Absent"), certificateReady, "ShieldCheck"),
             ("API locale", bridge?.apiUrl != nil ? localLabel : "Non active", active, "Server"),
         ]
-        let pairingLabel = active ? "Nouveau QR" : (enabled ? "Préparation HTTPS" : "Activer d’abord")
+        let pairingLabel = active ? "Nouveau QR" : (enabled ? (isRemote ? "Connexion…" : "Préparation HTTPS") : "Activer d’abord")
         let qrEmpty = !enabled ? "Le QR sera disponible après activation."
+            : (isRemote ? (active ? "Générez un QR pour appairer un mobile." : "Connexion Internet en cours.")
             : (!certificateReady ? "Certificat HTTPS en cours de génération."
-               : (!active ? "Serveur local en démarrage." : "Génère un QR pour appairer un mobile."))
+               : (!active ? "Serveur local en démarrage." : "Génère un QR pour appairer un mobile.")))
 
         return section("Mode compagnon mobile", icon: "Smartphone") {
             VStack(alignment: .leading, spacing: 12) {
@@ -296,7 +304,7 @@ public struct SettingsPage: View {
                     IconCircle(icon: "Lock", color: DmxColors.income, size: 34)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 8) {
-                            Text("Accès mobile local + PWA").font(.system(size: 14, weight: .semibold))
+                            Text("Accès depuis votre téléphone").font(.system(size: 14, weight: .semibold))
                             Pill(state.label, color: state.color)
                         }
                         Text(state.detail).font(.system(size: 12)).foregroundColor(.secondary)
@@ -308,8 +316,8 @@ public struct SettingsPage: View {
                     .disabled(bridgeBusy || status == nil)
                 }
                 HStack(spacing: 8) {
-                    infoTile(icon: "Globe2", label: "PWA mobile", value: bridge?.appUrl ?? "Provisionnement automatique en attente")
-                    infoTile(icon: "Server", label: "API locale sécurisée", value: bridge?.apiUrl ?? "Non active")
+                    infoTile(icon: "Globe2", label: "Compagnon mobile", value: isRemote ? "Application mobile disponible" : bridge?.appUrl ?? "En préparation")
+                    infoTile(icon: "Server", label: "Connexion au bureau", value: isRemote ? (active ? "Accès Internet chiffré" : "Connexion Internet en cours") : bridge?.apiUrl ?? "Non active")
                 }
             }
             .padding(16)
@@ -342,8 +350,8 @@ public struct SettingsPage: View {
                         }
                     }
                     HStack(spacing: 6) {
-                        badge("Local", localLabel)
-                        badge("Certificat", certificateReady ? "Prêt" : "Absent")
+                        badge(isRemote ? "Internet" : "Local", isRemote ? (active ? "Connecté" : "En cours") : localLabel)
+                        badge(isRemote ? "Chiffrement" : "Certificat", isRemote ? "Entre appareils" : (certificateReady ? "Prêt" : "Absent"))
                         badge("Mobiles", "\(passkeys.count)")
                     }
                     if enabled, let error = bridge?.lastError {
@@ -477,7 +485,7 @@ public struct SettingsPage: View {
             }
             .padding(12)
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(DmxPalette.separator, lineWidth: 0.5))
-            Text("Ouvre la PWA sur mobile, puis appaire le téléphone avec ce QR. Les données apparaissent après cette étape. Génère un QR par appareil : plusieurs mobiles peuvent rester appairés en même temps.")
+            Text("Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. En accès Internet, le Wi-Fi, la 4G et la 5G fonctionnent ; l’ordinateur doit rester allumé et connecté. Un QR par appareil.")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
