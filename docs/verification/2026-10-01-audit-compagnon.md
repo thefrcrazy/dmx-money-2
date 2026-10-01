@@ -13,7 +13,8 @@ L’archivage conserve l’historique ; un nouveau commit ne masque pas les anci
 
 Le nouveau Worker et sa PWA sont publiés sur
 [le service commun](https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev/mobile/), version Worker
-`7a88524a-13e4-437a-8b78-b52a5eeb3c71`. L’ancien Worker `managed-bridge` reste séparé.
+`3ae96b65-2692-4033-b844-cd056ad8709f`, cache PWA `2.0.6-2278b075f072404e`.
+L’ancien Worker `managed-bridge` reste séparé.
 **Aucune nouvelle release desktop ni aucun installeur Windows signé n’a été publié.**
 Les applications déjà installées nécessitent une nouvelle build pour utiliser ce relais.
 
@@ -60,7 +61,7 @@ captures AppKit et iOS simulateur arm64. Ce passage ne publie pas d’installeur
 | Swift | 13 tests DmxKit, dont 3 courses d’ACK CloudKit ; builds macOS modern et AppKit réussis |
 | Windows | 41 tests .NET de noyau/modèles réussis, dont les diagnostics des erreurs de politique Windows ; scripts PowerShell et vérification de signature détaillés dans le rapport Windows |
 | GTK | Compilation vérifiée ; pas d’exécution du bureau Linux pendant cette passe |
-| Navigateur public | PWA à 390 × 844 sans débordement ; service worker actif sous `/mobile/`, manifest/icônes/assets reçus ; aucune erreur JavaScript, CSP ou réseau constatée sur l’écran non appairé |
+| Navigateur public | Nouvelle PWA à 390 × 844 sans débordement ; bundle `index-Bo9DIAf8.js`, service worker actif sous `/mobile/` et nouveau cache reçus ; aucune erreur JavaScript, CSP ou réseau constatée sur l’écran non appairé |
 | Dépendances npm | PWA : aucun avis sur 478 paquets ; relais : aucun avis sur 159 paquets après overrides de deux dépendances de test |
 | RustSec | 512 paquets, aucune entrée `vulnerabilities` ; 3 avis conservés détaillés ci-dessous |
 

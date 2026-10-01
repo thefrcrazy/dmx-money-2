@@ -101,7 +101,14 @@ namespace DmxMoney
         static void VerifyTimestamp(IntPtr message)
         {
             uint length = 0;
-            Require(CryptMsgGetStructure(message, 10, 0, IntPtr.Zero, ref length), "Attributs CMS");
+            if (!CryptMsgGetStructure(message, 10, 0, IntPtr.Zero, ref length))
+            {
+                // Un SignedData non horodaté n'a aucun attribut non signé ; CryptoAPI
+                // renvoie CRYPT_E_ATTRIBUTES_MISSING plutôt qu'une liste vide.
+                if (unchecked((uint)Marshal.GetLastWin32Error()) == 0x8009100F)
+                    throw new CryptographicException("Horodatage Authenticode absent.");
+                Require(false, "Attributs CMS");
+            }
             if (length < Marshal.SizeOf<Attributes>() || length > 16 * 1024 * 1024)
                 throw new CryptographicException("Taille des attributs CMS invalide.");
             var pointer = Marshal.AllocHGlobal((int)length);
