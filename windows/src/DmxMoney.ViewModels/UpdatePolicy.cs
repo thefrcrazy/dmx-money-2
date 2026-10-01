@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Security.Cryptography;
 
 namespace DmxMoney.ViewModels;
 
@@ -22,15 +23,43 @@ public static class UpdatePolicy
     public static bool IsValidPackage(string? fileName, string? sha256, long size)
     {
         if (string.IsNullOrEmpty(fileName) || size <= 0 ||
-            fileName.IndexOfAny(['/', '\\', ':']) >= 0 ||
+            fileName.IndexOfAny(['/', '\\', ':', '<', '>', '"', '|', '?', '*']) >= 0 ||
             !fileName.EndsWith(".nupkg", StringComparison.OrdinalIgnoreCase) || sha256?.Length != 64)
         {
             return false;
         }
+        foreach (var character in fileName)
+            if (character < 0x20) return false;
         // Velopack 0.0.1298 produit 32 octets de SHA-256 en 64 chiffres hexadécimaux.
         foreach (var digit in sha256)
             if (!char.IsAsciiHexDigit(digit)) return false;
         return true;
+    }
+
+    /// <summary>Le propriétaire garde ce flux ouvert jusqu'au lancement de l'installation.</summary>
+    public static async Task<FileStream> OpenVerifiedPackageAsync(string path, string sha256, long size,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsValidPackage(Path.GetFileName(path), sha256, size))
+            throw new InvalidDataException("Métadonnées de mise à jour invalides.");
+        cancellationToken.ThrowIfCancellationRequested();
+        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 128 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        try
+        {
+            if (stream.Length != size)
+                throw new InvalidDataException("Taille du paquet de mise à jour incorrecte.");
+            var actual = await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
+            if (!CryptographicOperations.FixedTimeEquals(actual, Convert.FromHexString(sha256)))
+                throw new InvalidDataException("Empreinte SHA-256 du paquet de mise à jour incorrecte.");
+            stream.Position = 0;
+            return stream;
+        }
+        catch
+        {
+            await stream.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     public static bool IsWindowsExecutionBlocked(Exception error)

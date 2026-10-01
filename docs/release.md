@@ -91,8 +91,16 @@ un canal distinct `win-x64` / `win-arm64`. L'updater consulte le dépôt V2
 une version stable ; les installations de préversion les activent par défaut. Le premier clic
 vérifie la disponibilité ; « Installer » confirme le téléchargement et le redémarrage.
 `DMXMONEY_UPDATE_URL` accepte une source personnalisée HTTPS sans identifiants ni paramètres.
-L'updater exige une empreinte SHA-256 et Velopack la vérifie avec la taille avant d'appliquer
-chaque paquet. Cette empreinte protège l'intégrité ; elle ne remplace pas la signature du code.
+L'updater télécharge le paquet complet puis vérifie lui-même la taille et l'empreinte SHA-256
+du flux, même si Velopack réutilise un fichier déjà en cache. Le flux de lecture reste ouvert
+avec `FileShare.Read` jusqu'au lancement d'Update.exe, qui attend la sortie du parent sous Windows.
+Un cache invalide est retiré pour permettre un nouveau téléchargement à la prochaine tentative.
+Les deltas sont désactivés : leur reconstruction recomprime le ZIP et ne garantit pas une
+empreinte identique à celle du paquet complet. Les téléchargements peuvent donc être plus gros.
+Cette empreinte protège l'intégrité ; elle ne remplace pas la signature du code.
+Sources de la version épinglée :
+[réutilisation du cache et contrôle des paquets](https://github.com/velopack/velopack/blob/ed8600eee530a38d2669444b03eb240e56bc5aa3/src/lib-csharp/UpdateManager.cs),
+[recompression des deltas](https://github.com/velopack/velopack/blob/ed8600eee530a38d2669444b03eb240e56bc5aa3/src/bins/src/commands/patch.rs).
 
 ### Signature Windows et Smart App Control
 
@@ -196,7 +204,13 @@ nouvelle identité locale ne renouvelle pas automatiquement la confiance des ins
 
 SignTool utilise `/sha1` uniquement pour sélectionner l’empreinte du certificat dans
 `CurrentUser/My` ; le digest des fichiers et l’horodatage RFC 3161 utilisent **SHA-256**.
-Le contrôle local compare le certificat DER exact du signataire CMS embarqué, vérifie sa
+Velopack conserve les signatures fournisseurs déjà reconnues (Microsoft et son moteur de
+mise à jour). Setup, les fichiers `DmxMoney*.exe` / `DmxMoney*.dll` et `dmx_ffi.dll` exigent
+le certificat de développement épinglé. Les autres binaires, dont Squirrel/Update, exigent
+soit ce même certificat, soit une signature publique vérifiée par SignTool `/pa /all /tw`.
+Aucun autre certificat autosigné non approuvé n'est accepté.
+
+Pour la signature de développement, le contrôle local compare le certificat DER exact du signataire CMS embarqué, vérifie sa
 signature avec la clé publique épinglée puis recalcule le digest Authenticode du PE via le
 SIP Windows. Il vérifie aussi cryptographiquement le jeton d’horodatage RFC 3161 et son lien
 avec la signature du fichier, ainsi que les tailles/SHA-256 des paquets. Ce contrôle local

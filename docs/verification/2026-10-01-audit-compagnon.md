@@ -48,7 +48,7 @@ captures AppKit et iOS simulateur arm64. Ce passage ne publie pas d’installeur
 | PWA publiée | Chemins absolus de manifest, service worker et assets incompatibles avec `/mobile/` | Chemins relatifs, scope et cache de build vérifiés depuis l’adresse publique |
 | Windows | EXE/DLL/Setup distribués sans confiance Authenticode publique | Pipeline Azure Artifact Signing Public Trust, OIDC, vérification des signatures/horodatages et du paquet ; publication bloquée si configuration ou signature manque |
 | Développement Windows | Besoin de builds autosignés sans abonnement ; confusion entre élévation administrateur et confiance du code | Mode de signature locale distinct de la publication publique, clé privée non exportable et vérification d’intégrité ; aucun contournement Smart App Control |
-| Updater Windows | Source personnalisée insuffisamment restreinte et installation peu explicite | Source HTTPS validée, politique stable/préversion, contrôle SHA-256, vérification et installation séparées avec confirmation avant redémarrage |
+| Updater Windows | Source insuffisamment restreinte, installation peu explicite et cache de paquet réutilisé sans recontrôle par Velopack | HTTPS, politique stable/préversion, paquet complet et contrôle final taille/SHA-256 même en cache, verrou Windows jusqu'au lancement ; confirmation avant redémarrage |
 
 ## Vérifications réalisées
 
@@ -59,7 +59,7 @@ captures AppKit et iOS simulateur arm64. Ce passage ne publie pas d’installeur
 | PWA | 76 tests, TypeScript strict et build de production réussis ; migration/rollback du cache, écriture concurrente, Unicode, ancien onglet bloquant et conservation des données corrompues couverts |
 | Workers | 6 tests du relais dans le moteur Cloudflare réel ; 5 contrats du pont historique ; typage et empaquetage à blanc réussis |
 | Swift | 13 tests DmxKit, dont 3 courses d’ACK CloudKit ; builds macOS modern et AppKit réussis |
-| Windows | 41 tests .NET de noyau/modèles réussis, dont les diagnostics des erreurs de politique Windows ; scripts PowerShell et vérification de signature détaillés dans le rapport Windows |
+| Windows | 54 tests .NET de noyau/modèles réussis, dont les paquets en cache altérés et les diagnostics des erreurs de politique Windows ; scripts PowerShell et vérification de signature détaillés dans le rapport Windows |
 | GTK | Compilation vérifiée ; pas d’exécution du bureau Linux pendant cette passe |
 | Navigateur public | Nouvelle PWA à 390 × 844 sans débordement ; bundle `index-Bo9DIAf8.js`, service worker actif sous `/mobile/` et nouveau cache reçus ; aucune erreur JavaScript, CSP ou réseau constatée sur l’écran non appairé |
 | Dépendances npm | PWA : aucun avis sur 478 paquets ; relais : aucun avis sur 159 paquets après overrides de deux dépendances de test |

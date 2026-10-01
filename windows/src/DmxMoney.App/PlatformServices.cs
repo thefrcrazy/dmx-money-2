@@ -14,7 +14,7 @@ namespace DmxMoney.App;
 public sealed class WindowsPlatformServices : IPlatformServices
 {
     private readonly Window window;
-    private UpdateManager? pendingManager;
+    private VerifiedUpdateManager? pendingManager;
     private UpdateInfo? pending;
     private bool isUpdating;
 
@@ -175,15 +175,13 @@ public sealed class WindowsPlatformServices : IPlatformServices
             if (await confirmation.ShowAsync() != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary) return;
             App.Store.ShowToast("Téléchargement de la mise à jour…");
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-            // Velopack vérifie la taille et le SHA-256 de chaque paquet téléchargé avant application.
-            await pendingManager.DownloadUpdatesAsync(pending, null, timeout.Token);
-            pendingManager.ApplyUpdatesAndRestart(pending);
+            await pendingManager.DownloadVerifiedAndRestartAsync(pending, timeout.Token);
             return;
         }
         var url = UpdatePolicy.ValidateSourceOverride(Environment.GetEnvironmentVariable("DMXMONEY_UPDATE_URL"));
         var activeManager = url is not null
-            ? new UpdateManager(new SimpleWebSource(url))
-            : new UpdateManager(new GithubSource(UpdatePolicy.RepositoryUrl, null, prerelease: IncludePrereleases));
+            ? new VerifiedUpdateManager(new SimpleWebSource(url))
+            : new VerifiedUpdateManager(new GithubSource(UpdatePolicy.RepositoryUrl, null, prerelease: IncludePrereleases));
         if (!activeManager.IsInstalled)
         {
             App.Store.ShowToast("Mise à jour automatique disponible sur la version installée.");
@@ -199,6 +197,8 @@ public sealed class WindowsPlatformServices : IPlatformServices
         {
             if (!UpdatePolicy.IsValidPackage(asset.FileName, asset.SHA256, asset.Size))
                 throw new InvalidDataException("Paquet de mise à jour invalide.");
+            // La version épinglée de Velopack compare son HEX avec une casse stricte.
+            asset.SHA256 = asset.SHA256.ToUpperInvariant();
         }
         pendingManager = activeManager;
         App.Store.ShowToast("Nouvelle version disponible. Cliquez sur Installer pour télécharger et redémarrer.");

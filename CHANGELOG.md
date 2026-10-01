@@ -8,6 +8,7 @@
 - Synchronisation : protection des accusés de réception CloudKit, changement de compte iCloud, cohérence des snapshots et validation des mutations distantes.
 - Distribution Windows : signature Authenticode publique exigée avant publication, contrôle des exécutables/DLL et des paquets, installation des mises à jour après confirmation.
 - Builds Windows de développement : signature autosignée locale avec certificat RSA et clé privée non exportable ; diagnostic explicite quand Windows bloque le lancement de l’updater. Le mode administrateur ne contourne pas Smart App Control.
+- Updater Windows : contrôle final taille/SHA-256 du paquet complet, y compris s'il est déjà en cache ; refus d'un fichier altéré et verrou de lecture jusqu'au lancement de l'installation.
 - Cache mobile : valeurs financières et corps des messages hors ligne obfusqués en UTF-8/base64 ; migration atomique sans suppression des saisies en attente. Cet encodage reste décodable et ne constitue pas un chiffrement.
 
 ## 2.0.6 - 2026-09-17

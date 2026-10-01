@@ -3,7 +3,8 @@
 param(
     [Parameter(Mandatory)][string]$ReleaseDirectory,
     [Parameter(Mandatory)][ValidateSet("win-x64", "win-arm64")][string]$Rid,
-    [Parameter(Mandatory, ParameterSetName = 'PublicTrust')][string]$SignToolPath,
+    [Parameter(Mandatory, ParameterSetName = 'PublicTrust')]
+    [Parameter(ParameterSetName = 'Development')][string]$SignToolPath,
     [Parameter(Mandatory, ParameterSetName = 'Development')][string]$DevelopmentCertificateThumbprint
 )
 
@@ -11,18 +12,32 @@ $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 $ReleaseDirectory = (Resolve-Path -LiteralPath $ReleaseDirectory).Path
 $developmentCertificate = $null
+$script:developmentSignatureCount = 0
+$script:publicSignatureCount = 0
 if ($PSCmdlet.ParameterSetName -eq 'Development') {
     . (Join-Path $PSScriptRoot 'windows-development-signing.ps1')
     $developmentCertificate = Get-DevelopmentCodeSigningCertificate -Thumbprint $DevelopmentCertificateThumbprint
+    $SignToolPath = Get-WindowsSignTool -Path $SignToolPath
 }
 else { $SignToolPath = (Resolve-Path -LiteralPath $SignToolPath).Path }
 $setup = Join-Path $ReleaseDirectory "DmxMoney-$Rid-Setup.exe"
 $feedPath = Join-Path $ReleaseDirectory "releases.$Rid.json"
 if (-not (Test-Path -LiteralPath $setup -PathType Leaf)) { throw "Installeur $Rid absent." }
 
-function Assert-TrustedSignature([string]$Path) {
+function Assert-TrustedSignature([string]$Path, [bool]$RequireDevelopmentPin = $false) {
     if ($developmentCertificate) {
-        Assert-DevelopmentAuthenticode -Path $Path -Certificate $developmentCertificate
+        try {
+            Assert-DevelopmentAuthenticode -Path $Path -Certificate $developmentCertificate
+            $script:developmentSignatureCount++
+            return
+        }
+        catch {
+            if ($RequireDevelopmentPin) { throw "Signature de développement obligatoire pour $Path : $($_.Exception.Message)" }
+            # Velopack conserve les signatures fournisseurs déjà approuvées. Un autre
+            # certificat n'est accepté qu'après vérification complète de confiance publique.
+        }
+        & $SignToolPath verify /pa /all /tw $Path
+        $script:publicSignatureCount++
         return
     }
     # /pa applique la politique Authenticode ; /all vérifie les signatures ; /tw exige un timestamp.
@@ -30,7 +45,7 @@ function Assert-TrustedSignature([string]$Path) {
     & $SignToolPath verify /pa /all /tw $Path
 }
 
-Assert-TrustedSignature $setup
+Assert-TrustedSignature $setup $true
 $feed = Get-Content -LiteralPath $feedPath -Raw | ConvertFrom-Json
 $fullPackages = @($feed.Assets | Where-Object { $_.Type -eq "Full" })
 if ($fullPackages.Count -ne 1) { throw "Le flux $Rid doit contenir exactement un paquet complet." }
@@ -67,9 +82,12 @@ try {
         -not ($binaries | Where-Object Name -eq "Squirrel.exe")) {
         throw "Paquet incomplet : application, noyau ou moteur de mise à jour absent."
     }
-    foreach ($binary in $binaries) { Assert-TrustedSignature $binary.FullName }
+    foreach ($binary in $binaries) {
+        $ours = $binary.Name -match '\A(?:DmxMoney.*\.(?:exe|dll)|dmx_ffi\.dll)\z'
+        Assert-TrustedSignature $binary.FullName $ours
+    }
     if ($developmentCertificate) {
-        Write-Host "==> $Rid : signature CMS et digest PE vérifiés avec le certificat de développement épinglé ; SHA-256 valide."
+        Write-Host "==> $Rid : Setup + $($binaries.Count) binaires vérifiés ; $script:developmentSignatureCount signatures de développement épinglées (Setup inclus), $script:publicSignatureCount signatures fournisseurs publiquement approuvées ; SHA-256 HEX valide."
         Write-Warning 'Ce contrôle local ne prouve aucune confiance publique et ne garantit pas une autorisation Smart App Control.'
     }
     else { Write-Host "==> $Rid : installeur et $($binaries.Count) binaires signés, horodatés et vérifiés ; SHA-256 valide." }

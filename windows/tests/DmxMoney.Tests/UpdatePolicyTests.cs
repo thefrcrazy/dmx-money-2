@@ -54,6 +54,13 @@ public sealed class UpdatePolicyTests
     [InlineData("C:DmxMoney.nupkg")]
     [InlineData("DmxMoney.exe")]
     [InlineData("")]
+    [InlineData("invalid<name.nupkg")]
+    [InlineData("invalid>name.nupkg")]
+    [InlineData("invalid\"name.nupkg")]
+    [InlineData("invalid|name.nupkg")]
+    [InlineData("invalid?name.nupkg")]
+    [InlineData("invalid*name.nupkg")]
+    [InlineData("invalid\u0001name.nupkg")]
     public void PackagePathCannotEscapeTheUpdateDirectory(string fileName)
         => Assert.False(UpdatePolicy.IsValidPackage(fileName, new string('A', 64), 100));
 

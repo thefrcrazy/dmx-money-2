@@ -150,7 +150,7 @@ try {
     vpk @packArguments
     if ($developmentSigning) {
         & (Join-Path $PSScriptRoot 'verify-windows-release.ps1') -ReleaseDirectory $releases -Rid $Rid `
-            -DevelopmentCertificateThumbprint $DevelopmentCertificateThumbprint
+            -DevelopmentCertificateThumbprint $DevelopmentCertificateThumbprint -SignToolPath $SignToolPath
     }
     elseif ($signingConfigured) {
         & (Join-Path $PSScriptRoot "verify-windows-release.ps1") -ReleaseDirectory $releases -Rid $Rid -SignToolPath $SignToolPath
