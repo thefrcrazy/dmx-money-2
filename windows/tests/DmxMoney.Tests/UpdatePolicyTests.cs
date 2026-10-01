@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 using DmxMoney.ViewModels;
 
 namespace DmxMoney.Tests;
@@ -48,4 +50,26 @@ public sealed class UpdatePolicyTests
     [InlineData("")]
     public void PackagePathCannotEscapeTheUpdateDirectory(string fileName)
         => Assert.False(UpdatePolicy.IsValidPackage(fileName, Convert.ToBase64String(new byte[32]), 100));
+
+    [Theory]
+    [InlineData(577)]
+    [InlineData(1260)]
+    [InlineData(4551)]
+    public void WindowsExecutionPolicyErrorsAreRecognizedEvenWhenWrapped(int code)
+    {
+        Assert.True(UpdatePolicy.IsWindowsExecutionBlocked(new Win32Exception(code)));
+        Assert.True(UpdatePolicy.IsWindowsExecutionBlocked(new Exception("Échec du redémarrage", new Win32Exception(code))));
+        Assert.True(UpdatePolicy.IsWindowsExecutionBlocked(new COMException("Windows", unchecked((int)(0x80070000u | (uint)code)))));
+    }
+
+    [Theory]
+    [InlineData(5)] // Accès refusé : droits de fichiers, pas nécessairement contrôle d'application.
+    [InlineData(2)] // Fichier absent.
+    [InlineData(1223)] // Demande annulée par l'utilisateur.
+    public void OrdinaryInstallationFailuresDoNotClaimASecurityPolicyBlock(int code)
+        => Assert.False(UpdatePolicy.IsWindowsExecutionBlocked(new Win32Exception(code)));
+
+    [Fact]
+    public void UntrustedExceptionTextDoesNotDetermineTheDiagnosis()
+        => Assert.False(UpdatePolicy.IsWindowsExecutionBlocked(new Exception("ERROR_INVALID_IMAGE_HASH 577")));
 }

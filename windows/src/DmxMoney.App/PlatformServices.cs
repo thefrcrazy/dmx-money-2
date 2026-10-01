@@ -142,6 +142,11 @@ public sealed class WindowsPlatformServices : IPlatformServices
             pending = null;
             App.Store.ShowToast("Mise à jour refusée : paquet ou empreinte SHA-256 invalide.");
         }
+        catch (Exception error) when (UpdatePolicy.IsWindowsExecutionBlocked(error))
+        {
+            pending = null;
+            App.Store.ShowToast("Windows bloque la mise à jour : signature non acceptée ou politique de sécurité. Le mode administrateur ne contourne pas ce blocage.");
+        }
         catch (Exception)
         {
             pending = null;
@@ -149,6 +154,7 @@ public sealed class WindowsPlatformServices : IPlatformServices
         }
         finally
         {
+            if (pending is null) pendingManager = null;
             isUpdating = false;
         }
     }

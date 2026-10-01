@@ -1,19 +1,30 @@
 <# Vérifie ce qui est distribué : installeur, payload complet et empreintes du flux Velopack. #>
+[CmdletBinding(DefaultParameterSetName = 'PublicTrust')]
 param(
     [Parameter(Mandatory)][string]$ReleaseDirectory,
     [Parameter(Mandatory)][ValidateSet("win-x64", "win-arm64")][string]$Rid,
-    [Parameter(Mandatory)][string]$SignToolPath
+    [Parameter(Mandatory, ParameterSetName = 'PublicTrust')][string]$SignToolPath,
+    [Parameter(Mandatory, ParameterSetName = 'Development')][string]$DevelopmentCertificateThumbprint
 )
 
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 $ReleaseDirectory = (Resolve-Path -LiteralPath $ReleaseDirectory).Path
-$SignToolPath = (Resolve-Path -LiteralPath $SignToolPath).Path
+$developmentCertificate = $null
+if ($PSCmdlet.ParameterSetName -eq 'Development') {
+    . (Join-Path $PSScriptRoot 'windows-development-signing.ps1')
+    $developmentCertificate = Get-DevelopmentCodeSigningCertificate -Thumbprint $DevelopmentCertificateThumbprint
+}
+else { $SignToolPath = (Resolve-Path -LiteralPath $SignToolPath).Path }
 $setup = Join-Path $ReleaseDirectory "DmxMoney-$Rid-Setup.exe"
 $feedPath = Join-Path $ReleaseDirectory "releases.$Rid.json"
 if (-not (Test-Path -LiteralPath $setup -PathType Leaf)) { throw "Installeur $Rid absent." }
 
 function Assert-TrustedSignature([string]$Path) {
+    if ($developmentCertificate) {
+        Assert-DevelopmentAuthenticode -Path $Path -Certificate $developmentCertificate
+        return
+    }
     # /pa applique la politique Authenticode ; /all vérifie les signatures ; /tw exige un timestamp.
     # SignTool renvoie 2 pour un avertissement : lui aussi fait échouer la release.
     & $SignToolPath verify /pa /all /tw $Path
@@ -52,7 +63,11 @@ try {
         throw "Paquet incomplet : application, noyau ou moteur de mise à jour absent."
     }
     foreach ($binary in $binaries) { Assert-TrustedSignature $binary.FullName }
-    Write-Host "==> $Rid : installeur et $($binaries.Count) binaires signés, horodatés et vérifiés ; SHA-256 valide."
+    if ($developmentCertificate) {
+        Write-Host "==> $Rid : signature CMS et digest PE vérifiés avec le certificat de développement épinglé ; SHA-256 valide."
+        Write-Warning 'Ce contrôle local ne prouve aucune confiance publique et ne garantit pas une autorisation Smart App Control.'
+    }
+    else { Write-Host "==> $Rid : installeur et $($binaries.Count) binaires signés, horodatés et vérifiés ; SHA-256 valide." }
 }
 finally {
     if (Test-Path -LiteralPath $extraction) { Remove-Item -LiteralPath $extraction -Recurse -Force }

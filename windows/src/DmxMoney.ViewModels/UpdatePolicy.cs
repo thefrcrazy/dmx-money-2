@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace DmxMoney.ViewModels;
 
 /// <summary>Règles partagées par le service de mise à jour et ses tests hors de Windows.</summary>
@@ -27,5 +29,21 @@ public static class UpdatePolicy
         }
         Span<byte> hash = stackalloc byte[32];
         return Convert.TryFromBase64String(sha256, hash, out var length) && length == hash.Length;
+    }
+
+    public static bool IsWindowsExecutionBlocked(Exception error)
+    {
+        for (Exception? current = error; current is not null; current = current.InnerException)
+        {
+            // Win32 peut être propagé directement ou encapsulé dans un HRESULT_FROM_WIN32.
+            var hresult = unchecked((uint)current.HResult);
+            var code = current is Win32Exception native
+                ? unchecked((uint)native.NativeErrorCode)
+                : (hresult & 0xffff0000u) == 0x80070000u ? hresult & 0xffffu : 0u;
+            // ERROR_INVALID_IMAGE_HASH, ERROR_ACCESS_DISABLED_BY_POLICY,
+            // ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION (SDK Windows, winerror.h).
+            if (code is 577 or 1260 or 4551) return true;
+        }
+        return false;
     }
 }

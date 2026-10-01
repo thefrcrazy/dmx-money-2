@@ -52,6 +52,7 @@ cloudflare/managed-bridge/wrangler.local.toml
 # Signature et secrets locaux (jamais versionnés)
 apple/Config/Signing.local.xcconfig
 *.p12
+*.pfx
 *.mobileprovision
 *.provisionprofile
 .env

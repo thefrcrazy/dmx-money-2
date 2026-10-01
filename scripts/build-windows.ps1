@@ -12,6 +12,7 @@ param(
     [string]$SignToolPath = "",
     [string]$SigningDlibPath = "",
     [string]$SigningMetadataPath = "",
+    [string]$DevelopmentCertificateThumbprint = "",
     [switch]$RequireSigning
 )
 
@@ -31,7 +32,17 @@ try {
     if ($RequireSigning -and $SkipInstaller) {
         throw "RequireSigning exige la construction et la vérification de l'installeur."
     }
-    $signingConfigured = $SignToolPath -or $SigningDlibPath -or $SigningMetadataPath
+    . (Join-Path $PSScriptRoot 'windows-development-signing.ps1')
+    Assert-DevelopmentSigningOptions -Thumbprint $DevelopmentCertificateThumbprint -RequireSigning ([bool]$RequireSigning) `
+        -SkipInstaller ([bool]$SkipInstaller) -SigningDlibPath $SigningDlibPath -SigningMetadataPath $SigningMetadataPath
+    $developmentSigning = [bool]$DevelopmentCertificateThumbprint
+    $signingConfigured = -not $developmentSigning -and ($SignToolPath -or $SigningDlibPath -or $SigningMetadataPath)
+    if ($developmentSigning) {
+        $DevelopmentCertificateThumbprint = $DevelopmentCertificateThumbprint.ToUpperInvariant()
+        $null = Get-DevelopmentCodeSigningCertificate -Thumbprint $DevelopmentCertificateThumbprint -RequirePrivateKey
+        $SignToolPath = Get-WindowsSignTool -Path $SignToolPath
+        Write-Warning 'Signature autosignée de développement : aucune confiance publique ; Smart App Control peut bloquer ces fichiers.'
+    }
     if ($RequireSigning -or $signingConfigured) {
         foreach ($path in @($SignToolPath, $SigningDlibPath, $SigningMetadataPath)) {
             if (-not $path -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -108,7 +119,8 @@ try {
     Write-Host "==> Installeur Velopack"
     # Un canal par architecture : les installeurs x64 et arm64 ont des noms distincts dans la
     # release, et l'app installée lit le flux de son canal (releases.<canal>.json).
-    $releases = Join-Path $root "target/windows/releases/$Rid"
+    $releaseKind = if ($developmentSigning) { 'development-releases' } else { 'releases' }
+    $releases = Join-Path $root "target/windows/$releaseKind/$Rid"
     if (Test-Path -LiteralPath $releases) {
         Remove-Item -LiteralPath $releases -Recurse -Force
     }
@@ -118,7 +130,13 @@ try {
         "--icon", (Join-Path $root "windows/src/DmxMoney.App/Assets/dmxmoney.ico"),
         "--outputDir", $releases
     )
-    if ($signingConfigured) {
+    if ($developmentSigning) {
+        # /sha1 sélectionne le certificat dans CurrentUser/My ; le digest du fichier reste SHA-256.
+        $signTemplate = '"{0}" sign /s My /sha1 {1} /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 {{{{file...}}}}' -f `
+            $SignToolPath, $DevelopmentCertificateThumbprint
+        $packArguments += @('--signTemplate', $signTemplate)
+    }
+    elseif ($signingConfigured) {
         # Velopack signe le payload ET les exécutables qu'il génère (Update, stub et Setup).
         # Sa version 0.0.1298 ne fournit pas le dlib : on utilise le SDK et le client Microsoft
         # explicitement installés par prepare-windows-signing.ps1, via le template officiel.
@@ -130,7 +148,11 @@ try {
         Write-Warning "Build local non signé : il peut être bloqué par Smart App Control. Ne pas le publier."
     }
     vpk @packArguments
-    if ($signingConfigured) {
+    if ($developmentSigning) {
+        & (Join-Path $PSScriptRoot 'verify-windows-release.ps1') -ReleaseDirectory $releases -Rid $Rid `
+            -DevelopmentCertificateThumbprint $DevelopmentCertificateThumbprint
+    }
+    elseif ($signingConfigured) {
         & (Join-Path $PSScriptRoot "verify-windows-release.ps1") -ReleaseDirectory $releases -Rid $Rid -SignToolPath $SignToolPath
     }
 }

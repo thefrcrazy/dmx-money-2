@@ -8,7 +8,14 @@
   SignTool, ainsi que l'horodatage et les tailles/empreintes SHA-256 du flux.
 - Velopack `0.0.1298` expose l'option Azure, mais ne fournit pas son dlib : le script emploie
   son template de signature, le SignTool du SDK Windows et le client Microsoft Artifact
-  Signing `1.0.128`. Aucun certificat auto-signé ni signature simulée n'est utilisé.
+  Signing `1.0.128`. Aucune signature simulée n'est utilisée dans la distribution officielle.
+- Un mode explicitement autosigné a été ajouté pour le développement Windows à la demande
+  de l'utilisateur : identité locale `Developmax / Collignon Maxim`, clé RSA 3072 bits non
+  exportable dans `CurrentUser/My`, export public `.cer` seulement, aucun ajout de confiance.
+  Il est incompatible avec `-RequireSigning` et Artifact Signing, et produit ses paquets
+  dans `target/windows/development-releases`. Il vérifie la signature CMS avec le certificat
+  embarqué épinglé, le digest PE via le SIP Windows et le jeton d'horodatage RFC 3161.
+  Cette vérification d'intégrité ne certifie ni confiance publique ni autorisation SAC.
 - L'updater cible V2, exige HTTPS et SHA-256, conserve les canaux x64/arm64 et distingue
   vérification, téléchargement et confirmation du redémarrage. Les installations stables
   n'activent plus les préversions par défaut.
@@ -19,17 +26,20 @@
 
 ## Vérifications achevées
 
-- **34 tests .NET sur 34 réussis**, aucun ignoré : suite complète
-  `windows/tests/DmxMoney.Tests`, incluant noyau/interops, modèles de vue, 17 contrôles de
+- **41 tests .NET sur 41 réussis**, aucun ignoré : suite complète
+  `windows/tests/DmxMoney.Tests`, incluant noyau/interops, modèles de vue, 24 contrôles de
   l'updater et 2 régressions du compagnon distant. Interops et modèles recompilés sur macOS.
 - **CI Windows x64 réussie** sur le commit `0f40717` : compilation Rust, bindings C#,
   application WinUI, suite .NET, démarrage et navigation automatique dans toutes les pages.
   Le job publie seulement la version de développement avec `-SkipInstaller` ; il ne produit
   aucune prétendue signature ni installeur officiel. Preuve :
   [job Windows du run 36876164473](https://github.com/thefrcrazy/dmx-money-2/actions/runs/36876164473/job/110416260391).
-- Parsing PowerShell des trois scripts de distribution et tests de refus réussis : version
+- Parsing PowerShell des six scripts de distribution/tests et compilation du helper C#
+  Authenticode réussis sur macOS. Les 10 tests de refus d'options ont réussi : version
   contenant une injection, signature absente/incomplète, combinaison excluant la vérification
-  de l'installeur et endpoint de signature HTTP. Le runtime PowerShell portable officiel
+  de l'installeur, empreinte injectée, mélange autosigné/public et endpoint de signature HTTP.
+  Ces contrôles portables n'exécutent pas les API cryptographiques Windows.
+  Le runtime PowerShell portable officiel
   `7.6.6`, conservé dans `/tmp`, a été vérifié contre le SHA-256 de son asset GitHub.
 - YAML CI/release chargé avec succès ; environnement `windows-signing`, permissions OIDC
   limitées au job Windows, runtimes .NET 8/10 et contrôle des scripts dans la CI vérifiés.
@@ -80,6 +90,13 @@ L'audit par restauration et le contrôle du catalogue ci-dessus ont donc été u
 
 ## Vérifications restant nécessaires
 
+- Exécuter les nouvelles fixtures Authenticode sur Windows réel : certificat non approuvé
+  éphémère, signature positive, mauvais certificat, fichier non signé, PE/CMS altérés,
+  horodatage RFC 3161 Microsoft réel, jeton altéré et refus de la fixture autosignée en
+  mode Public Trust malgré une variable de développement héritée. Ce test est désormais appelé
+  automatiquement par `scripts/tests/test-windows-release.ps1` sous Windows ; il supprime
+  ensuite le certificat et sa clé. À la rédaction de cette entrée, ces nouvelles API n'ont
+  pas encore été exécutées depuis le Mac : elles ne sont pas annoncées comme validées.
 - Configurer réellement le compte Azure, la validation d'identité, le profil Public Trust,
   le rôle de signature et les variables GitHub décrits dans `docs/release.md`.
 - Exécuter le pipeline Windows, vérifier les signatures réelles et essayer installation,

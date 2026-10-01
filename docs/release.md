@@ -151,6 +151,68 @@ Windows pour résoudre un défaut de distribution. Sources :
 [réputation SmartScreen](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation),
 [tests Smart App Control](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/test-your-app-with-smart-app-control).
 
+### Certificat autosigné pour le développement Windows
+
+Ce mode crée une vraie signature locale pour tester DmxMoney et ses paquets de mise à jour.
+L’identité `Developmax / Collignon Maxim` est une déclaration locale, sans validation d’une
+autorité publique. Un compte administrateur ne fournit pas d’exception Smart App Control
+par application : ce certificat ne garantit donc pas que Windows autorisera l’installation
+ou l’exécution. Aucun script ne désactive SAC/Defender, n’élève l’application ni n’importe
+automatiquement de certificat dans `Root` ou `TrustedPublisher`. Source :
+[FAQ Smart App Control](https://support.microsoft.com/en-us/windows/what-is-smart-app-control-285ea03d-fa88-4d56-882e-6698afdb7003).
+
+Depuis **PowerShell 7 sous Windows**, avec SDK Windows, Rust, .NET et Velopack installés :
+
+```powershell
+# Une fois : clé RSA 3072 bits non exportable, magasin personnel de l'utilisateur.
+# Le fichier .cer exporté ne contient que le certificat public.
+$localCertificate = ./scripts/new-windows-development-certificate.ps1
+
+# Chaque build de développement : app, DLL, moteur de mise à jour et installeur signés.
+./scripts/build-windows.ps1 -Rid win-x64 -Version 2.0.7 `
+    -DevelopmentCertificateThumbprint $localCertificate.Thumbprint
+
+# Dans une autre session : relever l'empreinte du certificat personnel existant.
+Get-ChildItem Cert:/CurrentUser/My -CodeSigningCert |
+    Select-Object Subject, Thumbprint, NotAfter
+```
+
+Les résultats restent dans `target/windows/development-releases/win-x64` (ou `win-arm64`),
+distincts des releases publiques. L’empaquetage conserve les flux Velopack et leurs
+empreintes SHA-256 pour les essais de mise à jour ; utiliser le même certificat pour les
+builds successifs. Une source de mise à jour personnalisée doit être servie en HTTPS et
+configurée avec `DMXMONEY_UPDATE_URL`. Essayer effectivement installation et mise à jour
+sur le PC ciblé avant d’affirmer leur compatibilité. Conserver la clé dans ce compte Windows :
+elle n’est pas exportable en PFX. Le certificat expire après un an par défaut ; créer une
+nouvelle identité locale ne renouvelle pas automatiquement la confiance des installations.
+
+SignTool utilise `/sha1` uniquement pour sélectionner l’empreinte du certificat dans
+`CurrentUser/My` ; le digest des fichiers et l’horodatage RFC 3161 utilisent **SHA-256**.
+Le contrôle local compare le certificat DER exact du signataire CMS embarqué, vérifie sa
+signature avec la clé publique épinglée puis recalcule le digest Authenticode du PE via le
+SIP Windows. Il vérifie aussi cryptographiquement le jeton d’horodatage RFC 3161 et son lien
+avec la signature du fichier, ainsi que les tailles/SHA-256 des paquets. Ce contrôle local
+ne valide pas la confiance publique de l’éditeur ni de l’autorité d’horodatage.
+`-RequireSigning` et les paramètres Artifact Signing
+refusent toute combinaison avec `-DevelopmentCertificateThumbprint` ; le workflow public
+continue d’exiger une chaîne approuvée avec SignTool `/pa`.
+
+`pwsh scripts/tests/test-windows-release.ps1` contrôle les options sur toutes les plateformes.
+Sous Windows, il crée en plus un certificat éphémère non approuvé, signe une copie de fixture
+PE et vérifie le refus d’un mauvais certificat, d’un fichier non signé, d’un digest PE
+modifié, d’un CMS modifié et d’un horodatage absent. Il signe aussi une fixture avec un
+horodatage Microsoft RFC 3161 réel et vérifie le refus d’un jeton altéré et le refus de cette
+fixture par le mode Public Trust, même avec une variable de développement héritée ; cette dernière
+partie nécessite l’accès au service d’horodatage. Le certificat et sa clé sont supprimés
+après ce test, sans modifier la confiance du système. Les builds distribuables de
+développement exigent cet horodatage.
+
+Références Microsoft :
+[New-SelfSignedCertificate](https://learn.microsoft.com/en-us/powershell/module/pki/new-selfsignedcertificate?view=windowsserver2025-ps),
+[vérification CMS](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-cryptmsgcontrol),
+[digest PE via CryptSIPVerifyIndirectData](https://learn.microsoft.com/en-us/windows/win32/api/mssip/nf-mssip-cryptsipverifyindirectdata),
+[jeton RFC 3161](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-cryptverifytimestampsignature).
+
 ## Linux
 
 * **AppImage** : `scripts/build-linux-appimage.sh` (icônes, build release, AppDir, appimagetool).

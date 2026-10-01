@@ -159,13 +159,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: |
+            10.0.x
+            8.0.x
       - name: Contrôles des scripts de distribution Windows
         run: pwsh scripts/tests/test-windows-release.ps1
       - name: uniffi-bindgen-cs
         run: cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.11.0+v0.31.0 --locked
-      - name: Noyau, bindings et application
-        run: pwsh scripts/build-windows.ps1 -Rid win-x64 -SkipInstaller
+      - name: Noyau, bindings, application et paquet autosigné de test
+        run: |
+          $testCertificate = ./scripts/new-windows-development-certificate.ps1 `
+            -PublicCertificatePath (Join-Path $env:RUNNER_TEMP 'DmxMoney-ci-signing.cer') -ValidDays 1
+          try {
+            ./scripts/build-windows.ps1 -Rid win-x64 `
+              -DevelopmentCertificateThumbprint $testCertificate.Thumbprint
+          }
+          finally {
+            Remove-Item -LiteralPath "Cert:/CurrentUser/My/$($testCertificate.Thumbprint)" -DeleteKey -Force
+          }
       - name: Tests (noyau et modèles de vue)
         run: dotnet test windows/tests/DmxMoney.Tests/DmxMoney.Tests.csproj --configuration Release
       # Test de démarrage : l'app publiée ouvre chaque page tour à tour puis quitte d'elle-même
