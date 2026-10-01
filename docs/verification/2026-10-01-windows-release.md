@@ -19,6 +19,11 @@
 - L'updater cible V2, exige HTTPS et SHA-256, conserve les canaux x64/arm64 et distingue
   vérification, téléchargement et confirmation du redémarrage. Les installations stables
   n'activent plus les préversions par défaut.
+- Les empreintes du flux Velopack sont vérifiées sous leur format réel : **64 chiffres
+  hexadécimaux SHA-256**. Le commentaire XML de `CalculateStreamSHA256` de Velopack
+  `0.0.1298` indique à tort base64 ; son implémentation et le paquet construit produisent
+  de l'hexadécimal. Source :
+  [implémentation officielle](https://github.com/velopack/velopack/blob/0.0.1298/src/lib-csharp/Util/IoUtil.cs).
 - Les interfaces du compagnon WinUI, GTK, SwiftUI moderne et DmxKit reconnaissent le relais
   distant par `/relay/`. Elles montrent connexion Internet et chiffrement entre appareils,
   sans attendre un certificat local ni exposer l'adresse du relais. La génération du QR
@@ -41,6 +46,21 @@
   Ces contrôles portables n'exécutent pas les API cryptographiques Windows.
   Le runtime PowerShell portable officiel
   `7.6.6`, conservé dans `/tmp`, a été vérifié contre le SHA-256 de son asset GitHub.
+- **Fixtures Authenticode réussies sous Windows** sur `fa6eb44` : certificat RSA 3072
+  non exportable réellement non approuvé, signature CMS épinglée et digest PE vérifiés,
+  mauvais certificat et fichier non signé refusés, PE/CMS altérés refusés, horodatage
+  RFC 3161 Microsoft réel accepté et jeton altéré refusé. Le mode Public Trust a refusé
+  cette fixture autosignée malgré une variable de développement héritée. Aucun ajout de
+  confiance. Preuve : étape « Contrôles des scripts de distribution Windows » du
+  [job Windows 110448597857](https://github.com/thefrcrazy/dmx-money-2/actions/runs/36885613814/job/110448597857).
+  Les deux premiers essais ont révélé le mode de décodage PKCS#7 et le diagnostic
+  `CRYPT_E_ATTRIBUTES_MISSING`, corrigés sans réduire les contrôles d'intégrité.
+- Le code officiel Velopack `0.0.1298` confirme que `SHA256` du flux est un **HEX de
+  64 caractères**, malgré un commentaire XML obsolète indiquant base64. Le vérificateur
+  de distribution et l'updater ont été corrigés pour ce format réel ; le vérificateur
+  exige 64 caractères hexadécimaux ASCII et compare les empreintes sans sensibilité
+  à la casse. Source :
+  [IoUtil.CalculateStreamSHA256](https://github.com/velopack/velopack/blob/0.0.1298/src/lib-csharp/Util/IoUtil.cs).
 - YAML CI/release chargé avec succès ; environnement `windows-signing`, permissions OIDC
   limitées au job Windows, runtimes .NET 8/10 et contrôle des scripts dans la CI vérifiés.
 - Parsing Swift réussi pour `ModernCompanion.swift` et `DmxKit/Pages/SettingsPage.swift` ;
@@ -90,13 +110,11 @@ L'audit par restauration et le contrôle du catalogue ci-dessus ont donc été u
 
 ## Vérifications restant nécessaires
 
-- Exécuter les nouvelles fixtures Authenticode sur Windows réel : certificat non approuvé
-  éphémère, signature positive, mauvais certificat, fichier non signé, PE/CMS altérés,
-  horodatage RFC 3161 Microsoft réel, jeton altéré et refus de la fixture autosignée en
-  mode Public Trust malgré une variable de développement héritée. Ce test est désormais appelé
-  automatiquement par `scripts/tests/test-windows-release.ps1` sous Windows ; il supprime
-  ensuite le certificat et sa clé. À la rédaction de cette entrée, ces nouvelles API n'ont
-  pas encore été exécutées depuis le Mac : elles ne sont pas annoncées comme validées.
+- Valider la construction complète d'un paquet de développement autosigné dans la CI.
+  Sur `fa6eb44`, les fixtures et la compilation WinUI réussissent, mais l'empaquetage n'a
+  pas été exécuté car `vpk` manquait dans ce job qui utilisait auparavant `-SkipInstaller`.
+  La CI installe désormais le CLI `0.0.1298` avant l'empaquetage ; le résultat final du
+  paquet doit encore confirmer signatures de tous les binaires, horodatage et flux HEX.
 - Configurer réellement le compte Azure, la validation d'identité, le profil Public Trust,
   le rôle de signature et les variables GitHub décrits dans `docs/release.md`.
 - Exécuter le pipeline Windows, vérifier les signatures réelles et essayer installation,

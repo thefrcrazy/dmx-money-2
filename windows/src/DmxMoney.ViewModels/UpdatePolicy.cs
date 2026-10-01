@@ -23,12 +23,14 @@ public static class UpdatePolicy
     {
         if (string.IsNullOrEmpty(fileName) || size <= 0 ||
             fileName.IndexOfAny(['/', '\\', ':']) >= 0 ||
-            !fileName.EndsWith(".nupkg", StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(sha256))
+            !fileName.EndsWith(".nupkg", StringComparison.OrdinalIgnoreCase) || sha256?.Length != 64)
         {
             return false;
         }
-        Span<byte> hash = stackalloc byte[32];
-        return Convert.TryFromBase64String(sha256, hash, out var length) && length == hash.Length;
+        // Velopack 0.0.1298 produit 32 octets de SHA-256 en 64 chiffres hexadécimaux.
+        foreach (var digit in sha256)
+            if (!char.IsAsciiHexDigit(digit)) return false;
+        return true;
     }
 
     public static bool IsWindowsExecutionBlocked(Exception error)

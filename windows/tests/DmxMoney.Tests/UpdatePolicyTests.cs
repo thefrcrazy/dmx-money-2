@@ -34,9 +34,15 @@ public sealed class UpdatePolicyTests
     [Fact]
     public void PackageRequiresCompleteSha256AndPositiveSize()
     {
-        var hash = Convert.ToBase64String(new byte[32]);
+        const string hash = "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855";
         Assert.True(UpdatePolicy.IsValidPackage("DmxMoney-2.0.7-win-x64-full.nupkg", hash, 100));
+        Assert.True(UpdatePolicy.IsValidPackage("DmxMoney-2.0.7-win-x64-full.nupkg", hash.ToLowerInvariant(), 100));
         Assert.False(UpdatePolicy.IsValidPackage("DmxMoney.nupkg", null, 100));
+        Assert.False(UpdatePolicy.IsValidPackage("DmxMoney.nupkg", hash[..63], 100));
+        Assert.False(UpdatePolicy.IsValidPackage("DmxMoney.nupkg", hash + "0", 100));
+        Assert.False(UpdatePolicy.IsValidPackage("DmxMoney.nupkg", "Z" + hash[1..], 100));
+        Assert.False(UpdatePolicy.IsValidPackage("DmxMoney.nupkg", "Ａ" + hash[1..], 100));
+        Assert.False(UpdatePolicy.IsValidPackage("DmxMoney.nupkg", Convert.ToBase64String(new byte[32]), 100));
         Assert.False(UpdatePolicy.IsValidPackage("DmxMoney.nupkg", Convert.ToBase64String(new byte[20]), 100));
         Assert.False(UpdatePolicy.IsValidPackage("DmxMoney.nupkg", "invalid", 100));
         Assert.False(UpdatePolicy.IsValidPackage("DmxMoney.nupkg", hash, 0));
@@ -49,7 +55,7 @@ public sealed class UpdatePolicyTests
     [InlineData("DmxMoney.exe")]
     [InlineData("")]
     public void PackagePathCannotEscapeTheUpdateDirectory(string fileName)
-        => Assert.False(UpdatePolicy.IsValidPackage(fileName, Convert.ToBase64String(new byte[32]), 100));
+        => Assert.False(UpdatePolicy.IsValidPackage(fileName, new string('A', 64), 100));
 
     [Theory]
     [InlineData(577)]

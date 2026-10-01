@@ -115,6 +115,14 @@ Aucun abonnement de signature n’a été créé pendant cet audit. Sources :
 [éligibilité](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart),
 [tarif](https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-change-sku).
 
+Une autre voie sans abonnement payant est le programme Open Source de
+[SignPath Foundation](https://signpath.org/terms.html), sous acceptation du projet.
+Il exige notamment une licence OSI sans double licence commerciale, un projet maintenu
+et déjà publié, une origine de build vérifiable et une approbation manuelle des signatures.
+Le certificat porte l’identité de **SignPath Foundation**, pas celle de Developmax.
+Ce programme n’est pas configuré ici et aucune candidature n’a été envoyée ; il ne faut
+pas l’assimiler à une signature gratuite automatiquement disponible pour ce dépôt.
+
 1. Créer le compte Artifact Signing, faire valider l'identité et créer un profil Public Trust.
 2. Créer l'environnement GitHub `windows-signing`. Configurer une identité Azure fédérée dont
    le sujet est `repo:thefrcrazy/dmx-money-2:environment:windows-signing`, audience

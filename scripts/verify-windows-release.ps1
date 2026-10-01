@@ -39,11 +39,16 @@ foreach ($asset in $feed.Assets) {
         $asset.FileName -match '[/\\:]' -or $asset.FileName -in @(".", "..")) {
         throw "Nom de paquet invalide dans le flux $Rid."
     }
+    if ($asset.SHA256 -isnot [string] -or $asset.SHA256 -notmatch '\A[0-9a-fA-F]{64}\z') {
+        throw "Empreinte SHA-256 invalide dans le flux $Rid : 64 caractères hexadécimaux sont requis."
+    }
     $packagePath = Join-Path $ReleaseDirectory $asset.FileName
     $stream = [System.IO.File]::OpenRead($packagePath)
     try {
-        $digest = [Convert]::ToBase64String([System.Security.Cryptography.SHA256]::HashData($stream))
-        if ($stream.Length -ne $asset.Size -or $digest -cne $asset.SHA256) {
+        # Velopack 0.0.1298 calcule un HEX de 64 caractères ; son ancien commentaire XML
+        # indique base64, mais CalculateStreamSHA256 et le vrai flux utilisent bien HEX.
+        $digest = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($stream))
+        if ($stream.Length -ne $asset.Size -or -not [StringComparer]::OrdinalIgnoreCase.Equals($digest, $asset.SHA256)) {
             throw "Taille ou empreinte SHA-256 incorrecte : $($asset.FileName)."
         }
     }
