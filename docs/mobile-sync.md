@@ -43,9 +43,13 @@ et un remplacement du cache seulement après réception complète. Un changement
 fait recommencer la lecture, au plus deux fois, puis conserve le cache existant.
 
 La clé du relais passe par le fragment du QR et ne va pas au Worker. Les passkeys imposent
-une vérification utilisateur. Le cache financier du navigateur reste toutefois en clair :
-la garde d’interface le masque avant authentification et après 45 minutes, sans chiffrement
-au repos. Après fermeture de la PWA, une connexion au bureau est requise pour déverrouiller.
+une vérification utilisateur. Le cache financier et les corps des messages hors ligne sont
+stockés dans des enveloppes JSON UTF-8/base64 versionnées. Les anciennes valeurs sont
+migrées dans une transaction IndexedDB, sans perdre les messages en attente. L’encodage
+masque la lecture directe et ajoute environ 33 % à la taille du JSON UTF-8 ; il reste
+facilement décodable et n’apporte pas de confidentialité. La garde d’interface masque les
+données avant authentification et après 45 minutes, sans chiffrement au repos. Après
+fermeture de la PWA, une connexion au bureau est requise pour déverrouiller.
 Un opérateur qui contrôlerait le JavaScript livré pourrait compromettre ce client.
 Voir [les limites et le déploiement du relais](../cloudflare/remote-relay/README.md).
 

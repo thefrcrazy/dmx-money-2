@@ -161,7 +161,9 @@ namespace DmxMoney
                         throw new CryptographicException("Taille de signature invalide.");
                     var signature = new byte[signatureLength];
                     Require(CryptSIPGetSignedDataMsg(ref subject, out encoding, 0, ref signatureLength, signature), "Signature embarquée");
-                    message = CryptMsgOpenToDecode(encoding, 0, 2, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero); // CMSG_SIGNED
+                    // Le SIP fournit un ContentInfo PKCS#7 complet. Un type non nul attendrait
+                    // le contenu nu du SignedData et refuserait son enveloppe ASN.1.
+                    message = CryptMsgOpenToDecode(encoding, 0, 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
                     Require(message != IntPtr.Zero, "Décodage CMS");
                     Require(CryptMsgUpdate(message, signature, signatureLength, true), "Décodage CMS");
                     if (BitConverter.ToUInt32(ReadParameter(message, 5), 0) != 1) // CMSG_SIGNER_COUNT_PARAM

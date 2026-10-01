@@ -37,6 +37,7 @@ captures AppKit et iOS simulateur arm64. Ce passage ne publie pas d’installeur
 | Journal natif | GTK faisait des parcours quadratiques ; WinUI remplaçait inutilement sa source et perdait la sélection ; Apple répétait tris/filtres | Mise à jour GTK en lot, sélection WinUI conservée et rafraîchissements réduits, invalidation explicite des caches Apple ; virtualisation native conservée |
 | Journal mobile | Toutes les lignes et groupes étaient construits immédiatement | Affichage progressif de 80 lignes, regroupement linéaire, index des budgets et formatteurs réutilisés |
 | Lecture mobile | Téléchargement de toutes les opérations en une seule enveloppe | Pages de 2 000, version bancaire contrôlée, reprise bornée après changement concurrent, cache remplacé après réception complète |
+| Cache mobile | Valeurs financières et corps des saisies hors ligne directement lisibles dans IndexedDB | Enveloppes JSON UTF-8/base64 versionnées, migration transactionnelle conservant messages, ordre, scopes et révisions ; obfuscation sans chiffrement |
 | Imports | Dates/montants invalides transformés ou partiellement écrits ; transactions commencées après certaines lectures ; faux succès mobile | Validation stricte, transactions IMMEDIATE incluant lectures et contrôles, erreurs propagées ; deux achats identiques restent deux achats distincts |
 | Sauvegarde | Une restauration pouvait remplacer des données avant validation complète ou séparer paramètres et données | Validation avant remplacement, restauration atomique des données, groupes et paramètres ; rejet des versions futures |
 | Mutations synchronisées | Identifiants/timestamps/montants distants insuffisamment vérifiés ; liens de virements pouvant désigner une opération sans rapport | Identité enveloppe/payload contrôlée, dates comparées comme instants, liens réciproques et contreparties cohérentes exigés |
@@ -45,6 +46,7 @@ captures AppKit et iOS simulateur arm64. Ce passage ne publie pas d’installeur
 | File PWA | Double sérialisation des mutations banque/paramètres, changement de destination risquant de retargeter des saisies | Sérialisation corrigée, files malformées conservées, destination vérifiée sans utiliser un HTTP 401 comme preuve d’identité |
 | PWA publiée | Chemins absolus de manifest, service worker et assets incompatibles avec `/mobile/` | Chemins relatifs, scope et cache de build vérifiés depuis l’adresse publique |
 | Windows | EXE/DLL/Setup distribués sans confiance Authenticode publique | Pipeline Azure Artifact Signing Public Trust, OIDC, vérification des signatures/horodatages et du paquet ; publication bloquée si configuration ou signature manque |
+| Développement Windows | Besoin de builds autosignés sans abonnement ; confusion entre élévation administrateur et confiance du code | Mode de signature locale distinct de la publication publique, clé privée non exportable et vérification d’intégrité ; aucun contournement Smart App Control |
 | Updater Windows | Source personnalisée insuffisamment restreinte et installation peu explicite | Source HTTPS validée, politique stable/préversion, contrôle SHA-256, vérification et installation séparées avec confirmation avant redémarrage |
 
 ## Vérifications réalisées
@@ -53,10 +55,10 @@ captures AppKit et iOS simulateur arm64. Ce passage ne publie pas d’installeur
 | --- | --- |
 | Rust core/bridge/FFI | 134 tests ordinaires réussis ; format et Clippy sans avertissements |
 | Transport réel | Test supplémentaire HTTPS/WSS réussi sur le Worker publié : inscription éphémère, appairage chiffré, cookie dans la réponse chiffrée, rejet du même message à 409 et suppression de l’inscription |
-| PWA | 64 tests, TypeScript strict et build de production réussis |
+| PWA | 76 tests, TypeScript strict et build de production réussis ; migration/rollback du cache, écriture concurrente, Unicode, ancien onglet bloquant et conservation des données corrompues couverts |
 | Workers | 6 tests du relais dans le moteur Cloudflare réel ; 5 contrats du pont historique ; typage et empaquetage à blanc réussis |
 | Swift | 13 tests DmxKit, dont 3 courses d’ACK CloudKit ; builds macOS modern et AppKit réussis |
-| Windows | 34 tests .NET de noyau/modèles réussis ; scripts PowerShell parsés et 5 cas de refus de publication exécutés |
+| Windows | 41 tests .NET de noyau/modèles réussis, dont les diagnostics des erreurs de politique Windows ; scripts PowerShell et vérification de signature détaillés dans le rapport Windows |
 | GTK | Compilation vérifiée ; pas d’exécution du bureau Linux pendant cette passe |
 | Navigateur public | PWA à 390 × 844 sans débordement ; service worker actif sous `/mobile/`, manifest/icônes/assets reçus ; aucune erreur JavaScript, CSP ou réseau constatée sur l’écran non appairé |
 | Dépendances npm | PWA : aucun avis sur 478 paquets ; relais : aucun avis sur 159 paquets après overrides de deux dépendances de test |
@@ -72,6 +74,17 @@ Le noyau du journal a été mesuré en release sur une base synthétique de **10
 24 % de réduction. Cela mesure le calcul du noyau, pas le temps d’ouverture de l’interface.
 Les collections natives sont encore chargées en mémoire ; l’affichage virtualisé ne rend
 pas toutes les opérations sur la collection indépendantes de sa taille.
+
+L’obfuscation du cache a été mesurée séparément sous Bun sur ce Mac avec **100 000 opérations** :
+JSON UTF-8 **17 579 781 octets**, base64 **23 439 708 caractères**, enveloppe complète
+**23 439 761 octets**, soit environ **33,3 %** de plus que le JSON. Ce ratio ne mesure pas
+le quota IndexedDB du stockage précédent. Les méthodes base64 natives, détectées à
+l’exécution, donnent **40–52 ms** d’encodage et **58–66 ms** de décodage ; le repli pour les
+anciens navigateurs donne **213–239 ms** et **61–77 ms**. Ces mesures incluent la conversion
+JSON et ne garantissent ni latence ni consommation mémoire sur téléphone. La migration
+ajoute un travail linéaire sur les données existantes ; la transaction conserve l’ancien
+stockage si elle échoue. Référence des API :
+[Uint8Array.toBase64](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array/toBase64).
 
 ## Dépendances et avis conservés
 
@@ -94,8 +107,11 @@ assimilés à une preuve de vulnérabilité exploitable dans l’application.
 
 ## Limites et travail restant avant release
 
-- **Windows** : configurer réellement le compte Azure, faire valider l’identité et créer
-  le profil Public Trust. Le code ne peut pas fabriquer cette identité. Puis tester une
+- **Windows** : l’utilisateur préfère actuellement une signature autosignée de développement,
+  sans abonnement. Elle ne donne pas de confiance publique et le mode administrateur ne
+  contourne pas Smart App Control. Pour distribuer avec une signature reconnue, configurer
+  réellement le compte Azure, faire valider l’identité et créer le profil Public Trust,
+  ou utiliser un autre fournisseur reconnu. Le code ne peut pas fabriquer cette identité. Puis tester une
   installation et une mise à jour x64/arm64 avec Smart App Control actif. Une signature
   valide ne garantit pas l’absence de tout avertissement SmartScreen lié à la réputation.
   Voir [la procédure de signature](../release.md#signature-windows-et-smart-app-control).
@@ -110,9 +126,11 @@ assimilés à une preuve de vulnérabilité exploitable dans l’application.
 - **Confidentialité** : le Worker ne reçoit pas la clé maîtresse ou les données financières
   en clair, mais voit IP, routage, horaires et tailles. Un opérateur qui modifie le JavaScript
   de la PWA peut compromettre le client ; une URL cachée n’est pas une barrière de sécurité.
-- **Stockage** : cache financier IndexedDB, SQLite bureau et sauvegardes `.dmx` restent sans
-  chiffrement applicatif au repos. La garde passkey de 45 minutes masque l’interface ; elle
-  ne chiffre pas les fichiers. Le format `.dmx` utilise base64, qui n’est pas du chiffrement.
+- **Stockage** : cache financier et corps des messages IndexedDB désormais obfusqués
+  en base64, facilement décodables sans clé. Cet encodage ajoute environ 33 % au JSON UTF-8
+  et ne chiffre pas le stockage. SQLite bureau et sauvegardes `.dmx` restent sans chiffrement
+  applicatif au repos. La garde passkey de 45 minutes masque l’interface ; elle ne chiffre
+  pas les fichiers. Le format `.dmx` utilise également base64, qui n’est pas du chiffrement.
 - **Disponibilité** : bureau allumé, connecté et application ouverte ; contrôle actif toutes
   les 2,5 secondes, reprise à la réouverture si iOS suspend la PWA. Aucun accès direct à la
   base quand le bureau dort. Les saisies hors ligne sont conservées jusqu’à reconnexion.

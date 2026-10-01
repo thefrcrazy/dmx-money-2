@@ -35,9 +35,12 @@ sur le téléphone et sont rejouées à la reconnexion.
   une protection cryptographique.
 - Un opérateur qui modifierait le JavaScript livré à la PWA pourrait lire ses données.
   Le chiffrement protège le transport et le relais honnête, pas un client compromis.
-- Le cache financier IndexedDB est encore en clair. La PWA masque les données avant une
-  authentification passkey et après 45 minutes, mais cette garde d’interface ne chiffre
-  pas les fichiers du navigateur. Après fermeture, la reconnexion au bureau est requise
+- Le cache financier IndexedDB et les corps des mutations en attente sont obfusqués
+  en JSON UTF-8/base64, avec migration atomique du stockage existant. Ce format masque
+  la lecture directe, mais reste facilement décodable sans clé : il ne protège pas la
+  confidentialité des fichiers récupérés. Le base64 ajoute environ 33 % à la taille du
+  JSON UTF-8. La PWA masque les données avant une authentification passkey et après
+  45 minutes ; cette garde ne chiffre pas les fichiers. Après fermeture, la reconnexion au bureau est requise
   pour déverrouiller. Un onglet déjà déverrouillé peut continuer hors ligne.
 - SQLite sur le bureau et les sauvegardes `.dmx` restent dans leur format existant,
   sans chiffrement applicatif au repos. La protection du système et du disque s’applique.

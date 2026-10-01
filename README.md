@@ -53,6 +53,8 @@ Deux options indépendantes, activables dans Paramètres :
 
 Les garanties, le cache hors ligne et les limites de confidentialité sont détaillés dans
 [le fonctionnement du relais](cloudflare/remote-relay/README.md) et [la synchronisation mobile](docs/mobile-sync.md).
+Le cache mobile est obfusqué en base64 pour masquer la lecture directe ; cet encodage
+reste décodable et ne remplace pas le chiffrement ni la protection du téléphone.
 Les corrections, mesures et limites de validation sont recensées dans
 [l’audit du 1 octobre 2026](docs/verification/2026-10-01-audit-compagnon.md).
 
@@ -83,6 +85,10 @@ cargo test --workspace
 ```
 
 Les instructions propres à chaque plateforme sont dans [apple/README.md](apple/README.md), [windows/README.md](windows/README.md) et [linux/README.md](linux/README.md) ; la publication est décrite dans [docs/release.md](docs/release.md).
+
+Sous Windows, les builds de développement peuvent être autosignés localement sans abonnement.
+Cette signature ne garantit pas l’acceptation par Smart App Control ; les mises à jour restent
+soumises aux règles d’exécution de Windows. Voir [la procédure Windows](docs/release.md#windows).
 
 Pour essayer l'application sans toucher à vos données :
 
