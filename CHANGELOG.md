@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.9 — 2026-10-02
+
+- PWA hébergée sur Cloudflare Pages ; API de relais séparée sur un Worker et WebSocket sortant depuis le bureau, sans DNS individuel.
+- Correction de la migration : une identité DNS héritée ne devient plus un faux accès Internet ; action explicite de passage au relais sur SwiftUI, AppKit, WinUI et GTK.
+- Nouvel appairage sur Pages : anciennes passkeys, sessions et QR révoqués lorsque l’origine change ; l’ancien QR en mémoire n’est plus affiché après activation.
+- Une activation Internet échouée conserve l’ancienne configuration et ne se rabat pas sur un pont DNS local. Le démarrage conserve les appairages existants jusqu’à une migration explicite.
+- Vérification d’écriture distante : création, modification et suppression reçues par le bureau, contrôle de son snapshot et notifications aux interfaces natives ; autorisation, CSRF et rejeu vérifiés.
+- Diagnostic des caches de compilation et outil de nettoyage en simulation par défaut ; aucune donnée financière ni sauvegarde supprimée.
+
 ## 2.0.8 — 2026-10-02
 
 - Compagnon Internet : relais Cloudflare commun, connexion WSS sortante du bureau, messages chiffrés AES-GCM et appairage par QR/passkey sans configuration DNS individuelle.

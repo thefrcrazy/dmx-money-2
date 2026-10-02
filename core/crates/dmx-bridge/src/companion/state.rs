@@ -231,6 +231,11 @@ impl MobileCompanion {
     pub async fn set_secure_bridge_enabled_async(&self, enabled: bool) -> Result<MobileCompanionStatus, String> {
         log::info!("Mobile companion secure bridge toggle requested: enabled={enabled}");
         secure::set_enabled(&self.host.pool, &self.host.data_dir, enabled).await?;
+        if enabled {
+            // Explicit activation can change the WebAuthn origin and consume the
+            // old pairing tokens. Never render that stale token in a new Pages QR.
+            *self.secure_pairing.lock().map_err(|error| error.to_string())? = None;
+        }
         sqlx::query("UPDATE settings SET \"mobileAccessEnabled\" = $1 WHERE id = 1")
             .bind(enabled)
             .execute(&self.host.pool)

@@ -1,15 +1,22 @@
 # Compagnon distant DmxMoney
 
-Le service commun est publié sur
-`https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev/mobile/`.
+La PWA commune est hébergée sur Cloudflare Pages à
+`https://dmxmoney-companion.pages.dev/mobile/`.
+L'API et le relais WebSocket sont fournis par le Worker séparé
+`https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev`.
 Chaque installation de bureau génère sa propre identité aléatoire. Aucun domaine,
 enregistrement DNS, port entrant ou compte Cloudflare n’est demandé à l’utilisateur.
-L’ancien `managed-bridge` reste séparé pour les installations existantes.
+L’ancien `managed-bridge` reste séparé pour les installations existantes. Les bureaux
+avec une ancienne identité DNS nécessitent l'action « Passer à l'accès Internet ».
+Les appairages précédents du relais restent valides au démarrage jusqu'à l'action
+« Mettre à jour le compagnon » ; cette migration change l'origine WebAuthn et demande un nouveau QR.
 
 ## Fonctionnement
 
 Le bureau ouvre une connexion WSS sortante. Un Durable Object par installation
 achemine les demandes HTTPS du téléphone vers cette connexion et renvoie la réponse.
+Les POST/PUT/PATCH/DELETE sont déchiffrés et autorisés sur le bureau avant mutation de
+sa base SQLite ; chaque écriture acceptée notifie l'interface native immédiatement.
 La base reste sur le bureau ; le relais ne conserve aucune donnée financière.
 Il conserve les empreintes des identifiants de transport et les compteurs de débit.
 Les données en transit sont chiffrées avec AES-256-GCM ; HKDF-SHA256 produit des clés
@@ -57,19 +64,27 @@ bun run build
 cd ../cloudflare/remote-relay
 bun install --frozen-lockfile
 bun run assets
+bun run pages:assets
 bun run types
 bun run check
 bun run test
 bun run dry-run
 bun run deploy
+bun run pages:deploy
 ```
 
 `bun run assets` copie le build sans les fichiers de routage propres à Pages. Le Worker
 sert les assets sous `/mobile/` et applique ses propres en-têtes de sécurité. La date
 de compatibilité est celle prise en charge par le moteur de tests verrouillé.
+`bun run pages:assets` prépare le dossier statique Pages sous `/mobile/`, avec CSP,
+un 404 explicite et chemins de service worker cohérents. `pages:deploy` publie sur
+le projet Pages `dmxmoney-companion`. Le Worker autorise en CORS uniquement cette
+origine additionnelle, sur la route de messages chiffrés ; aucun cookie HTTP n'est exposé.
 Un éditeur peut définir `DMXMONEY_REMOTE_RELAY_URL` au **build Rust** pour choisir une
 autre origine HTTPS commune. La PWA prend l’origine du QR ; aucun secret commun
 d’enregistrement n’est embarqué dans l’application.
+`DMXMONEY_COMPANION_URL` peut choisir l'adresse HTTPS de la PWA au build Rust. Pour
+un hébergement personnalisé, adapter aussi `COMPANION_ORIGIN` et la CSP de Pages.
 
 Les overrides `sharp 0.35.4` et `undici 7.29.1` actualisent les dépendances de Miniflare
 du moteur de tests verrouillé. Ils corrigent les avis de sécurité connus sans changer

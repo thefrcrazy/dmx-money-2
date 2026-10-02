@@ -23,12 +23,16 @@ pub struct Page {
     bridge_switch: gtk::Switch,
     bridge_badge: gtk::Label,
     bridge_detail: gtk::Label,
+    migration_button: gtk::Button,
+    migration_detail: gtk::Label,
+    bridge_busy: Rc<std::cell::Cell<bool>>,
     app_url: gtk::Label,
     api_url: gtk::Label,
     steps: gtk::Box,
     bridge_error: gtk::Label,
     qr_area: gtk::DrawingArea,
     qr_empty: gtk::Label,
+    qr_instructions: gtk::Label,
     pairing_button: gtk::Button,
     copy_button: gtk::Button,
     passkeys_title: gtk::Label,
@@ -95,6 +99,13 @@ impl Page {
         bridge_switch.set_valign(gtk::Align::Center);
         bridge_header.append(&bridge_switch);
         bridge_content.append(&bridge_header);
+        let migration_button = widgets::action_button("Passer à l’accès Internet", Some("Globe2"), true);
+        migration_button.set_halign(gtk::Align::Start);
+        migration_button.set_visible(false);
+        bridge_content.append(&migration_button);
+        let migration_detail = widgets::caption("");
+        migration_detail.set_visible(false);
+        bridge_content.append(&migration_detail);
 
         let urls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         urls.set_homogeneous(true);
@@ -139,9 +150,8 @@ impl Page {
         let copy_button = widgets::action_button("Copier", Some("Copy"), false);
         copy_button.set_visible(false);
         right.append(&copy_button);
-        right.append(&widgets::caption(
-            "Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. En accès Internet, le Wi-Fi, la 4G et la 5G fonctionnent ; l’ordinateur doit rester allumé et connecté. Un QR par appareil.",
-        ));
+        let qr_instructions = widgets::caption("");
+        right.append(&qr_instructions);
         bridge_body.append(&right);
         bridge_content.append(&bridge_body);
         bridge_content.append(&widgets::separator());
@@ -221,12 +231,16 @@ impl Page {
             bridge_switch: bridge_switch.clone(),
             bridge_badge,
             bridge_detail,
+            migration_button: migration_button.clone(),
+            migration_detail,
+            bridge_busy: Rc::new(std::cell::Cell::new(false)),
             app_url,
             api_url,
             steps,
             bridge_error,
             qr_area: qr_area.clone(),
             qr_empty,
+            qr_instructions,
             pairing_button: pairing_button.clone(),
             copy_button: copy_button.clone(),
             passkeys_title,
@@ -274,15 +288,19 @@ impl Page {
         // Pont
         {
             let store = store.clone();
+            let busy = page.bridge_busy.clone();
             bridge_switch.connect_state_set(move |switch, state| {
                 if switch.is_sensitive() {
-                    match bridge::set_enabled(state) {
-                        Ok(_) => store.reload(),
-                        Err(error) => store.show_error(&format!("Pont sécurisé indisponible : {error}")),
-                    }
+                    request_bridge_enabled(&store, &busy, state);
+                    return glib::Propagation::Stop;
                 }
                 glib::Propagation::Proceed
             });
+        }
+        {
+            let store = store.clone();
+            let busy = page.bridge_busy.clone();
+            migration_button.connect_clicked(move |_| request_bridge_enabled(&store, &busy, true));
         }
         {
             let store = store.clone();
@@ -403,36 +421,55 @@ impl Page {
             .as_ref()
             .and_then(|bridge| bridge.api_url.as_deref())
             .is_some_and(|url| url.contains("/relay/"));
+        let has_legacy_bridge = !is_remote && secure.as_ref().is_some_and(|bridge| bridge.local_host.is_some());
+        let needs_pwa_update = secure
+            .as_ref()
+            .is_some_and(|bridge| needs_hosted_pwa_update(bridge.api_url.as_deref(), bridge.app_url.as_deref()));
 
         self.bridge_switch.set_sensitive(false);
         self.bridge_switch.set_active(enabled);
-        self.bridge_switch.set_sensitive(true);
+        self.bridge_switch.set_sensitive(!self.bridge_busy.get());
+        self.migration_button.set_visible(has_legacy_bridge || needs_pwa_update);
+        self.migration_button.set_sensitive(!self.bridge_busy.get());
+        self.migration_detail.set_visible(has_legacy_bridge || needs_pwa_update);
+        self.migration_detail.set_text(if has_legacy_bridge {
+            "Votre ancien compagnon utilise le réseau local. L’accès en 4G ou 5G nécessite le compagnon Internet."
+        } else {
+            "Votre compagnon Internet utilise l’ancienne page. Mettez-le à jour pour ouvrir la PWA Cloudflare Pages."
+        });
+        if let Some(content) = self.migration_button.child().and_downcast::<gtk::Box>() {
+            if let Some(label) = content.last_child().and_downcast::<gtk::Label>() {
+                label.set_text(if has_legacy_bridge {
+                    "Passer à l’accès Internet"
+                } else {
+                    "Mettre à jour le compagnon"
+                });
+            }
+        }
 
         let (badge, detail) = if !enabled {
             (
                 "Désactivé",
-                "Activez le compagnon, puis appairez votre téléphone avec le QR.",
+                "Activez l’accès Internet pour modifier les données de cet ordinateur depuis votre téléphone, en Wi-Fi, 4G ou 5G, puis scannez le QR.",
             )
         } else if is_remote {
             (
                 if active { "Prêt à appairer" } else { "Connexion Internet" },
-                "Accès en Wi-Fi, 4G ou 5G, avec chiffrement entre vos appareils. L’ordinateur doit rester allumé et connecté.",
-            )
-        } else if active {
-            ("Prêt à appairer", "La PWA peut se connecter à l’API locale sécurisée.")
-        } else if certificate_ready {
-            (
-                "Démarrage local",
-                "Le certificat est prêt, le serveur local termine son démarrage.",
+                "Les modifications de votre téléphone passent par le relais chiffré jusqu’à cet ordinateur, en Wi-Fi, 4G ou 5G. DmxMoney doit rester ouvert sur cet ordinateur allumé et connecté à Internet.",
             )
         } else {
             (
-                "Préparation HTTPS",
-                "DNS et certificat sont préparés automatiquement en arrière-plan.",
+                "Accès local hérité",
+                "Ancien accès local : le téléphone doit être sur le même réseau que cet ordinateur. Cet accès ne fonctionne pas en 4G ou 5G.",
             )
         };
         self.bridge_badge.set_text(badge);
         self.bridge_detail.set_text(detail);
+        self.qr_instructions.set_text(if !has_legacy_bridge {
+            "Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. Vos modifications seront envoyées à DmxMoney sur cet ordinateur par Internet. Un QR par appareil."
+        } else {
+            "Ce QR utilise l’ancien accès local, disponible sur le même réseau que cet ordinateur. Passez à l’accès Internet pour utiliser la 4G ou la 5G."
+        });
         self.app_url.set_text(if is_remote {
             "Application mobile disponible"
         } else {
@@ -470,9 +507,18 @@ impl Page {
             .as_ref()
             .map(|bridge| bridge.managed_credential_ready)
             .unwrap_or(false);
-        let steps = if is_remote {
+        let steps = if !has_legacy_bridge {
             vec![
-                ("Compagnon mobile", "Disponible", true, "Globe2"),
+                (
+                    "Compagnon mobile",
+                    if secure.as_ref().is_some_and(|bridge| bridge.app_url.is_some()) {
+                        "Disponible"
+                    } else {
+                        "En attente"
+                    },
+                    secure.as_ref().is_some_and(|bridge| bridge.app_url.is_some()),
+                    "Globe2",
+                ),
                 (
                     "Chiffrement entre appareils",
                     if encryption_ready { "Prêt" } else { "En préparation" },
@@ -683,6 +729,78 @@ impl Page {
             self.passkeys.append(&row);
         }
     }
+}
+
+fn request_bridge_enabled(store: &Rc<Store>, busy: &Rc<std::cell::Cell<bool>>, enabled: bool) {
+    if busy.get() {
+        return;
+    }
+    let secure = bridge::status().and_then(|status| status.secure_bridge);
+    let legacy = secure.as_ref().is_some_and(|bridge| {
+        bridge.local_host.is_some() && !bridge.api_url.as_deref().is_some_and(|url| url.contains("/relay/"))
+    });
+    let update = secure
+        .as_ref()
+        .is_some_and(|bridge| needs_hosted_pwa_update(bridge.api_url.as_deref(), bridge.app_url.as_deref()));
+    if enabled && (legacy || update) {
+        let store_for_action = store.clone();
+        let busy = busy.clone();
+        store.confirm(
+            if legacy { "Passer à l’accès Internet ?" } else { "Mettre à jour le compagnon ?" },
+            "Synchronisez d’abord les saisies en attente dans l’ancienne PWA. Vos mobiles devront ensuite être appairés avec un nouveau QR ; les anciennes sessions seront révoquées.",
+            if legacy { "Passer à Internet" } else { "Mettre à jour" },
+            move || apply_bridge_enabled(&store_for_action, &busy, true),
+        );
+    } else {
+        apply_bridge_enabled(store, busy, enabled);
+    }
+}
+
+fn needs_hosted_pwa_update(api: Option<&str>, app: Option<&str>) -> bool {
+    let Some(api) = api.and_then(|url| glib::Uri::parse(url, glib::UriFlags::NONE).ok()) else {
+        return false;
+    };
+    if !has_https_origin(&api, "dmxmoney-remote-relay.qm7ws5twn7.workers.dev") || !api.path().starts_with("/relay/") {
+        return false;
+    }
+    !app.and_then(|url| glib::Uri::parse(url, glib::UriFlags::NONE).ok())
+        .is_some_and(|uri| has_https_origin(&uri, "dmxmoney-companion.pages.dev"))
+}
+
+fn has_https_origin(uri: &glib::Uri, host: &str) -> bool {
+    uri.scheme().eq_ignore_ascii_case("https")
+        && uri
+            .host()
+            .as_deref()
+            .is_some_and(|value| value.eq_ignore_ascii_case(host))
+        && matches!(uri.port(), -1 | 443)
+        && uri.userinfo().is_none()
+}
+
+fn apply_bridge_enabled(store: &Rc<Store>, busy: &Rc<std::cell::Cell<bool>>, enabled: bool) {
+    if busy.replace(true) {
+        return;
+    }
+    let Some(companion) = bridge::companion() else {
+        busy.set(false);
+        store.show_error("Compagnon non démarré.");
+        return;
+    };
+    // Le provisionnement Internet peut attendre le réseau ou le trousseau : il ne bloque pas GTK.
+    let (sender, receiver) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let _ = sender.send_blocking(companion.set_secure_bridge_enabled(enabled));
+    });
+    let store = store.clone();
+    let busy = busy.clone();
+    store.reload();
+    glib::spawn_future_local(async move {
+        if let Ok(Err(error)) = receiver.recv().await {
+            store.show_error(&format!("Compagnon Internet indisponible : {error}"));
+        }
+        busy.set(false);
+        store.reload();
+    });
 }
 
 fn section(title: &str, icon: &str, card: &gtk::Box) -> gtk::Box {

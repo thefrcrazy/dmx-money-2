@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "assets": "bun scripts/build-assets.ts",
+    "pages:assets": "bun scripts/build-pages.ts",
+    "pages:deploy": "wrangler --cwd ../companion-pages pages deploy .pages --project-name dmxmoney-companion --branch main",
     "types": "wrangler types",
     "check": "tsc --noEmit",
     "test": "vitest run",

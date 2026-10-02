@@ -19,6 +19,31 @@ const MAX_FRAME: usize = 12 * 1024 * 1024;
 const MAX_BODY: usize = 8 * 1024 * 1024;
 const MAX_AGE_MS: i64 = 120_000;
 const DEFAULT_REMOTE_RELAY_URL: &str = "https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev";
+const DEFAULT_COMPANION_URL: &str = "https://dmxmoney-companion.pages.dev/mobile/";
+
+fn companion_url(config: &RelayConfig) -> Result<String, String> {
+    let value = option_env!("DMXMONEY_COMPANION_URL")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            if config.service == DEFAULT_REMOTE_RELAY_URL {
+                DEFAULT_COMPANION_URL.into()
+            } else {
+                format!("{}/mobile/", config.service)
+            }
+        });
+    let url = Url::parse(&value).map_err(|_| "Adresse du compagnon invalide")?;
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("Le compagnon doit être une adresse HTTPS sans identifiants".into());
+    }
+    Ok(value)
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct RelayConfig {
@@ -193,8 +218,9 @@ pub(super) async fn load_config(pool: &DbPool) -> Result<Option<RelayConfig>, St
 
 /// No network access in unit tests; production discovers the relay before opting into it.
 pub(crate) async fn try_provision(pool: &DbPool) -> Result<bool, String> {
-    if let Some(config) = load_config(pool).await? {
-        activate(pool, &config).await?;
+    if load_config(pool).await?.is_some() {
+        // Merely reading status or restarting the desktop must not change an
+        // existing WebAuthn origin and revoke the mobile without user action.
         return Ok(true);
     }
     if cfg!(test) {
@@ -255,6 +281,14 @@ pub(crate) async fn try_provision(pool: &DbPool) -> Result<bool, String> {
     Ok(true)
 }
 
+pub(crate) async fn enable_internet(pool: &DbPool) -> Result<(), String> {
+    if !try_provision(pool).await? {
+        return Err("Service d’accès Internet indisponible. Réessayez après reconnexion ; aucun DNS individuel n’est nécessaire.".into());
+    }
+    let config = load_config(pool).await?.ok_or("Configuration du relais absente")?;
+    activate(pool, &config).await
+}
+
 async fn enroll(config: &RelayConfig) -> Result<(), String> {
     // Mobile sends SHA256(master key string) as bearer. The service stores its hash again.
     let response = reqwest::Client::builder()
@@ -278,7 +312,8 @@ async fn enroll(config: &RelayConfig) -> Result<(), String> {
 }
 
 async fn activate(pool: &DbPool, config: &RelayConfig) -> Result<(), String> {
-    let domain = Url::parse(&config.service)
+    let app = companion_url(config)?;
+    let domain = Url::parse(&app)
         .ok()
         .and_then(|url| url.host_str().map(str::to_owned))
         .ok_or("URL du relais invalide")?;
@@ -286,11 +321,17 @@ async fn activate(pool: &DbPool, config: &RelayConfig) -> Result<(), String> {
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|e| map_db_error(e, "activation du relais"))?;
-    let previous: Option<String> = sqlx::query_scalar("SELECT \"secureBridgeDeviceId\" FROM settings WHERE id=1")
+    let previous = sqlx::query("SELECT \"secureBridgeDeviceId\", \"secureBridgeAppUrl\" FROM settings WHERE id=1")
         .fetch_one(&mut *transaction)
         .await
         .map_err(|e| map_db_error(e, "lecture de l’identité du pont"))?;
-    if previous.as_deref().is_some_and(|previous| previous != config.id) {
+    let previous_id: Option<String> = previous.get("secureBridgeDeviceId");
+    let previous_app: Option<String> = previous.get("secureBridgeAppUrl");
+    let origin_changed = previous_app
+        .as_deref()
+        .and_then(|app| Url::parse(app).ok())
+        .is_some_and(|previous| previous.origin() != Url::parse(&app).unwrap().origin());
+    if previous_id.as_deref().is_some_and(|previous| previous != config.id) || origin_changed {
         // Changing the WebAuthn origin requires re-pairing. Keep revocation records but
         // invalidate all old credentials, sessions and unused QRs atomically.
         let now = chrono::Utc::now().to_rfc3339();
@@ -313,7 +354,7 @@ async fn activate(pool: &DbPool, config: &RelayConfig) -> Result<(), String> {
         .await
         .map_err(|e| map_db_error(e, "enregistrement du relais"))?;
     sqlx::query("UPDATE settings SET \"secureBridgeDomain\"=$1, \"secureBridgeAppUrl\"=$2, \"secureBridgeLocalHost\"=NULL, \"secureBridgeDeviceId\"=$3, \"secureBridgeManagedServiceUrl\"=$4, \"secureBridgeLastError\"=NULL WHERE id=1")
-        .bind(domain).bind(format!("{}/mobile", config.service)).bind(&config.id).bind(&config.service)
+        .bind(domain).bind(app).bind(&config.id).bind(&config.service)
         .execute(&mut *transaction).await.map_err(|e| map_db_error(e, "activation du relais"))?;
     transaction
         .commit()
@@ -330,7 +371,10 @@ pub(super) async fn build_status(
     pairing: Option<(String, String)>,
 ) -> Result<SecureBridgeStatus, String> {
     let api = format!("{}/relay/{}", config.service, config.id);
-    let app = format!("{}/mobile", config.service);
+    let app = secure::load_settings(pool)
+        .await?
+        .app_url
+        .unwrap_or(companion_url(config)?);
     let pairing_url = pairing
         .as_ref()
         .map(|(token, _)| format!("{app}#pairing={token}&relay={api}&key={}", config.key));
@@ -451,13 +495,15 @@ async fn run_connection(
 }
 
 fn dispatch(host: &BridgeHost, request: RelayRequest, origin: &str) -> HttpResponse {
-    let enabled = host
-        .runtime
-        .block_on(secure::load_settings(&host.pool))
-        .is_ok_and(|settings| settings.enabled);
-    if !enabled {
+    let settings = host.runtime.block_on(secure::load_settings(&host.pool));
+    if !settings.as_ref().is_ok_and(|settings| settings.enabled) {
         return error_response(401, "Le compagnon distant est désactivé");
     }
+    let origin = settings
+        .as_ref()
+        .ok()
+        .and_then(secure::secure_app_origin)
+        .unwrap_or_else(|| origin.into());
     let now = chrono::Utc::now().timestamp_millis();
     let accepted = host.runtime.block_on(async {
         sqlx::query("DELETE FROM remote_relay_requests WHERE expires_at < $1")
@@ -484,7 +530,7 @@ fn dispatch(host: &BridgeHost, request: RelayRequest, origin: &str) -> HttpRespo
         })
         .map(|(key, value)| (key.to_ascii_lowercase(), value))
         .collect();
-    headers.insert("origin".into(), origin.into());
+    headers.insert("origin".into(), origin.clone());
     http::handle_request(
         HttpRequest {
             method: request.method,
@@ -494,7 +540,7 @@ fn dispatch(host: &BridgeHost, request: RelayRequest, origin: &str) -> HttpRespo
         },
         host,
         &ServerSecurity {
-            secure_app_origin: Some(origin.into()),
+            secure_app_origin: Some(origin.clone()),
             app_url: Some(format!("{origin}/mobile")),
         },
     )
@@ -503,6 +549,221 @@ fn dispatch(host: &BridgeHost, request: RelayRequest, origin: &str) -> HttpRespo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct MutationEvents(std::sync::Mutex<Vec<i64>>);
+
+    impl crate::BridgeEvents for MutationEvents {
+        fn data_changed(&self, version: i64) {
+            self.0.lock().unwrap().push(version);
+        }
+        fn status_changed(&self) {}
+    }
+
+    fn finalized_session(engine: &dmx_core::Engine) -> (String, String) {
+        let cookie = random_token();
+        let csrf = random_token();
+        // Test-only fixture for the state after a successful passkey ceremony. The
+        // production handler still validates the session, CSRF and revocation.
+        engine.block_on(async {
+            sqlx::query(
+                "INSERT INTO mobile_sessions (id, session_hash, csrf_hash, passkey_id, device_label, expires_at, created_at)
+                 VALUES ('relay-mutation-session', $1, $2, 'relay-mutation-passkey', 'Relay mutation test', $3, $4)",
+            )
+            .bind(secure::hash_secret(&cookie))
+            .bind(secure::hash_secret(&csrf))
+            .bind((chrono::Utc::now() + chrono::Duration::minutes(5)).to_rfc3339())
+            .bind(chrono::Utc::now().to_rfc3339())
+            .execute(engine.pool())
+            .await
+            .unwrap();
+        });
+        (cookie, csrf)
+    }
+
+    fn request_packet(
+        config: &RelayConfig,
+        method: &str,
+        path: &str,
+        body: &str,
+        headers: HashMap<String, String>,
+    ) -> Envelope {
+        let id = Uuid::new_v4().to_string();
+        let clear = serde_json::to_vec(&json!({
+            "id": id, "issuedAt": chrono::Utc::now().timestamp_millis(),
+            "method": method, "path": path, "headers": headers, "body": body,
+        }))
+        .unwrap();
+        let mut nonce = [0; 12];
+        OsRng.fill_bytes(&mut nonce);
+        let ciphertext = cipher(config, b"request")
+            .unwrap()
+            .encrypt(Nonce::from_slice(&nonce), clear.as_ref())
+            .unwrap();
+        Envelope {
+            id,
+            nonce: URL_SAFE_NO_PAD.encode(nonce),
+            ciphertext: URL_SAFE_NO_PAD.encode(ciphertext),
+        }
+    }
+
+    fn response_payload(config: &RelayConfig, request_id: &str, encrypted: Envelope) -> serde_json::Value {
+        assert_eq!(encrypted.id, request_id);
+        let nonce = URL_SAFE_NO_PAD.decode(encrypted.nonce).unwrap();
+        let ciphertext = URL_SAFE_NO_PAD.decode(encrypted.ciphertext).unwrap();
+        let bytes = cipher(config, b"response")
+            .unwrap()
+            .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
+            .unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(result["id"], request_id);
+        result
+    }
+
+    fn session_headers(cookie: &str, csrf: &str) -> HashMap<String, String> {
+        HashMap::from([
+            ("cookie".into(), format!("dmxmoney_session={cookie}")),
+            ("x-dmx-csrf".into(), csrf.into()),
+            ("content-type".into(), "application/json".into()),
+        ])
+    }
+
+    async fn remote_request(client: &reqwest::Client, config: &RelayConfig, packet: &Envelope) -> serde_json::Value {
+        let origin = std::env::var("DMXMONEY_RELAY_SMOKE_ORIGIN").unwrap_or_else(|_| config.service.clone());
+        let response = client
+            .post(format!("{}/relay/{}/request", config.service, config.id))
+            .header("origin", &origin)
+            .bearer_auth(hash(&config.key))
+            .json(packet)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status().as_u16(),
+            200,
+            "relay must return an encrypted desktop response"
+        );
+        if std::env::var("DMXMONEY_RELAY_SMOKE_ORIGIN").is_ok() {
+            assert_eq!(
+                response
+                    .headers()
+                    .get("access-control-allow-origin")
+                    .and_then(|value| value.to_str().ok()),
+                Some(origin.as_str())
+            );
+        }
+        response_payload(config, &packet.id, response.json().await.unwrap())
+    }
+
+    #[test]
+    fn encrypted_mutations_update_desktop_snapshot_and_emit_notifications() {
+        let engine = dmx_core::Engine::open_in_memory().unwrap();
+        engine.block_on(schema(engine.pool())).unwrap();
+        engine
+            .block_on(
+                sqlx::query("UPDATE settings SET \"secureBridgeEnabled\"=1, \"secureBridgeAppUrl\"='https://dmxmoney-companion.pages.dev/mobile/' WHERE id=1")
+                    .execute(engine.pool()),
+            )
+            .unwrap();
+        let (cookie, csrf) = finalized_session(&engine);
+        let events = Arc::new(MutationEvents::default());
+        let host = BridgeHost {
+            pool: engine.pool().clone(),
+            runtime: engine.handle(),
+            data_dir: std::env::temp_dir(),
+            assets_dir: None,
+            events: events.clone(),
+        };
+        let config = RelayConfig {
+            id: Uuid::new_v4().simple().to_string(),
+            service: "https://example.com".into(),
+            key: random_token(),
+            desktop_token: random_token(),
+        };
+        let request = |method, path, body: &str, headers| {
+            let packet = request_packet(&config, method, path, body, headers);
+            let clear = decrypt(&config, &packet).unwrap();
+            let response = dispatch(&host, clear, &config.service);
+            response_payload(
+                &config,
+                &packet.id,
+                serde_json::from_str(&encrypt(&config, &packet.id, response).unwrap()).unwrap(),
+            )
+        };
+        let account = r##"{"id":"relay-account","name":"Remote","type":"Courant","initialBalance":100,"color":"#3b82f6","icon":"Wallet"}"##;
+        let initial = engine.snapshot().unwrap();
+        assert_eq!(
+            request("POST", "/api/accounts", account, session_headers(&cookie, "wrong"))["status"],
+            401
+        );
+        assert_eq!(engine.snapshot().unwrap().data_version, initial.data_version);
+        assert!(events.0.lock().unwrap().is_empty());
+        assert_eq!(
+            request("POST", "/api/accounts", account, session_headers(&cookie, &csrf))["status"],
+            201
+        );
+        assert!(engine
+            .snapshot()
+            .unwrap()
+            .accounts
+            .iter()
+            .any(|account| account.id == "relay-account"));
+        let transaction = r#"{"id":"relay-transaction","date":"2026-10-02","accountId":"relay-account","type":"expense","amount":12.5,"category":"5","description":"Sent from phone","checked":false}"#;
+        assert_eq!(
+            request(
+                "POST",
+                "/api/transactions",
+                transaction,
+                session_headers(&cookie, &csrf)
+            )["status"],
+            201
+        );
+        let after_create = engine.snapshot().unwrap();
+        assert_eq!(
+            after_create
+                .transactions
+                .iter()
+                .find(|tx| tx.id == "relay-transaction")
+                .unwrap()
+                .description,
+            "Sent from phone"
+        );
+        let edited = transaction.replace("Sent from phone", "Edited from phone");
+        assert_eq!(
+            request("PUT", "/api/transactions", &edited, session_headers(&cookie, &csrf))["status"],
+            200
+        );
+        assert_eq!(
+            engine
+                .snapshot()
+                .unwrap()
+                .transactions
+                .iter()
+                .find(|tx| tx.id == "relay-transaction")
+                .unwrap()
+                .description,
+            "Edited from phone"
+        );
+        assert_eq!(
+            request(
+                "DELETE",
+                "/api/transactions/relay-transaction",
+                "",
+                session_headers(&cookie, &csrf)
+            )["status"],
+            200
+        );
+        assert!(engine
+            .snapshot()
+            .unwrap()
+            .transactions
+            .iter()
+            .all(|tx| tx.id != "relay-transaction"));
+        let versions = events.0.lock().unwrap();
+        assert_eq!(versions.len(), 4, "each accepted mutation notifies the native desktop");
+        assert!(versions.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(versions.last().copied(), Some(engine.snapshot().unwrap().data_version));
+    }
     #[test]
     fn authenticated_encryption_separates_directions_and_detects_tampering() {
         let config = RelayConfig {
@@ -640,6 +901,75 @@ mod tests {
     }
 
     #[test]
+    fn moving_the_same_device_to_pages_revokes_old_credentials_but_preserves_new_qr() {
+        let engine = dmx_core::Engine::open_in_memory().unwrap();
+        let _ = finalized_session(&engine);
+        let config = RelayConfig {
+            id: Uuid::new_v4().simple().to_string(),
+            service: DEFAULT_REMOTE_RELAY_URL.into(),
+            key: random_token(),
+            desktop_token: random_token(),
+        };
+        engine.block_on(async {
+            schema(engine.pool()).await.unwrap();
+            sqlx::query("UPDATE settings SET \"secureBridgeDeviceId\"=$1, \"secureBridgeAppUrl\"=$2 WHERE id=1")
+                .bind(&config.id).bind(format!("{}/mobile/", config.service)).execute(engine.pool()).await.unwrap();
+            sqlx::query("INSERT INTO mobile_passkeys (id, credential_id, public_key, created_at) VALUES ('relay-mutation-passkey', 'old-worker-credential', '{}', $1)")
+                .bind(chrono::Utc::now().to_rfc3339()).execute(engine.pool()).await.unwrap();
+            let (old_qr, _) = secure::regenerate_pairing_token(engine.pool()).await.unwrap();
+            activate(engine.pool(), &config).await.unwrap();
+            let settings = secure::load_settings(engine.pool()).await.unwrap();
+            assert_eq!(settings.device_id.as_deref(), Some(config.id.as_str()), "device identity is retained");
+            assert_eq!(settings.app_url.as_deref(), Some(DEFAULT_COMPANION_URL));
+            for statement in [
+                "SELECT revoked_at FROM mobile_passkeys WHERE id='relay-mutation-passkey'",
+                "SELECT revoked_at FROM mobile_sessions WHERE id='relay-mutation-session'",
+            ] {
+                let revoked: Option<String> = sqlx::query_scalar(statement).fetch_one(engine.pool()).await.unwrap();
+                assert!(revoked.is_some(), "credentials for the old WebAuthn origin must be revoked");
+            }
+            let consumed: Option<String> = sqlx::query_scalar("SELECT consumed_at FROM mobile_pairing_tokens WHERE token_hash=$1")
+                .bind(secure::hash_secret(&old_qr)).fetch_one(engine.pool()).await.unwrap();
+            assert!(consumed.is_some());
+            let (new_qr, expires) = secure::regenerate_pairing_token(engine.pool()).await.unwrap();
+            activate(engine.pool(), &config).await.unwrap();
+            let consumed: Option<String> = sqlx::query_scalar("SELECT consumed_at FROM mobile_pairing_tokens WHERE token_hash=$1")
+                .bind(secure::hash_secret(&new_qr)).fetch_one(engine.pool()).await.unwrap();
+            assert!(consumed.is_none(), "activation at the same Pages origin keeps the new QR usable");
+            let status = build_status(engine.pool(), &config, true, true, Some((new_qr, expires))).await.unwrap();
+            assert_eq!(status.app_url.as_deref(), Some(DEFAULT_COMPANION_URL));
+            assert_eq!(status.api_url.as_deref(), Some(format!("{}/relay/{}", config.service, config.id).as_str()));
+            assert!(status.pairing_url.as_ref().unwrap().starts_with(&format!("{DEFAULT_COMPANION_URL}#pairing=")));
+        });
+    }
+
+    #[test]
+    fn unavailable_internet_activation_preserves_legacy_settings_and_pairing() {
+        let engine = dmx_core::Engine::open_in_memory().unwrap();
+        engine.block_on(async {
+            sqlx::query("UPDATE settings SET \"secureBridgeEnabled\"=0, \"secureBridgeDeviceId\"='legacy-device', \"secureBridgeDomain\"='legacy.example.com', \"secureBridgeAppUrl\"='https://legacy.example.com/mobile/', \"secureBridgeLocalHost\"='pc.legacy.example.com', \"secureBridgeDnsRecordId\"='old-dns', \"secureBridgeLastError\"='previous-error' WHERE id=1")
+                .execute(engine.pool()).await.unwrap();
+            let (old_qr, _) = secure::regenerate_pairing_token(engine.pool()).await.unwrap();
+            let before = secure::load_settings(engine.pool()).await.unwrap();
+            let error = secure::set_enabled(engine.pool(), std::path::Path::new("/unused-test-directory"), true).await.unwrap_err();
+            assert!(error.contains("Service d’accès Internet indisponible"));
+            let after = secure::load_settings(engine.pool()).await.unwrap();
+            assert_eq!(after.enabled, before.enabled);
+            assert_eq!(after.device_id, before.device_id);
+            assert_eq!(after.app_url, before.app_url);
+            assert_eq!(after.domain, before.domain);
+            assert_eq!(after.local_host, before.local_host);
+            assert_eq!(after.dns_record_id, before.dns_record_id);
+            assert_eq!(after.last_error, before.last_error);
+            let consumed: Option<String> = sqlx::query_scalar("SELECT consumed_at FROM mobile_pairing_tokens WHERE token_hash=$1")
+                .bind(secure::hash_secret(&old_qr)).fetch_one(engine.pool()).await.unwrap();
+            assert!(consumed.is_none(), "an unavailable relay must not invalidate existing pairing");
+            let relays: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM remote_relay").fetch_one(engine.pool()).await.unwrap();
+            assert_eq!(relays, 0);
+        });
+    }
+
+    #[test]
     #[ignore = "requires local Worker or DMXMONEY_RELAY_SMOKE_URL"]
     fn local_cloudflare_worker_round_trip_uses_encryption_auth_and_replay_protection() {
         // Native entry points install the same provider before creating the bridge.
@@ -649,53 +979,121 @@ mod tests {
         engine
             .block_on(sqlx::query("UPDATE settings SET \"secureBridgeEnabled\"=1 WHERE id=1").execute(engine.pool()))
             .unwrap();
-        let (pairing, _) = engine
-            .block_on(secure::regenerate_pairing_token(engine.pool()))
-            .unwrap();
+        let events = Arc::new(MutationEvents::default());
         let config = RelayConfig {
             id: Uuid::new_v4().simple().to_string(),
             service: std::env::var("DMXMONEY_RELAY_SMOKE_URL").unwrap_or_else(|_| "http://127.0.0.1:8789".into()),
             key: random_token(),
             desktop_token: random_token(),
         };
+        if config.service.starts_with("https://") {
+            engine.block_on(activate(engine.pool(), &config)).unwrap();
+        }
+        if let Ok(origin) = std::env::var("DMXMONEY_RELAY_SMOKE_ORIGIN") {
+            let origin = Url::parse(&origin).unwrap();
+            assert_eq!(origin.scheme(), "https");
+            assert_eq!(origin.path(), "/");
+            engine
+                .block_on(
+                    sqlx::query("UPDATE settings SET \"secureBridgeAppUrl\"=$1 WHERE id=1")
+                        .bind(format!("{}/mobile/", origin.origin().ascii_serialization()))
+                        .execute(engine.pool()),
+                )
+                .unwrap();
+        }
+        let (pairing, _) = engine
+            .block_on(secure::regenerate_pairing_token(engine.pool()))
+            .unwrap();
+        let (cookie, csrf) = finalized_session(&engine);
         let host = BridgeHost {
             pool: engine.pool().clone(),
             runtime: engine.handle(),
             data_dir: std::env::temp_dir(),
             assets_dir: None,
-            events: Arc::new(crate::NoopEvents),
+            events: events.clone(),
         };
         let stop = Arc::new(AtomicBool::new(false));
         let connected = Arc::new(AtomicBool::new(false));
         engine.block_on(async {
+            use futures_util::FutureExt;
             enroll(&config).await.unwrap();
             let task_host = host.clone(); let task_config = config.clone(); let task_stop = stop.clone(); let task_connected = connected.clone();
             let task = tokio::spawn(async move { run_connection(&task_host, &task_config, &task_stop, &task_connected).await });
+            let client = reqwest::Client::builder().timeout(Duration::from_secs(35)).build().unwrap();
+            // Clean up the test-only relay even if a network or mutation assertion fails.
+            let outcome = std::panic::AssertUnwindSafe(async {
             for _ in 0..100 { if connected.load(Ordering::SeqCst) { break; } tokio::time::sleep(Duration::from_millis(50)).await; }
             assert!(connected.load(Ordering::SeqCst));
-            let id = Uuid::new_v4().to_string();
-            let clear = serde_json::to_vec(&json!({ "id": id, "issuedAt": chrono::Utc::now().timestamp_millis(), "method": "POST", "path": "/auth/pairing/start", "body": serde_json::to_string(&json!({ "token": pairing, "deviceLabel": "Local smoke" })).unwrap() })).unwrap();
-            let mut nonce = [0; 12]; OsRng.fill_bytes(&mut nonce);
-            let ciphertext = cipher(&config, b"request").unwrap().encrypt(Nonce::from_slice(&nonce), clear.as_ref()).unwrap();
-            let packet = Envelope { id: id.clone(), nonce: URL_SAFE_NO_PAD.encode(nonce), ciphertext: URL_SAFE_NO_PAD.encode(ciphertext) };
-            let client = reqwest::Client::new();
-            for expected in [200, 409] {
-                let response = client.post(format!("{}/relay/{}/request", config.service, config.id)).bearer_auth(hash(&config.key)).json(&packet).send().await.unwrap();
-                assert_eq!(response.status().as_u16(), 200);
-                let encrypted: Envelope = response.json().await.unwrap();
-                assert_eq!(encrypted.id, id);
-                let nonce = URL_SAFE_NO_PAD.decode(encrypted.nonce).unwrap();
-                let ciphertext = URL_SAFE_NO_PAD.decode(encrypted.ciphertext).unwrap();
-                let bytes = cipher(&config, b"response").unwrap().decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref()).unwrap();
-                let result: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-                assert_eq!(result["status"], expected);
-                if expected == 200 { assert!(result["headers"]["set-cookie"].as_str().unwrap().contains("dmxmoney_session=")); }
+            let body = serde_json::to_string(&json!({ "token": pairing, "deviceLabel": "Live encrypted mutation test" })).unwrap();
+            let packet = request_packet(&config, "POST", "/auth/pairing/start", &body, HashMap::new());
+            let origin = std::env::var("DMXMONEY_RELAY_SMOKE_ORIGIN").unwrap_or_else(|_| config.service.clone());
+            if std::env::var("DMXMONEY_RELAY_SMOKE_ORIGIN").is_ok() {
+                let preflight = client.request(reqwest::Method::OPTIONS, format!("{}/relay/{}/request", config.service, config.id))
+                    .header("origin", &origin).header("access-control-request-method", "POST")
+                    .header("access-control-request-headers", "authorization, content-type").send().await.unwrap();
+                assert_eq!(preflight.status().as_u16(), 204);
+                assert_eq!(preflight.headers().get("access-control-allow-origin").and_then(|value| value.to_str().ok()), Some(origin.as_str()));
+                assert_eq!(preflight.headers().get("access-control-allow-methods").and_then(|value| value.to_str().ok()), Some("POST"));
             }
+            let unauthorized = client.post(format!("{}/relay/{}/request", config.service, config.id))
+                .header("origin", origin).bearer_auth(random_token()).json(&packet).send().await.unwrap();
+            assert_eq!(unauthorized.status().as_u16(), 401, "routing credential is checked before forwarding to desktop");
+            let mut pending_cookie = String::new();
+            for expected in [200, 409] {
+                let result = remote_request(&client, &config, &packet).await;
+                assert_eq!(result["status"], expected);
+                if expected == 200 {
+                    pending_cookie = result["headers"]["set-cookie"].as_str().unwrap().split(';').next().unwrap().trim_start_matches("dmxmoney_session=").into();
+                    assert!(!pending_cookie.is_empty());
+                }
+            }
+            let account = r##"{"id":"live-relay-account","name":"Live remote","type":"Courant","initialBalance":100,"color":"#3b82f6","icon":"Wallet"}"##;
+            for headers in [session_headers(&pending_cookie, &csrf), session_headers(&cookie, "wrong-csrf")] {
+                let denied = request_packet(&config, "POST", "/api/accounts", account, headers);
+                assert_eq!(remote_request(&client, &config, &denied).await["status"], 401);
+            }
+            assert!(events.0.lock().unwrap().is_empty(), "denied mutations must not notify the desktop");
+            let created = request_packet(&config, "POST", "/api/accounts", account, session_headers(&cookie, &csrf));
+            assert_eq!(remote_request(&client, &config, &created).await["status"], 201);
+            let transaction = r#"{"id":"live-relay-transaction","date":"2026-10-02","accountId":"live-relay-account","type":"expense","amount":12.5,"category":"5","description":"Written over public relay","checked":false}"#;
+            let created = request_packet(&config, "POST", "/api/transactions", transaction, session_headers(&cookie, &csrf));
+            assert_eq!(remote_request(&client, &config, &created).await["status"], 201);
+            let snapshot = tokio::task::block_in_place(|| engine.snapshot().unwrap());
+            assert_eq!(snapshot.transactions.iter().find(|tx| tx.id == "live-relay-transaction").unwrap().description, "Written over public relay");
+            let edited = transaction.replace("Written over public relay", "Edited over public relay");
+            let updated = request_packet(&config, "PUT", "/api/transactions", &edited, session_headers(&cookie, &csrf));
+            assert_eq!(remote_request(&client, &config, &updated).await["status"], 200);
+            let read = request_packet(&config, "GET", "/api/transactions", "", session_headers(&cookie, &csrf));
+            let result = remote_request(&client, &config, &read).await;
+            assert_eq!(result["status"], 200);
+            let remote_transactions: serde_json::Value = serde_json::from_str(result["body"].as_str().unwrap()).unwrap();
+            assert_eq!(remote_transactions[0]["description"], "Edited over public relay");
+            let snapshot = tokio::task::block_in_place(|| engine.snapshot().unwrap());
+            assert_eq!(snapshot.transactions.iter().find(|tx| tx.id == "live-relay-transaction").unwrap().description, "Edited over public relay");
+            let removed = request_packet(&config, "DELETE", "/api/transactions/live-relay-transaction", "", session_headers(&cookie, &csrf));
+            assert_eq!(remote_request(&client, &config, &removed).await["status"], 200);
+            let snapshot = tokio::task::block_in_place(|| engine.snapshot().unwrap());
+            assert!(snapshot.transactions.iter().all(|tx| tx.id != "live-relay-transaction"));
+            let versions = events.0.lock().unwrap().clone();
+            assert_eq!(versions.len(), 4);
+            assert!(versions.windows(2).all(|pair| pair[0] < pair[1]));
+            assert_eq!(versions.last().copied(), Some(snapshot.data_version));
+            secure::revoke_passkey(engine.pool(), "relay-mutation-passkey".into()).await.unwrap();
+            let denied = request_packet(&config, "POST", "/api/transactions", transaction, session_headers(&cookie, &csrf));
+            assert_eq!(remote_request(&client, &config, &denied).await["status"], 401);
+            assert_eq!(events.0.lock().unwrap().len(), 4);
+            }).catch_unwind().await;
             stop.store(true, Ordering::SeqCst);
             task.abort();
+            let _ = task.await;
             let cleanup = client.delete(format!("{}/relay/{}/enroll", config.service, config.id))
                 .bearer_auth(&config.desktop_token).send().await.unwrap();
             assert_eq!(cleanup.status().as_u16(), 204);
+            let removed = client.post(format!("{}/relay/{}/request", config.service, config.id))
+                .bearer_auth(hash(&config.key)).json(&request_packet(&config, "GET", "/api/status", "", session_headers(&cookie, &csrf)))
+                .send().await.unwrap();
+            assert_eq!(removed.status().as_u16(), 404, "test enrollment is deleted from the public Worker");
+            if let Err(panic) = outcome { std::panic::resume_unwind(panic); }
         });
     }
 }

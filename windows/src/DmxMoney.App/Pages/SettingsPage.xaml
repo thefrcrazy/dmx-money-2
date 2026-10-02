@@ -86,6 +86,10 @@
                                 </StackPanel>
                                 <ToggleSwitch Grid.Column="2" x:Name="BridgeSwitch" OnContent="Activé" OffContent="Activer" Toggled="OnBridgeToggled" />
                             </Grid>
+                            <StackPanel x:Name="LegacyBridgeMigration" Spacing="8" Visibility="Collapsed">
+                                <TextBlock x:Name="CompanionMigrationDetail" Style="{StaticResource DmxCaption}" TextWrapping="Wrap" />
+                                <Button x:Name="MigrateBridgeButton" Command="{x:Bind ViewModel.MigrateBridgeCommand}" Style="{StaticResource AccentButtonStyle}" />
+                            </StackPanel>
                             <Grid ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -138,8 +142,7 @@
                                         </Button>
                                     </StackPanel>
                                 </Border>
-                                <TextBlock
-                                    Text="Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. En accès Internet, le Wi-Fi, la 4G et la 5G fonctionnent ; l’ordinateur doit rester allumé et connecté. Un QR par appareil."
+                                <TextBlock x:Name="QrInstructions"
                                     Style="{StaticResource DmxCaption}"
                                     FontSize="11"
                                     TextWrapping="Wrap" />

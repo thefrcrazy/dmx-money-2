@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-22",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": { "COMPANION_ORIGIN": "https://dmxmoney-companion.pages.dev" },
   "assets": {
     "directory": ".assets",
     "binding": "ASSETS",

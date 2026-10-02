@@ -12,6 +12,17 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.0.9",
+        date: "2026-10-02",
+        title: "Compagnon Internet sur Cloudflare Pages",
+        changes: [
+            "PWA commune sur Cloudflare Pages, sans DNS individuel ni compte Cloudflare personnel.",
+            "Les modifications du téléphone passent par le relais chiffré et sont appliquées dans l’application de bureau.",
+            "Passage explicite depuis l’ancien accès local ou le précédent compagnon ; synchronisez les saisies en attente avant le nouvel appairage.",
+            "Le bureau doit rester allumé, connecté à Internet et DmxMoney ouvert."
+        ]
+    },
+    {
         version: "2.0.8",
         date: "2026-10-02",
         title: "Compagnon mobile à distance",

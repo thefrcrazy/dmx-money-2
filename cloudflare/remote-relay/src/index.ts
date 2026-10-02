@@ -182,14 +182,36 @@ export default {
     const route = /^\/relay\/([a-f0-9]{32})\/(enroll|connect|request)$/.exec(url.pathname);
     if (route) {
       if (!ID.test(route[1])) return json({ error: 'not_found' }, 404);
-      // Browser requests must come from the single companion origin; the desktop uses no Origin.
+      // The desktop has no Origin. Pages is the one additional browser origin;
+      // legacy Worker-hosted companions remain valid until explicit re-pairing.
       const origin = request.headers.get('origin');
-      if (origin && origin !== url.origin) return json({ error: 'forbidden_origin' }, 403);
+      const pagesOrigin = origin === env.COMPANION_ORIGIN;
+      if (origin && origin !== url.origin && !(pagesOrigin && route[2] === 'request')) return json({ error: 'forbidden_origin' }, 403);
+      if (request.method === 'OPTIONS') {
+        const method = request.headers.get('access-control-request-method');
+        const requestedHeaders = (request.headers.get('access-control-request-headers') ?? '')
+          .split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+        if (!pagesOrigin || route[2] !== 'request' || method !== 'POST'
+          || requestedHeaders.some(header => !['authorization', 'content-type'].includes(header))) {
+          return json({ error: 'forbidden_preflight' }, 403);
+        }
+        return new Response(null, { status: 204, headers: {
+          'access-control-allow-origin': env.COMPANION_ORIGIN,
+          'access-control-allow-methods': 'POST',
+          'access-control-allow-headers': 'Authorization, Content-Type',
+          'access-control-max-age': '600', 'vary': 'Origin', 'cache-control': 'no-store',
+        } });
+      }
       if (route[2] === 'enroll') {
         const result = await env.ENROLLMENT_LIMIT.limit({ key: request.headers.get('cf-connecting-ip') ?? 'unknown' });
         if (!result.success) return json({ error: 'rate_limited' }, 429);
       }
-      return env.RELAYS.getByName(route[1]).fetch(request);
+      const response = await env.RELAYS.getByName(route[1]).fetch(request);
+      if (!pagesOrigin) return response;
+      const headers = new Headers(response.headers);
+      headers.set('access-control-allow-origin', env.COMPANION_ORIGIN);
+      headers.set('vary', 'Origin');
+      return new Response(response.body, { status: response.status, headers });
     }
     if (url.pathname.startsWith('/relay/')) return json({ error: 'not_found' }, 404);
     if (url.pathname === '/' || url.pathname === '/mobile') return Response.redirect(`${url.origin}/mobile/`, 302);

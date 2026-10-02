@@ -3,8 +3,8 @@ import Foundation
 
 /// Démarrage du pont compagnon mobile, commun aux deux variantes macOS.
 ///
-/// L'app embarque le client PWA : le pont le sert lui-même, et le QR d'appairage pointe vers
-/// le pont local plutôt que vers la PWA publique déployée sur le Worker.
+/// Le compagnon Internet ouvre une connexion sortante au relais. Les ressources embarquées
+/// restent disponibles pour les installations qui utilisent encore le pont local hérité.
 enum BridgeLauncher {
     /// Dossier du client PWA dans le bundle. XcodeGen embarque le dossier sous son nom
     /// d'origine (`dist`) : les deux noms sont acceptés.

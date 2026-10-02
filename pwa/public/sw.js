@@ -1,4 +1,4 @@
-const CACHE_NAME = "dmxmoney-shell-2.0.8";
+const CACHE_NAME = "dmxmoney-shell-2.0.9";
 const BUILD_ASSETS = [];
 const APP_SHELL = [
   "./",

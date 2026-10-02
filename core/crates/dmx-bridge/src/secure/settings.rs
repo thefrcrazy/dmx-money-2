@@ -2,10 +2,14 @@ use super::*;
 
 pub async fn ensure_auto_configuration(pool: &DbPool, data_dir: &Path) -> Result<(), String> {
     let current = load_settings(pool).await?;
-    if (current.device_id.is_none() || current.local_host.is_none())
-        && crate::companion::relay::try_provision(pool).await?
-    {
-        return Ok(());
+    // Preserve an existing local pairing until the user explicitly migrates. New
+    // installations must never silently fall back to per-device DNS provisioning.
+    if current.device_id.is_none() || current.local_host.is_none() {
+        return if crate::companion::relay::try_provision(pool).await? {
+            Ok(())
+        } else {
+            Err("Service d’accès Internet indisponible. Réessayez après reconnexion ; aucun DNS individuel n’est nécessaire.".into())
+        };
     }
     let has_secret = has_managed_device_secret();
     let has_valid_certificate = current
@@ -201,10 +205,12 @@ pub(super) async fn provision_managed_device(
     Ok(())
 }
 
-pub async fn set_enabled(pool: &DbPool, data_dir: &Path, enabled: bool) -> Result<(), String> {
+pub async fn set_enabled(pool: &DbPool, _data_dir: &Path, enabled: bool) -> Result<(), String> {
     log::info!("Secure bridge set_enabled requested: enabled={enabled}");
-    if enabled && !crate::companion::relay::try_provision(pool).await? {
-        ensure_auto_configuration(pool, data_dir).await?;
+    if enabled {
+        // This is an explicit Internet activation, including migration from a
+        // legacy local identity. A failed relay must not be reported as local success.
+        crate::companion::relay::enable_internet(pool).await?;
     }
 
     sqlx::query("UPDATE settings SET \"secureBridgeEnabled\" = $1 WHERE id = 1")
