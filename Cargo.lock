@@ -1067,7 +1067,7 @@ dependencies = [
 
 [[package]]
 name = "dmx-bridge"
-version = "2.0.6"
+version = "2.0.7"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -1096,7 +1096,7 @@ dependencies = [
 
 [[package]]
 name = "dmx-core"
-version = "2.0.6"
+version = "2.0.7"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1113,7 +1113,7 @@ dependencies = [
 
 [[package]]
 name = "dmx-ffi"
-version = "2.0.6"
+version = "2.0.7"
 dependencies = [
  "chrono",
  "dmx-bridge",
@@ -1125,7 +1125,7 @@ dependencies = [
 
 [[package]]
 name = "dmx-money-gtk"
-version = "2.0.6"
+version = "2.0.7"
 dependencies = [
  "async-channel",
  "cairo-rs",
@@ -3500,7 +3500,7 @@ dependencies = [
 
 [[package]]
 name = "seed-demo"
-version = "2.0.6"
+version = "2.0.7"
 dependencies = [
  "chrono",
  "dmx-core",
@@ -4381,7 +4381,7 @@ dependencies = [
 
 [[package]]
 name = "uniffi-bindgen"
-version = "2.0.6"
+version = "2.0.7"
 dependencies = [
  "uniffi",
 ]

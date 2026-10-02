@@ -25,7 +25,7 @@
       <li>Échéancier à 13 périodicités, avec date de fin et lien vers un budget</li>
       <li>Analyses (historique des soldes, répartitions) et prédictions avec transactions fictives</li>
       <li>Imports CSV, QIF et OFX, sauvegardes <code>.dmx</code> (remplacement ou fusion)</li>
-      <li>Compagnon mobile : pont HTTPS local sécurisé par passkeys, appairage par QR</li>
+      <li>Compagnon mobile : relais distant chiffré, passkeys et appairage par QR</li>
     </ul>
     <p>
       Le même noyau Rust calcule les montants sous Linux, macOS et Windows : les résultats sont
@@ -56,6 +56,11 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="2.0.7" date="2026-10-02">
+      <description>
+        <p>Compagnon mobile distant chiffré sans configuration DNS, journal plus rapide et validation renforcée des imports et de la synchronisation.</p>
+      </description>
+    </release>
     <release version="2.0.2-rc.1" date="2026-09-15">
       <description>
         <p>Pré-version 2.0.2 : refonte iOS de la PWA mobile et icônes natives.</p>

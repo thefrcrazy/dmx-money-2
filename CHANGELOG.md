@@ -1,15 +1,16 @@
 # Changelog
 
-## Non publié
+## 2.0.7 - 2026-10-02
 
 - Compagnon Internet : relais Cloudflare commun, connexion WSS sortante du bureau, messages chiffrés AES-GCM et appairage par QR/passkey sans configuration DNS individuelle.
 - Journal : affichage mobile progressif, calculs et mises à jour de listes natives optimisés sur SwiftUI/AppKit, WinUI et GTK.
 - Imports et restauration : validation des dates et montants avant écriture, transactions atomiques et conservation des dépenses distinctes identiques.
 - Synchronisation : protection des accusés de réception CloudKit, changement de compte iCloud, cohérence des snapshots et validation des mutations distantes.
-- Distribution Windows : signature Authenticode publique exigée avant publication, contrôle des exécutables/DLL et des paquets, installation des mises à jour après confirmation.
+- Distribution Windows : mode autosigné explicitement choisi pour cette version ; contrôle des signatures, exécutables/DLL et paquets, installation des mises à jour après confirmation. Le mode Public Trust reste bloqué si son identité publique n'est pas configurée.
 - Builds Windows de développement : signature autosignée locale avec certificat RSA et clé privée non exportable ; diagnostic explicite quand Windows bloque le lancement de l’updater. Le mode administrateur ne contourne pas Smart App Control.
 - Updater Windows : contrôle final taille/SHA-256 du paquet complet, y compris s'il est déjà en cache ; refus d'un fichier altéré et verrou de lecture jusqu'au lancement de l'installation.
 - Cache mobile : valeurs financières et corps des messages hors ligne obfusqués en UTF-8/base64 ; migration atomique sans suppression des saisies en attente. Cet encodage reste décodable et ne constitue pas un chiffrement.
+- Les installeurs Windows de cette version utilisent un certificat autosigné Developmax / Collignon Maxim. Ils ne garantissent pas l'acceptation par Smart App Control ; le mode administrateur ne contourne pas ce blocage.
 
 ## 2.0.6 - 2026-09-17
 

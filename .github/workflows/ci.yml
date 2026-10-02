@@ -174,7 +174,7 @@ jobs:
             -PublicCertificatePath (Join-Path $env:RUNNER_TEMP 'DmxMoney-ci-signing.cer') -ValidDays 1
           try {
             ./scripts/build-windows.ps1 -Rid win-x64 `
-              -DevelopmentCertificateThumbprint $testCertificate.Thumbprint
+              -DevelopmentCertificateThumbprint $testCertificate.Thumbprint -SelfSignedRelease -EphemeralSigningIdentity
           }
           finally {
             Remove-Item -LiteralPath "Cert:/CurrentUser/My/$($testCertificate.Thumbprint)" -DeleteKey -Force

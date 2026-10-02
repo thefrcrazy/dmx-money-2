@@ -49,6 +49,10 @@ jobs:
             echo "::error::Version invalide : 2.x.y ou 2.x.y-prerelease requis."
             exit 1
           fi
+          if [ "$version" != "$(cat VERSION)" ]; then
+            echo "::error::La version demandée doit correspondre à VERSION avant toute construction."
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "==> version $version"
 
@@ -172,12 +176,20 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      WINDOWS_SIGNING_MODE: ${{ vars.WINDOWS_SIGNING_MODE || 'public-trust' }}
     strategy:
       matrix:
         rid: [win-x64, win-arm64]
     steps:
       - uses: actions/checkout@v4
-      - name: Configuration de signature Windows obligatoire
+      - name: Mode de signature Windows explicite
+        run: |
+          if ($env:WINDOWS_SIGNING_MODE -notin @('public-trust', 'self-signed')) {
+            throw 'WINDOWS_SIGNING_MODE doit être public-trust ou self-signed.'
+          }
+      - name: Configuration de signature publique obligatoire
+        if: env.WINDOWS_SIGNING_MODE == 'public-trust'
         env:
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
@@ -192,6 +204,7 @@ jobs:
             }
           }
       - uses: azure/login@v2
+        if: env.WINDOWS_SIGNING_MODE == 'public-trust'
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
@@ -209,23 +222,68 @@ jobs:
       - run: dotnet tool install -g vpk --version 0.0.1298
       - name: Client Microsoft et métadonnées de signature
         id: signing
+        if: env.WINDOWS_SIGNING_MODE == 'public-trust'
         env:
           SIGNING_ENDPOINT: ${{ vars.WINDOWS_SIGNING_ENDPOINT }}
           SIGNING_ACCOUNT: ${{ vars.WINDOWS_SIGNING_ACCOUNT }}
           SIGNING_PROFILE: ${{ vars.WINDOWS_SIGNING_PROFILE }}
         run: |
           ./scripts/prepare-windows-signing.ps1 -Endpoint $env:SIGNING_ENDPOINT -AccountName $env:SIGNING_ACCOUNT -CertificateProfileName $env:SIGNING_PROFILE -OutputDirectory (Join-Path $env:RUNNER_TEMP 'windows-signing')
-      - name: Application et installeur Velopack
+      - name: Identité autosignée stable (sans ajout de confiance)
+        if: env.WINDOWS_SIGNING_MODE == 'self-signed'
+        id: self_signing
+        env:
+          WINDOWS_SELF_SIGNED_PFX: ${{ secrets.WINDOWS_SELF_SIGNED_PFX }}
+          WINDOWS_SELF_SIGNED_PASSWORD: ${{ secrets.WINDOWS_SELF_SIGNED_PASSWORD }}
+          EXPECTED_THUMBPRINT: ${{ vars.WINDOWS_SELF_SIGNED_THUMBPRINT }}
+        run: |
+          foreach ($name in @('WINDOWS_SELF_SIGNED_PFX', 'WINDOWS_SELF_SIGNED_PASSWORD', 'EXPECTED_THUMBPRINT')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Identité autosignée stable non configurée ($name). Aucun certificat temporaire ne sera publié."
+            }
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'dmxmoney-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_SELF_SIGNED_PFX))
+            $password = ConvertTo-SecureString $env:WINDOWS_SELF_SIGNED_PASSWORD -AsPlainText -Force
+            try {
+              $certificate = ./scripts/prepare-windows-self-signed-release.ps1 -PfxPath $pfxPath `
+                -PfxPassword $password -ExpectedThumbprint $env:EXPECTED_THUMBPRINT `
+                -PublicCertificatePath (Join-Path $env:RUNNER_TEMP 'dmxmoney-public.cer')
+              "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
+            }
+            finally { if ($password) { $password.Dispose() } }
+          }
+          finally {
+            if (Test-Path -LiteralPath $pfxPath) { Remove-Item -LiteralPath $pfxPath -Force }
+          }
+      - name: Application et installeur Public Trust
+        if: env.WINDOWS_SIGNING_MODE == 'public-trust'
         env:
           SIGN_TOOL: ${{ steps.signing.outputs.signtool }}
           SIGNING_DLIB: ${{ steps.signing.outputs.dlib }}
           SIGNING_METADATA: ${{ steps.signing.outputs.metadata }}
         run: |
           ./scripts/build-windows.ps1 -Rid ${{ matrix.rid }} -Version ${{ needs.version.outputs.version }} -RequireSigning -SignToolPath $env:SIGN_TOOL -SigningDlibPath $env:SIGNING_DLIB -SigningMetadataPath $env:SIGNING_METADATA
+      - name: Application et installeur autosigné
+        if: env.WINDOWS_SIGNING_MODE == 'self-signed'
+        env:
+          SIGNING_THUMBPRINT: ${{ steps.self_signing.outputs.thumbprint }}
+        run: |
+          ./scripts/build-windows.ps1 -Rid ${{ matrix.rid }} -Version ${{ needs.version.outputs.version }} `
+            -DevelopmentCertificateThumbprint $env:SIGNING_THUMBPRINT -SelfSignedRelease
+      - name: Suppression de la clé de signature du runner
+        if: always() && env.WINDOWS_SIGNING_MODE == 'self-signed'
+        env:
+          SIGNING_THUMBPRINT: ${{ steps.self_signing.outputs.thumbprint }}
+        run: |
+          if ($env:SIGNING_THUMBPRINT) {
+            Remove-Item -LiteralPath "Cert:/CurrentUser/My/$env:SIGNING_THUMBPRINT" -DeleteKey -Force
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.rid }}
-          path: target/windows/releases/${{ matrix.rid }}
+          path: target/windows/${{ env.WINDOWS_SIGNING_MODE == 'self-signed' && 'self-signed-releases' || 'releases' }}/${{ matrix.rid }}
           if-no-files-found: error
 
   linux:
@@ -271,6 +329,12 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: PWA embarquée
+        working-directory: pwa
+        run: bun install --frozen-lockfile && bun run build
       - uses: flathub-infra/flatpak-github-actions/flatpak-builder@master
         with:
           bundle: com.dmxmoney.app.flatpak

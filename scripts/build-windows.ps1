@@ -13,6 +13,8 @@ param(
     [string]$SigningDlibPath = "",
     [string]$SigningMetadataPath = "",
     [string]$DevelopmentCertificateThumbprint = "",
+    [switch]$SelfSignedRelease,
+    [switch]$EphemeralSigningIdentity,
     [switch]$RequireSigning
 )
 
@@ -34,12 +36,13 @@ try {
     }
     . (Join-Path $PSScriptRoot 'windows-development-signing.ps1')
     Assert-DevelopmentSigningOptions -Thumbprint $DevelopmentCertificateThumbprint -RequireSigning ([bool]$RequireSigning) `
-        -SkipInstaller ([bool]$SkipInstaller) -SigningDlibPath $SigningDlibPath -SigningMetadataPath $SigningMetadataPath
+        -SkipInstaller ([bool]$SkipInstaller) -SigningDlibPath $SigningDlibPath -SigningMetadataPath $SigningMetadataPath `
+        -SelfSignedRelease ([bool]$SelfSignedRelease) -EphemeralSigningIdentity ([bool]$EphemeralSigningIdentity)
     $developmentSigning = [bool]$DevelopmentCertificateThumbprint
     $signingConfigured = -not $developmentSigning -and ($SignToolPath -or $SigningDlibPath -or $SigningMetadataPath)
     if ($developmentSigning) {
         $DevelopmentCertificateThumbprint = $DevelopmentCertificateThumbprint.ToUpperInvariant()
-        $null = Get-DevelopmentCodeSigningCertificate -Thumbprint $DevelopmentCertificateThumbprint -RequirePrivateKey
+        $developmentCertificate = Get-DevelopmentCodeSigningCertificate -Thumbprint $DevelopmentCertificateThumbprint -RequirePrivateKey
         $SignToolPath = Get-WindowsSignTool -Path $SignToolPath
         Write-Warning 'Signature autosignée de développement : aucune confiance publique ; Smart App Control peut bloquer ces fichiers.'
     }
@@ -119,14 +122,14 @@ try {
     Write-Host "==> Installeur Velopack"
     # Un canal par architecture : les installeurs x64 et arm64 ont des noms distincts dans la
     # release, et l'app installée lit le flux de son canal (releases.<canal>.json).
-    $releaseKind = if ($developmentSigning) { 'development-releases' } else { 'releases' }
+    $releaseKind = if ($SelfSignedRelease) { 'self-signed-releases' } elseif ($developmentSigning) { 'development-releases' } else { 'releases' }
     $releases = Join-Path $root "target/windows/$releaseKind/$Rid"
     if (Test-Path -LiteralPath $releases) {
         Remove-Item -LiteralPath $releases -Recurse -Force
     }
     $packArguments = @(
         "pack", "--packId", "DmxMoney", "--packTitle", "DmxMoney", "--packVersion", $Version,
-        "--packDir", $publish, "--mainExe", "DmxMoney.exe", "--channel", $Rid,
+        "--packDir", $publish, "--mainExe", "DmxMoney.exe", "--channel", $Rid, "--runtime", $Rid,
         "--icon", (Join-Path $root "windows/src/DmxMoney.App/Assets/dmxmoney.ico"),
         "--outputDir", $releases
     )
@@ -151,6 +154,11 @@ try {
     if ($developmentSigning) {
         & (Join-Path $PSScriptRoot 'verify-windows-release.ps1') -ReleaseDirectory $releases -Rid $Rid `
             -DevelopmentCertificateThumbprint $DevelopmentCertificateThumbprint -SignToolPath $SignToolPath
+        if ($SelfSignedRelease) {
+            . (Join-Path $PSScriptRoot 'windows-self-signed-release.ps1')
+            Write-WindowsSelfSignedReleaseNotice -ReleaseDirectory $releases -Rid $Rid -Version $Version `
+                -Certificate $developmentCertificate -EphemeralSigningIdentity ([bool]$EphemeralSigningIdentity)
+        }
     }
     elseif ($signingConfigured) {
         & (Join-Path $PSScriptRoot "verify-windows-release.ps1") -ReleaseDirectory $releases -Rid $Rid -SignToolPath $SignToolPath

@@ -45,6 +45,22 @@ function Assert-TrustedSignature([string]$Path, [bool]$RequireDevelopmentPin = $
     & $SignToolPath verify /pa /all /tw $Path
 }
 
+function Assert-PayloadMachine([string]$Path, [uint16]$ExpectedMachine) {
+    $stream = [IO.File]::OpenRead($Path)
+    $reader = [IO.BinaryReader]::new($stream)
+    try {
+        if ($stream.Length -lt 64 -or $reader.ReadUInt16() -ne 0x5a4d) { throw "En-tête PE invalide : $Path" }
+        $stream.Position = 0x3c
+        $offset = $reader.ReadUInt32()
+        if ($offset -gt $stream.Length - 6) { throw "En-tête PE invalide : $Path" }
+        $stream.Position = $offset
+        if ($reader.ReadUInt32() -ne 0x4550 -or $reader.ReadUInt16() -ne $ExpectedMachine) {
+            throw "Architecture PE incorrecte pour $Rid : $Path"
+        }
+    }
+    finally { $reader.Dispose(); $stream.Dispose() }
+}
+
 Assert-TrustedSignature $setup $true
 $feed = Get-Content -LiteralPath $feedPath -Raw | ConvertFrom-Json
 $fullPackages = @($feed.Assets | Where-Object { $_.Type -eq "Full" })
@@ -75,12 +91,26 @@ foreach ($asset in $feed.Assets) {
 $extraction = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString("N"))
 try {
     [System.IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $ReleaseDirectory $fullPackages[0].FileName), $extraction)
+    $manifestPath = Join-Path $extraction 'DmxMoney.nuspec'
+    [xml]$manifest = Get-Content -LiteralPath $manifestPath -Raw
+    $manifestRid = $manifest.SelectSingleNode("/*[local-name()='package']/*[local-name()='metadata']/*[local-name()='rid']")
+    $manifestArchitecture = $manifest.SelectSingleNode("/*[local-name()='package']/*[local-name()='metadata']/*[local-name()='machineArchitecture']")
+    $expectedArchitecture = if ($Rid -eq 'win-arm64') { 'arm64' } else { 'x64' }
+    if (-not $manifestRid -or $manifestRid.InnerText -ne $Rid -or
+        -not $manifestArchitecture -or $manifestArchitecture.InnerText -ne $expectedArchitecture) {
+        throw "Architecture du manifeste incorrecte : $Rid attendu."
+    }
+    $expectedMachine = if ($Rid -eq 'win-arm64') { 0xaa64 } else { 0x8664 }
+    Assert-PayloadMachine (Join-Path $extraction 'lib/app/DmxMoney.exe') $expectedMachine
     $binaries = @(Get-ChildItem -LiteralPath $extraction -File -Recurse |
         Where-Object { $_.Extension -in @(".exe", ".dll") })
     if (-not ($binaries | Where-Object Name -eq "DmxMoney.exe") -or
         -not ($binaries | Where-Object Name -eq "dmx_ffi.dll") -or
         -not ($binaries | Where-Object Name -eq "Squirrel.exe")) {
         throw "Paquet incomplet : application, noyau ou moteur de mise à jour absent."
+    }
+    foreach ($nativeCore in $binaries | Where-Object Name -eq 'dmx_ffi.dll') {
+        Assert-PayloadMachine $nativeCore.FullName $expectedMachine
     }
     foreach ($binary in $binaries) {
         $ours = $binary.Name -match '\A(?:DmxMoney.*\.(?:exe|dll)|dmx_ffi\.dll)\z'

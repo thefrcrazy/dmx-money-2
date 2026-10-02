@@ -110,9 +110,16 @@ le projet ou un certificat auto-signé ne corrige pas ce blocage. La signature d
 l'application, le noyau Rust, les DLL et les exécutables générés par Velopack, dont Setup et
 Update. Voir [Microsoft : Smart App Control](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/overview).
 
-Le workflow utilise **Azure Artifact Signing**, profil **Public Trust**, avec authentification
-OIDC et aucun export de clé privée. La validation d'identité Microsoft et le compte Azure
-doivent être configurés réellement avant la première release signée :
+Le workflow choisit explicitement `WINDOWS_SIGNING_MODE` dans l'environnement GitHub
+`windows-signing` : `public-trust` par défaut, ou `self-signed` pour une publication gratuite
+avec une identité autosignée stable. Les deux modes refusent une configuration absente et
+ne basculent jamais automatiquement vers un paquet non signé. Le mode autosigné est décrit
+ci-dessous ; il ne nécessite aucun abonnement Azure.
+
+Le mode `public-trust` utilise **Azure Artifact Signing**, profil **Public Trust**, avec
+authentification OIDC et aucun export de clé privée. Cette intégration est optionnelle : la
+validation d'identité Microsoft et le compte Azure doivent être configurés réellement avant
+de l'utiliser. Un autre certificat d'autorité publique nécessite sa propre intégration :
 
 Public Trust accepte les organisations de l’Union européenne ; les validations individuelles
 sont actuellement limitées aux États-Unis et au Canada. Pour Developmax, utiliser l’identité
@@ -215,9 +222,61 @@ signature avec la clé publique épinglée puis recalcule le digest Authenticode
 SIP Windows. Il vérifie aussi cryptographiquement le jeton d’horodatage RFC 3161 et son lien
 avec la signature du fichier, ainsi que les tailles/SHA-256 des paquets. Ce contrôle local
 ne valide pas la confiance publique de l’éditeur ni de l’autorité d’horodatage.
-`-RequireSigning` et les paramètres Artifact Signing
-refusent toute combinaison avec `-DevelopmentCertificateThumbprint` ; le workflow public
-continue d’exiger une chaîne approuvée avec SignTool `/pa`.
+`-RequireSigning` et les paramètres Artifact Signing refusent toute combinaison avec
+`-DevelopmentCertificateThumbprint` et `-SelfSignedRelease` ; le mode `public-trust` continue
+d’exiger une chaîne approuvée avec SignTool `/pa`.
+
+### Publication gratuite autosignée avec identité stable
+
+Le mode `self-signed` réutilise le même certificat RSA 3072 bits et sa clé pour x64, arm64
+et les versions suivantes. Une nouvelle clé à chaque release ferait tourner l'identité
+et ne préserverait aucune confiance locale accordée au certificat précédent. Conserver
+un PFX **chiffré**, hors du dépôt et des assets publics, ainsi que son mot de passe séparé.
+Le certificat exporté par `new-windows-development-certificate.ps1` a une clé non exportable :
+ce script local ne peut pas fournir le PFX persistant destiné à la CI.
+
+Après autorisation du responsable de publication, configurer dans l'environnement GitHub
+`windows-signing`, limité aux références de publication autorisées :
+
+| Configuration | Type | Contenu |
+|---|---|---|
+| `WINDOWS_SIGNING_MODE` | variable | `self-signed` |
+| `WINDOWS_SELF_SIGNED_THUMBPRINT` | variable publique | empreinte SHA-1 attendue du certificat, 40 caractères HEX |
+| `WINDOWS_SELF_SIGNED_PFX` | secret | PFX chiffré encodé en Base64 |
+| `WINDOWS_SELF_SIGNED_PASSWORD` | secret | mot de passe du PFX |
+
+Le runner décode temporairement le PFX, appelle
+`prepare-windows-self-signed-release.ps1 -PfxPath ... -PfxPassword <SecureString>
+-ExpectedThumbprint ... -PublicCertificatePath ...`, puis supprime le fichier PFX.
+Le préflight importe en mémoire sans persistance et exige un seul certificat avec sa clé,
+le pin attendu, la validité courante, RSA 3072 minimum et l'usage Code Signing. L'import
+persistant force CNG avec `PFXImportCertStore`, magasin `CurrentUser/My`, sans drapeau
+d'exportabilité ni remplacement d'une clé existante. Le contrôle supplémentaire exige
+`RSACng.ExportPolicy=None`. Un certificat déjà présent est refusé, sans être supprimé ; un
+échec après création retire le certificat et sa nouvelle clé. Aucun magasin de confiance
+n'est modifié. Source : [PFXImportCertStore](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-pfximportcertstore).
+
+La construction utilise `-DevelopmentCertificateThumbprint <pin> -SelfSignedRelease`.
+Les résultats sont dans `target/windows/self-signed-releases/<rid>` et comprennent des
+noms distincts par architecture : Setup, paquet complet, flux Velopack,
+`DmxMoney-<rid>-self-signed.cer`, `WINDOWS-SIGNATURE-<rid>.json` et `.txt`. Ces notices
+déclarent explicitement l'absence de confiance publique et de garantie SAC ; le CER contient
+uniquement le certificat public. `-EphemeralSigningIdentity`, réservé à une publication
+explicitement temporaire, doit accompagner `-SelfSignedRelease` et annonce la rotation de
+l'identité. La CI de pull request teste uniquement ses propres fixtures temporaires.
+
+Les scripts vérifient réellement le CMS épinglé, le digest PE et l'horodatage, puis les
+tailles et SHA-256 des paquets. `--runtime <rid>` et `--channel <rid>` sont tous deux passés
+à Velopack ; la vérification contrôle le RID et l'architecture du manifeste ainsi que les
+en-têtes PE de l'app et du noyau natif. Les helpers Setup/Stub/Update Windows de Velopack
+`0.0.1298` sont communs aux architectures : il ne faut pas les annoncer comme binaires
+natifs ARM64. Le workflow supprime le certificat et sa clé privée du runner après le build.
+L'identité stable est conservée dans les secrets de publication, jamais dans les artefacts.
+
+Le test Windows ajoute un vrai import PFX CNG non exportable et une signature horodatée,
+le refus d'un mauvais pin, d'un PFX contenant plusieurs certificats et d'un remplacement,
+ainsi que le retrait certificat/clé après échec d'export public puis le réimport réussi.
+Les tests portables vérifient la séparation des modes et les notices CER/JSON x64/arm64.
 
 `pwsh scripts/tests/test-windows-release.ps1` contrôle les options sur toutes les plateformes.
 Sous Windows, il crée en plus un certificat éphémère non approuvé, signe une copie de fixture

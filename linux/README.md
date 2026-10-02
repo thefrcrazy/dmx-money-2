@@ -91,6 +91,10 @@ flatpak run com.dmxmoney.app
 ./scripts/build-linux-appimage.sh        # target/appimage/DmxMoney-<version>-x86_64.AppImage
 ```
 
+L'AppImage publiée est construite sous Ubuntu 24.04. La CI utilise `appimagetool` sans
+`linuxdeploy` : GTK 4.12+ et libadwaita 1.5+ doivent donc être présents sur la machine.
+Les distributions plus anciennes ne sont pas validées ; le Flatpak fournit le runtime GNOME.
+
 Le Flatpak demande : réseau (pont HTTPS local), trousseau
 (`org.freedesktop.secrets`, service « DmxMoney Secure Bridge »), `StatusNotifierWatcher`
 pour l'icône de zone de notification. Les imports et exports passent par le portail de
@@ -107,12 +111,14 @@ fichiers, sans accès disque supplémentaire.
 
 ## Compagnon mobile
 
-Le pont HTTPS local est le même que sur macOS et Windows (`dmx-bridge`). La PWA est servie
-depuis `$PREFIX/share/dmx-money/pwa` quand `pwa/dist` a été construit avant l'installation :
+Le relais distant chiffré est le même que sur macOS et Windows (`dmx-bridge`). Il utilise
+le Worker commun sans configuration DNS personnelle ; l'ordinateur doit rester allumé.
+Le pont local reste disponible. Sa PWA est servie depuis `$PREFIX/share/dmx-money/pwa`
+quand `pwa/dist` a été construit avant l'installation :
 
 ```bash
 cd pwa && bun install && bun run build
 ```
 
-Sans ce dossier, le pont expose l'API locale et la PWA peut être ouverte depuis l'URL publique
-du pont managé.
+Le client du relais distant est servi par le Worker. Les paquets AppImage et Flatpak embarquent
+aussi la PWA locale ; pendant le développement, le pont recherche `pwa/dist` dans les sources.

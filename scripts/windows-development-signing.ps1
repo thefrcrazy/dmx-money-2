@@ -1,9 +1,16 @@
 # Aides du mode de développement autosigné ; aucun magasin de confiance n'est modifié.
 function Assert-DevelopmentSigningOptions {
     param([string]$Thumbprint, [bool]$RequireSigning, [bool]$SkipInstaller,
-        [string]$SigningDlibPath, [string]$SigningMetadataPath)
+        [string]$SigningDlibPath, [string]$SigningMetadataPath,
+        [bool]$SelfSignedRelease, [bool]$EphemeralSigningIdentity)
+    if ($SelfSignedRelease -and -not $Thumbprint) {
+        throw "SelfSignedRelease exige DevelopmentCertificateThumbprint : aucune publication non signée."
+    }
+    if ($EphemeralSigningIdentity -and -not $SelfSignedRelease) {
+        throw "EphemeralSigningIdentity exige SelfSignedRelease."
+    }
     if (-not $Thumbprint) { return }
-    if ($Thumbprint -notmatch '^[0-9a-fA-F]{40}$') {
+    if ($Thumbprint -notmatch '\A[0-9a-fA-F]{40}\z') {
         throw "DevelopmentCertificateThumbprint invalide : 40 caractères hexadécimaux sont requis."
     }
     if ($RequireSigning -or $SigningDlibPath -or $SigningMetadataPath) {
