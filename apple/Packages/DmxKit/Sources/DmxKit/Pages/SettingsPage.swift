@@ -297,7 +297,7 @@ public struct SettingsPage: View {
                     Toggle(isOn: Binding(get: { enabled }, set: setBridgeEnabled)) {
                         Text("Activer").font(.system(size: 13, weight: .semibold))
                     }
-                    .accessibilityLabel("Activer le compagnon Internet")
+                    .accessibility(label: Text("Activer le compagnon Internet"))
                     .disabled(bridgeBusy || status == nil)
                 }
                 HStack(spacing: 8) {
