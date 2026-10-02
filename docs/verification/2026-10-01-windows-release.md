@@ -1,5 +1,9 @@
 # Vérification Windows, distribution et compagnon — 1 octobre 2026
 
+Ce rapport décrit les premières vérifications. La release 2.0.8 utilise désormais
+une identité autosignée stable autorisée par l'utilisateur : voir
+[la vérification finale du 2 octobre](2026-10-02-release-2.0.8.md).
+
 ## Changements
 
 - Les releases Windows exigent désormais une identité Azure Artifact Signing **Public Trust**

@@ -1,5 +1,8 @@
 # Audit et compagnon Internet — 1 octobre 2026
 
+Ce rapport décrit l'état du 1 octobre. La livraison bureau et PWA 2.0.8 est désormais
+publiée : voir [la vérification finale du 2 octobre](2026-10-02-release-2.0.8.md).
+
 ## Périmètre et livraison
 
 Revue du noyau Rust, imports/restauration, snapshots et synchronisation, pont mobile et
