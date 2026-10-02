@@ -4,7 +4,7 @@
 use crate::dates::format_date;
 use crate::db::DbPool;
 use crate::error::{CoreError, CoreResult, DbContext};
-use crate::metrics::{cents, euros};
+use crate::metrics::cents;
 use crate::models::{
     string_enum, Account, Category, Transaction, TransactionType, ACCOUNT_TYPES, DEFAULT_ACCOUNT_COLOR,
     DEFAULT_ACCOUNT_ICON, TRANSFER_CATEGORY_ID,
@@ -86,12 +86,16 @@ pub fn parse_delimited_rows(content: &str, separator: char, has_header: bool) ->
 
 /// Montant bancaire : `1 234,56 €`, `1,234.56`, `-12,5`… Une valeur illisible vaut 0.
 pub fn parse_bank_amount(value: &str) -> f64 {
+    parse_bank_amount_checked(value).unwrap_or(0.0)
+}
+
+fn parse_bank_amount_checked(value: &str) -> Option<f64> {
     let cleaned: String = value
         .chars()
         .filter(|character| !character.is_whitespace() && !matches!(character, '€' | '$' | '£'))
         .collect();
     if cleaned.is_empty() {
-        return 0.0;
+        return None;
     }
 
     let normalized = match (cleaned.rfind(','), cleaned.rfind('.')) {
@@ -103,8 +107,7 @@ pub fn parse_bank_amount(value: &str) -> f64 {
     normalized
         .parse::<f64>()
         .ok()
-        .filter(|amount| amount.is_finite())
-        .unwrap_or(0.0)
+        .filter(|amount| crate::metrics::is_valid_money(*amount))
 }
 
 fn take_digits(chars: &[char], start: usize, max: usize) -> (String, usize) {
@@ -120,9 +123,13 @@ fn take_digits(chars: &[char], start: usize, max: usize) -> (String, usize) {
 
 /// Date bancaire : `2026-05-18`, `2026/5/18`, `18/05/2026`, `18-05-26`. Aujourd'hui sinon.
 pub fn parse_bank_date(value: &str, today: NaiveDate) -> String {
+    parse_bank_date_checked(value).unwrap_or_else(|| format_date(today))
+}
+
+fn parse_bank_date_checked(value: &str) -> Option<String> {
     let raw = value.trim();
     if raw.is_empty() {
-        return format_date(today);
+        return None;
     }
     let chars: Vec<char> = raw.chars().collect();
     let is_separator =
@@ -135,7 +142,8 @@ pub fn parse_bank_date(value: &str, today: NaiveDate) -> String {
         if !month.is_empty() && is_separator(position, &['-', '/']) {
             let (day, _) = take_digits(&chars, position + 1, 2);
             if !day.is_empty() {
-                return format!("{year}-{month:0>2}-{day:0>2}");
+                return NaiveDate::from_ymd_opt(year.parse().ok()?, month.parse().ok()?, day.parse().ok()?)
+                    .map(format_date);
             }
         }
     }
@@ -148,12 +156,13 @@ pub fn parse_bank_date(value: &str, today: NaiveDate) -> String {
             let (year, end) = take_digits(&chars, position + 1, 4);
             if (2..=4).contains(&year.len()) && end == chars.len() {
                 let year = if year.len() == 2 { format!("20{year}") } else { year };
-                return format!("{year}-{month:0>2}-{day:0>2}");
+                return NaiveDate::from_ymd_opt(year.parse().ok()?, month.parse().ok()?, day.parse().ok()?)
+                    .map(format_date);
             }
         }
     }
 
-    format_date(today)
+    None
 }
 
 // --- QIF ---
@@ -162,7 +171,7 @@ pub fn parse_qif_date(value: &str, today: NaiveDate) -> String {
     parse_bank_date(value.replacen('\'', "/", 1).trim(), today)
 }
 
-pub fn parse_qif_transactions(content: &str, today: NaiveDate) -> CoreResult<Vec<ParsedStatementTransaction>> {
+pub fn parse_qif_transactions(content: &str, _today: NaiveDate) -> CoreResult<Vec<ParsedStatementTransaction>> {
     #[derive(Default)]
     struct Current {
         touched: bool,
@@ -174,20 +183,25 @@ pub fn parse_qif_transactions(content: &str, today: NaiveDate) -> CoreResult<Vec
 
     let mut transactions = Vec::new();
     let mut current = Current::default();
-    let commit = |current: &mut Current, transactions: &mut Vec<ParsedStatementTransaction>| {
+    let commit = |current: &mut Current, transactions: &mut Vec<ParsedStatementTransaction>| -> CoreResult<()> {
         if !current.touched {
-            return;
+            return Ok(());
         }
         let taken = std::mem::take(current);
         transactions.push(ParsedStatementTransaction {
-            date: taken.date.unwrap_or_else(|| format_date(today)),
-            amount: taken.amount.unwrap_or(0.0),
+            date: taken
+                .date
+                .ok_or_else(|| CoreError::import("Date QIF manquante ou invalide."))?,
+            amount: taken
+                .amount
+                .ok_or_else(|| CoreError::import("Montant QIF manquant ou invalide."))?,
             description: taken
                 .description
                 .filter(|description| !description.is_empty())
                 .unwrap_or_else(|| "Transaction QIF".to_string()),
             category: taken.category.filter(|category| !category.is_empty()),
         });
+        Ok(())
     };
 
     for line in content.lines() {
@@ -200,14 +214,14 @@ pub fn parse_qif_transactions(content: &str, today: NaiveDate) -> CoreResult<Vec
         let value = characters.as_str().trim();
 
         match field {
-            Some('^') => commit(&mut current, &mut transactions),
+            Some('^') => commit(&mut current, &mut transactions)?,
             Some('D') => {
                 current.touched = true;
-                current.date = Some(parse_qif_date(value, today));
+                current.date = parse_bank_date_checked(value.replacen('\'', "/", 1).trim());
             }
             Some('T') => {
                 current.touched = true;
-                current.amount = Some(parse_bank_amount(value));
+                current.amount = parse_bank_amount_checked(value);
             }
             Some('P') | Some('M') => {
                 current.touched = true;
@@ -222,7 +236,7 @@ pub fn parse_qif_transactions(content: &str, today: NaiveDate) -> CoreResult<Vec
             _ => {}
         }
     }
-    commit(&mut current, &mut transactions);
+    commit(&mut current, &mut transactions)?;
 
     if transactions.is_empty() {
         return Err(CoreError::import(
@@ -254,16 +268,13 @@ fn ofx_tag_value(block: &str, tag: &str) -> String {
     decode_entities(rest[..end].trim())
 }
 
-fn parse_ofx_date(value: &str, today: NaiveDate) -> String {
-    let chars: Vec<char> = value.chars().collect();
-    if chars.len() < 8 {
-        return format_date(today);
-    }
-    let part = |start: usize, end: usize| chars[start..end].iter().collect::<String>();
-    format!("{}-{}-{}", part(0, 4), part(4, 6), part(6, 8))
+fn parse_ofx_date(value: &str) -> Option<String> {
+    NaiveDate::parse_from_str(value.get(..8)?, "%Y%m%d")
+        .ok()
+        .map(format_date)
 }
 
-pub fn parse_ofx_transactions(content: &str, today: NaiveDate) -> CoreResult<Vec<ParsedStatementTransaction>> {
+pub fn parse_ofx_transactions(content: &str, _today: NaiveDate) -> CoreResult<Vec<ParsedStatementTransaction>> {
     let lower = content.to_ascii_lowercase();
     let marker = "<stmttrn>";
     let starts: Vec<usize> = lower
@@ -276,7 +287,7 @@ pub fn parse_ofx_transactions(content: &str, today: NaiveDate) -> CoreResult<Vec
         ));
     }
 
-    Ok(starts
+    starts
         .iter()
         .enumerate()
         .map(|(index, start)| {
@@ -304,14 +315,17 @@ pub fn parse_ofx_transactions(content: &str, today: NaiveDate) -> CoreResult<Vec
                 "Transaction OFX".to_string()
             };
 
-            ParsedStatementTransaction {
-                date: parse_ofx_date(&ofx_tag_value(block, "DTPOSTED"), today),
-                amount: parse_bank_amount(&ofx_tag_value(block, "TRNAMT")),
+            Ok(ParsedStatementTransaction {
+                date: parse_ofx_date(&ofx_tag_value(block, "DTPOSTED"))
+                    .ok_or_else(|| CoreError::import(format!("Date OFX invalide pour l'opération {}.", index + 1)))?,
+                amount: parse_bank_amount_checked(&ofx_tag_value(block, "TRNAMT")).ok_or_else(|| {
+                    CoreError::import(format!("Montant OFX invalide pour l'opération {}.", index + 1))
+                })?,
                 description,
                 category: None,
-            }
+            })
         })
-        .collect())
+        .collect()
 }
 
 // --- Doublons ---
@@ -504,23 +518,26 @@ pub fn parse_statement(
                     .unwrap_or_default()
                     .to_string()
             };
-            Ok(rows
-                .iter()
-                .map(|row| {
+            rows.iter()
+                .enumerate()
+                .map(|(index, row)| {
                     let description = cell(row, mapping.description);
                     let category = cell(row, mapping.category);
-                    ParsedStatementTransaction {
-                        date: parse_bank_date(&cell(row, Some(date_column)), today),
-                        amount: parse_bank_amount(&cell(row, Some(amount_column))),
+                    Ok(ParsedStatementTransaction {
+                        date: parse_bank_date_checked(&cell(row, Some(date_column)))
+                            .ok_or_else(|| CoreError::import(format!("Date CSV invalide à la ligne {}.", index + 1)))?,
+                        amount: parse_bank_amount_checked(&cell(row, Some(amount_column))).ok_or_else(|| {
+                            CoreError::import(format!("Montant CSV invalide à la ligne {}.", index + 1))
+                        })?,
                         description: if description.is_empty() {
                             "Import CSV".to_string()
                         } else {
                             description
                         },
                         category: (!category.is_empty()).then_some(category),
-                    }
+                    })
                 })
-                .collect())
+                .collect()
         }
     }
 }
@@ -586,8 +603,19 @@ pub struct StatementImportResult {
 
 /// Solde initial d'un nouveau compte pour que le solde final corresponde au relevé.
 pub fn initial_balance_from_final(transactions: &[ParsedStatementTransaction], final_balance: f64) -> f64 {
-    let net: i64 = transactions.iter().map(|transaction| cents(transaction.amount)).sum();
-    euros(cents(final_balance) - net)
+    let mut seen = HashSet::new();
+    let net: i128 = transactions
+        .iter()
+        .filter(|transaction| {
+            seen.insert((
+                transaction.date.as_str(),
+                cents(transaction.amount),
+                normalize_search(&collapse_whitespace(&transaction.description)),
+            ))
+        })
+        .map(|transaction| i128::from(cents(transaction.amount)))
+        .sum();
+    (i128::from(cents(final_balance)) - net) as f64 / 100.0
 }
 
 pub async fn import_statement(pool: &DbPool, request: StatementImportRequest) -> CoreResult<StatementImportResult> {
@@ -595,14 +623,36 @@ pub async fn import_statement(pool: &DbPool, request: StatementImportRequest) ->
         return Err(CoreError::import("Aucune transaction à importer"));
     }
 
-    let accent = settings::load_app_settings(pool)
+    for (index, transaction) in request.transactions.iter().enumerate() {
+        if !crate::metrics::is_valid_money(transaction.amount) {
+            return Err(CoreError::validation(format!(
+                "Montant invalide à la ligne {}.",
+                index + 1
+            )));
+        }
+        if transaction.date.len() != 10 || crate::dates::parse_date(&transaction.date).is_none() {
+            return Err(CoreError::validation(format!(
+                "Date invalide à la ligne {}.",
+                index + 1
+            )));
+        }
+    }
+    if let ImportTarget::New {
+        final_balance: Some(balance),
+        ..
+    } = &request.target
+    {
+        if !crate::metrics::is_valid_money(*balance) {
+            return Err(CoreError::validation("Solde final invalide."));
+        }
+    }
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.ctx("import bancaire")?;
+    let accent = settings::load_app_settings(&mut *tx)
         .await?
         .accent_color()
         .map(str::to_string);
-    let existing = repo::list_transactions(pool).await?;
-    let categories = repo::list_categories(pool).await?;
-
-    let mut tx = pool.begin().await.ctx("import bancaire")?;
+    let existing = repo::list_transactions(&mut *tx).await?;
+    let categories = repo::list_categories(&mut *tx).await?;
 
     let account_id = match &request.target {
         ImportTarget::Existing(account_id) => {
@@ -649,7 +699,15 @@ pub async fn import_statement(pool: &DbPool, request: StatementImportRequest) ->
     let mut resolved: Vec<(String, String)> = Vec::new();
     for entry in &request.category_mapping {
         let category_id = match &entry.category_id {
-            Some(category_id) => category_id.clone(),
+            Some(category_id) => {
+                if category_id == TRANSFER_CATEGORY_ID || !categories.iter().any(|category| category.id == *category_id)
+                {
+                    return Err(CoreError::validation(
+                        "Catégorie d'import introuvable ou réservée aux virements.",
+                    ));
+                }
+                category_id.clone()
+            }
             None => {
                 let category = Category {
                     id: uuid::Uuid::new_v4().to_string(),
@@ -758,6 +816,80 @@ mod tests {
         assert_eq!(parse_bank_date("2026/5/8 10:00", today()), "2026-05-08");
         assert_eq!(parse_bank_date("5-8-2026", today()), "2026-08-05");
         assert_eq!(parse_bank_date("n/a", today()), "2026-09-15");
+    }
+
+    #[test]
+    fn statement_parsers_reject_invalid_amounts_and_dates() {
+        for content in ["31/02/2026;-12", "18/05/2026;not-money", "18/05/2026;NaN"] {
+            assert!(parse_statement(StatementFormat::Csv, content, None, today()).is_err());
+        }
+        assert!(parse_qif_transactions("!Type:Bank\nD31/02'26\nT-12\n^", today()).is_err());
+        assert!(parse_qif_transactions("!Type:Bank\nD18/05'26\nTbad\n^", today()).is_err());
+        assert!(parse_ofx_transactions("<STMTTRN><DTPOSTED>20260231<TRNAMT>-12", today()).is_err());
+        assert!(parse_ofx_transactions("<STMTTRN><DTPOSTED>20260518<TRNAMT>bad", today()).is_err());
+    }
+
+    #[tokio::test]
+    async fn duplicated_lines_do_not_change_the_final_balance_of_a_new_account() {
+        let pool = open_memory_pool().await.unwrap();
+        ensure_initial_data(&pool).await.unwrap();
+        let transaction = ParsedStatementTransaction {
+            date: "2026-09-15".into(),
+            amount: -20.0,
+            description: "Café".into(),
+            category: None,
+        };
+        let result = import_statement(
+            &pool,
+            StatementImportRequest {
+                transactions: vec![transaction.clone(), transaction],
+                target: ImportTarget::New {
+                    name: "Compte".into(),
+                    account_type: "Courant".into(),
+                    final_balance: Some(100.0),
+                },
+                category_mapping: vec![],
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!((result.imported, result.duplicates), (1, 1));
+        let snapshot = crate::snapshot::load(&pool).await.unwrap();
+        assert_eq!(snapshot.accounts[0].initial_balance, 120.0);
+        assert_eq!(crate::metrics::balance_summary(&snapshot, &[]).current_balance, 100.0);
+    }
+
+    #[tokio::test]
+    async fn invalid_import_request_leaves_the_database_unchanged() {
+        let pool = open_memory_pool().await.unwrap();
+        ensure_initial_data(&pool).await.unwrap();
+        for (date, amount) in [
+            ("2026-02-31", -12.0),
+            ("2026-09-15", f64::NAN),
+            ("2026-09-15", f64::INFINITY),
+        ] {
+            let result = import_statement(
+                &pool,
+                StatementImportRequest {
+                    transactions: vec![ParsedStatementTransaction {
+                        date: date.into(),
+                        amount,
+                        description: "Test".into(),
+                        category: None,
+                    }],
+                    target: ImportTarget::New {
+                        name: "Compte".into(),
+                        account_type: "Courant".into(),
+                        final_balance: None,
+                    },
+                    category_mapping: vec![],
+                },
+            )
+            .await;
+            assert!(result.is_err());
+            assert!(repo::list_accounts(&pool).await.unwrap().is_empty());
+            assert!(repo::list_transactions(&pool).await.unwrap().is_empty());
+        }
     }
 
     #[test]

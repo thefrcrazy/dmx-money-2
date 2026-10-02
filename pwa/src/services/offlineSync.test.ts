@@ -74,3 +74,27 @@ test('a concurrent local edit is not overwritten by an older GET response', asyn
     expect(await new DatabaseService().getAccounts()).toEqual([{ id: 'local' }] as never);
     expect(data.accounts).toEqual([{ id: 'local' }]);
 });
+
+test('legacy queued settings JSON fields are decoded and transmitted exactly once', async () => {
+    queue = [{ id: 'groups', path: '/api/settings', method: 'PATCH', body: JSON.stringify({
+        schemaVersion: 2, baseRevision: 1, values: { accountGroups: JSON.stringify({ a: 'group' }) },
+        expectedValues: { accountGroups: JSON.stringify({}) },
+    }) }];
+    let transmitted: { values: { accountGroups: string }; expectedValues: { accountGroups: string } } | undefined;
+    globalThis.fetch = mock(async (input: string, init: RequestInit) => {
+        if (new URL(input).pathname === '/api/settings') transmitted = JSON.parse(init.body as string);
+        return Response.json({ ok: true, dataVersion: 3, revision: 2, conflicts: [] });
+    }) as never;
+    Object.assign(window, { dispatchEvent: () => true });
+    await new DatabaseService().getSyncStatus();
+    expect(transmitted?.values.accountGroups).toBe('{"a":"group"}');
+    expect(transmitted?.expectedValues.accountGroups).toBe('{}');
+    expect(queue).toHaveLength(0);
+});
+
+test('unreadable settings mutations remain in the offline queue', async () => {
+    queue = [{ id: 'broken', path: '/api/settings', method: 'PATCH', body: '{invalid' }];
+    globalThis.fetch = mock(async () => Response.json({ ok: true, dataVersion: 1 })) as never;
+    await expect(new DatabaseService().getSyncStatus()).rejects.toThrow('illisible');
+    expect(queue).toHaveLength(1);
+});

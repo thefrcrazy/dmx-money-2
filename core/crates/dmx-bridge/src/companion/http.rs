@@ -9,12 +9,16 @@ struct ConnectionPermit(Arc<AtomicUsize>);
 
 impl ConnectionPermit {
     fn acquire(active: &Arc<AtomicUsize>) -> Option<Self> {
-        active
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
-                (count < MAX_CONNECTIONS).then_some(count + 1)
-            })
-            .ok()
-            .map(|_| Self(active.clone()))
+        let mut count = active.load(Ordering::SeqCst);
+        loop {
+            if count >= MAX_CONNECTIONS {
+                return None;
+            }
+            match active.compare_exchange_weak(count, count + 1, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => return Some(Self(active.clone())),
+                Err(current) => count = current,
+            }
+        }
     }
 }
 
@@ -219,7 +223,7 @@ fn parse_content_length(header_text: &str) -> Result<usize, String> {
     Ok(length.unwrap_or(0))
 }
 
-fn handle_request(request: HttpRequest, host: &BridgeHost, security: &ServerSecurity) -> HttpResponse {
+pub(super) fn handle_request(request: HttpRequest, host: &BridgeHost, security: &ServerSecurity) -> HttpResponse {
     let path = strip_query(&request.path);
 
     if request.method == "OPTIONS" {

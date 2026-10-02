@@ -35,7 +35,10 @@ const registerPwaServiceWorker = () => {
 
   const register = async () => {
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+      const mobilePath = window.location.pathname.startsWith('/mobile');
+      const registration = await navigator.serviceWorker.register(mobilePath ? '/mobile/sw.js' : '/sw.js', {
+        updateViaCache: 'none', scope: mobilePath ? '/mobile/' : '/',
+      });
       let checking = false;
       const checkForUpdate = async () => {
         if (checking || document.visibilityState !== 'visible' || !navigator.onLine) return;

@@ -8,7 +8,14 @@ param(
     [string]$Configuration = "Release",
     [ValidateSet("win-x64", "win-arm64")][string]$Rid = "win-x64",
     [string]$Version = "",
-    [switch]$SkipInstaller
+    [switch]$SkipInstaller,
+    [string]$SignToolPath = "",
+    [string]$SigningDlibPath = "",
+    [string]$SigningMetadataPath = "",
+    [string]$DevelopmentCertificateThumbprint = "",
+    [switch]$SelfSignedRelease,
+    [switch]$EphemeralSigningIdentity,
+    [switch]$RequireSigning
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,6 +27,34 @@ Push-Location $root
 try {
     if (-not $Version) {
         $Version = (Get-Content (Join-Path $root "VERSION")).Trim()
+    }
+    if ($Version -notmatch '^2\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$') {
+        throw "Version invalide : une version 2.x.y éventuellement suivie d'une pré-version est requise."
+    }
+    if ($RequireSigning -and $SkipInstaller) {
+        throw "RequireSigning exige la construction et la vérification de l'installeur."
+    }
+    . (Join-Path $PSScriptRoot 'windows-development-signing.ps1')
+    Assert-DevelopmentSigningOptions -Thumbprint $DevelopmentCertificateThumbprint -RequireSigning ([bool]$RequireSigning) `
+        -SkipInstaller ([bool]$SkipInstaller) -SigningDlibPath $SigningDlibPath -SigningMetadataPath $SigningMetadataPath `
+        -SelfSignedRelease ([bool]$SelfSignedRelease) -EphemeralSigningIdentity ([bool]$EphemeralSigningIdentity)
+    $developmentSigning = [bool]$DevelopmentCertificateThumbprint
+    $signingConfigured = -not $developmentSigning -and ($SignToolPath -or $SigningDlibPath -or $SigningMetadataPath)
+    if ($developmentSigning) {
+        $DevelopmentCertificateThumbprint = $DevelopmentCertificateThumbprint.ToUpperInvariant()
+        $developmentCertificate = Get-DevelopmentCodeSigningCertificate -Thumbprint $DevelopmentCertificateThumbprint -RequirePrivateKey
+        $SignToolPath = Get-WindowsSignTool -Path $SignToolPath
+        Write-Warning 'Signature autosignée de développement : aucune confiance publique ; Smart App Control peut bloquer ces fichiers.'
+    }
+    if ($RequireSigning -or $signingConfigured) {
+        foreach ($path in @($SignToolPath, $SigningDlibPath, $SigningMetadataPath)) {
+            if (-not $path -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                throw "Signature Windows requise : SignToolPath, SigningDlibPath et SigningMetadataPath doivent exister."
+            }
+        }
+        $SignToolPath = (Resolve-Path -LiteralPath $SignToolPath).Path
+        $SigningDlibPath = (Resolve-Path -LiteralPath $SigningDlibPath).Path
+        $SigningMetadataPath = (Resolve-Path -LiteralPath $SigningMetadataPath).Path
     }
     $target = if ($Rid -eq "win-arm64") { "aarch64-pc-windows-msvc" } else { "x86_64-pc-windows-msvc" }
 
@@ -44,6 +79,10 @@ try {
 
     Write-Host "==> Publication de l'application"
     $publish = Join-Path $root "target/windows/$Rid"
+    # Évite qu'un ancien build laisse des DLL ou assets supprimés dans le nouveau paquet.
+    if (Test-Path -LiteralPath $publish) {
+        Remove-Item -LiteralPath $publish -Recurse -Force
+    }
     $project = Join-Path $root "windows/src/DmxMoney.App/DmxMoney.App.csproj"
     # Sous dotnet, le Windows App SDK lance XamlCompiler.exe, qui échoue sans jamais afficher ses erreurs
     # (microsoft-ui-xaml#10027), et sa tâche .NET ne se charge pas avec MSBuild 18. Le MSBuild de
@@ -77,17 +116,53 @@ try {
     }
 
     if (-not (Get-Command vpk -ErrorAction SilentlyContinue)) {
-        Write-Host "==> Velopack absent : dotnet tool install -g vpk"
-        return
+        throw "Velopack absent : dotnet tool install -g vpk --version 0.0.1298"
     }
 
     Write-Host "==> Installeur Velopack"
     # Un canal par architecture : les installeurs x64 et arm64 ont des noms distincts dans la
     # release, et l'app installée lit le flux de son canal (releases.<canal>.json).
-    vpk pack --packId DmxMoney --packTitle DmxMoney --packVersion $Version `
-        --packDir $publish --mainExe DmxMoney.exe --channel $Rid `
-        --icon (Join-Path $root "windows/src/DmxMoney.App/Assets/dmxmoney.ico") `
-        --outputDir (Join-Path $root "target/windows/releases/$Rid")
+    $releaseKind = if ($SelfSignedRelease) { 'self-signed-releases' } elseif ($developmentSigning) { 'development-releases' } else { 'releases' }
+    $releases = Join-Path $root "target/windows/$releaseKind/$Rid"
+    if (Test-Path -LiteralPath $releases) {
+        Remove-Item -LiteralPath $releases -Recurse -Force
+    }
+    $packArguments = @(
+        "pack", "--packId", "DmxMoney", "--packTitle", "DmxMoney", "--packVersion", $Version,
+        "--packDir", $publish, "--mainExe", "DmxMoney.exe", "--channel", $Rid, "--runtime", $Rid,
+        "--icon", (Join-Path $root "windows/src/DmxMoney.App/Assets/dmxmoney.ico"),
+        "--outputDir", $releases
+    )
+    if ($developmentSigning) {
+        # /sha1 sélectionne le certificat dans CurrentUser/My ; le digest du fichier reste SHA-256.
+        $signTemplate = '"{0}" sign /s My /sha1 {1} /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 {{{{file...}}}}' -f `
+            $SignToolPath, $DevelopmentCertificateThumbprint
+        $packArguments += @('--signTemplate', $signTemplate)
+    }
+    elseif ($signingConfigured) {
+        # Velopack signe le payload ET les exécutables qu'il génère (Update, stub et Setup).
+        # Sa version 0.0.1298 ne fournit pas le dlib : on utilise le SDK et le client Microsoft
+        # explicitement installés par prepare-windows-signing.ps1, via le template officiel.
+        $signTemplate = '"{0}" sign /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib "{1}" /dmdf "{2}" {{{{file...}}}}' -f `
+            $SignToolPath, $SigningDlibPath, $SigningMetadataPath
+        $packArguments += @("--signTemplate", $signTemplate)
+    }
+    else {
+        Write-Warning "Build local non signé : il peut être bloqué par Smart App Control. Ne pas le publier."
+    }
+    vpk @packArguments
+    if ($developmentSigning) {
+        & (Join-Path $PSScriptRoot 'verify-windows-release.ps1') -ReleaseDirectory $releases -Rid $Rid `
+            -DevelopmentCertificateThumbprint $DevelopmentCertificateThumbprint -SignToolPath $SignToolPath
+        if ($SelfSignedRelease) {
+            . (Join-Path $PSScriptRoot 'windows-self-signed-release.ps1')
+            Write-WindowsSelfSignedReleaseNotice -ReleaseDirectory $releases -Rid $Rid -Version $Version `
+                -Certificate $developmentCertificate -EphemeralSigningIdentity ([bool]$EphemeralSigningIdentity)
+        }
+    }
+    elseif ($signingConfigured) {
+        & (Join-Path $PSScriptRoot "verify-windows-release.ps1") -ReleaseDirectory $releases -Rid $Rid -SignToolPath $SignToolPath
+    }
 }
 finally {
     Pop-Location

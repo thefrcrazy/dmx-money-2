@@ -1,5 +1,6 @@
 import { Account, Transaction, Category, ScheduledTransaction, Settings, Budget } from '../types';
 import { offlineStore, OfflineDataKey } from './offlineStore';
+import { clearMobileRelay, getMobileRelayEndpoint, isMobileRelayUnlocked, markMobileRelayAuthenticated, mobileTransportFetch } from './relayTransport';
 import {
     clearMobileCompanionLocalState,
     clearMobilePairingToken,
@@ -62,9 +63,16 @@ interface SettingsPatchResult {
 }
 
 class MobileNetworkError extends Error {
-    constructor(message = 'Serveur mobile local indisponible.') {
+    constructor(message = 'Ordinateur temporairement indisponible.') {
         super(message);
         this.name = 'MobileNetworkError';
+    }
+}
+
+class MobileHttpError extends Error {
+    constructor(readonly status: number, message: string) {
+        super(message);
+        this.name = 'MobileHttpError';
     }
 }
 
@@ -162,7 +170,18 @@ const parseQueuedSettingsMutation = (body?: string): SettingsMutation | null => 
     if (!body) return null;
     try {
         const parsed = JSON.parse(body) as SettingsMutation;
-        return typeof parsed === 'object' && parsed !== null ? parsed : null;
+        if (!parsed || Array.isArray(parsed) || !Number.isInteger(parsed.schemaVersion)
+            || !Number.isInteger(parsed.baseRevision) || parsed.baseRevision < 0) return null;
+        // Older queues contain the wire representation. Decode it before merging
+        // and encoding for transport, otherwise these fields become JSON strings twice.
+        for (const values of [parsed.values, parsed.expectedValues]) {
+            if (!values) continue;
+            for (const key of ['accountGroups', 'customGroups', 'customGroupsOrder', 'accountsOrder'] as const) {
+                const value = values[key];
+                if (typeof value === 'string') Object.assign(values, { [key]: JSON.parse(value) });
+            }
+        }
+        return parsed;
     } catch {
         return null;
     }
@@ -228,6 +247,7 @@ export class DatabaseService {
 
     async getCachedBankData() {
         if (!this.usesHttp()) return null;
+        if (!isMobileRelayUnlocked()) return null;
         const [accounts, transactions, categories, scheduled, budgets] = await Promise.all([
             offlineStore.getData('accounts'), offlineStore.getData('transactions'),
             offlineStore.getData('categories'), offlineStore.getData('scheduled'),
@@ -262,6 +282,7 @@ export class DatabaseService {
         retrySession = true,
         allowRecovery = true,
     ): Promise<T> {
+        if (path.startsWith('/api/') && !isMobileRelayUnlocked()) await this.ensureSecureMobileSession();
         const apiBaseUrl = getMobileApiBaseUrl();
         const method = init.method || 'GET';
         if (!apiBaseUrl) {
@@ -285,13 +306,12 @@ export class DatabaseService {
         }
 
         const controller = new AbortController();
-        const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
-        const url = new URL(path, apiBaseUrl || window.location.origin).toString();
+        const timeoutId = window.setTimeout(() => controller.abort(), getMobileRelayEndpoint() ? Math.max(timeoutMs, 30000) : timeoutMs);
 
         let response: Response;
         let text: string;
         try {
-            response = await fetch(url, {
+            response = await mobileTransportFetch(path, apiBaseUrl, {
                 ...init,
                 cache: 'no-store',
                 credentials: 'include',
@@ -311,14 +331,14 @@ export class DatabaseService {
                 return this.request<T>(path, init, timeoutMs, retrySession, false);
             }
             throw error instanceof DOMException
-                ? new MobileNetworkError('Serveur mobile local indisponible ou trop lent.')
+                ? new MobileNetworkError('Connexion à l’ordinateur indisponible ou trop lente.')
                 : new MobileNetworkError((error as TypeError).message);
         } finally {
             window.clearTimeout(timeoutId);
         }
 
         if ([408, 502, 503, 504].includes(response.status)) {
-            throw new MobileNetworkError('Pont local temporairement indisponible.');
+            throw new MobileNetworkError('Connexion à l’ordinateur temporairement indisponible.');
         }
         if (!response.ok) {
             let message = text || `Erreur HTTP ${response.status}`;
@@ -334,7 +354,7 @@ export class DatabaseService {
                     return this.request<T>(path, init, timeoutMs, false, allowRecovery);
                 }
             }
-            throw new Error(message);
+            throw new MobileHttpError(response.status, message);
         }
 
         if (!text) return undefined as T;
@@ -349,6 +369,7 @@ export class DatabaseService {
      */
     private async recoverMobileApiBaseUrl(): Promise<boolean> {
         if (!this.usesHttp()) return false;
+        if (getMobileRelayEndpoint()) return false;
         if (this.recoveryPromise) return this.recoveryPromise;
         if (Date.now() - this.lastRecoveryAt < this.recoveryCooldownMs) return false;
 
@@ -400,13 +421,11 @@ export class DatabaseService {
                 credentials: 'include',
                 signal: controller.signal,
             });
-            // An unauthenticated /api/status answers 401, which already proves the
-            // bridge is the one listening here. Session cookies ignore ports, so a
-            // 200 is possible too: check it really is our status payload.
-            if (response.status === 401) return true;
+            // A 401 from another process cannot establish the bridge's identity.
+            // Recover only with an authenticated status, since cookies ignore ports.
             if (!response.ok) return false;
             const payload = await response.json().catch(() => null);
-            return typeof payload?.dataVersion === 'number';
+            return payload?.ok === true && typeof payload?.dataVersion === 'number';
         } catch {
             return false;
         } finally {
@@ -439,8 +458,10 @@ export class DatabaseService {
     }
 
     private async ensureSecureMobileSession() {
-        if (!getMobileApiBaseUrl() || getMobileCsrfToken()) return;
+        if (!getMobileApiBaseUrl() || (getMobileCsrfToken() && isMobileRelayUnlocked())) return;
         if (this.sessionPromise) return this.sessionPromise;
+
+        if (!isMobileRelayUnlocked()) setMobileCsrfToken(null);
 
         this.sessionPromise = this.createSecureMobileSession().finally(() => {
             this.sessionPromise = null;
@@ -511,6 +532,8 @@ export class DatabaseService {
             console.warn('Mobile offline cache clear failed:', error);
         }
 
+        try { await clearMobileRelay(); } catch (error) { console.warn('Mobile relay key clear failed:', error); }
+
         clearMobileCompanionLocalState();
     }
 
@@ -520,11 +543,11 @@ export class DatabaseService {
         const headers = new Headers(init.headers);
         if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
         const controller = new AbortController();
-        const timeoutId = window.setTimeout(() => controller.abort(), this.requestTimeoutMs);
+        const timeoutId = window.setTimeout(() => controller.abort(), getMobileRelayEndpoint() ? 30000 : this.requestTimeoutMs);
         let response: Response;
         let text: string;
         try {
-            response = await fetch(new URL(path, apiBaseUrl).toString(), {
+            response = await mobileTransportFetch(path, apiBaseUrl, {
                 ...init,
                 cache: 'no-store',
                 credentials: 'include',
@@ -534,7 +557,7 @@ export class DatabaseService {
             text = await response.text();
         } catch (error) {
             if (error instanceof DOMException && error.name === 'AbortError') {
-                throw new MobileNetworkError('Pont HTTPS local indisponible ou trop lent.');
+                throw new MobileNetworkError('Connexion sécurisée indisponible ou trop lente.');
             }
             if (error instanceof TypeError) {
                 throw new MobileNetworkError(error.message);
@@ -544,7 +567,7 @@ export class DatabaseService {
             window.clearTimeout(timeoutId);
         }
         if ([408, 502, 503, 504].includes(response.status)) {
-            throw new MobileNetworkError('Pont local temporairement indisponible.');
+            throw new MobileNetworkError('Connexion à l’ordinateur temporairement indisponible.');
         }
         if (!response.ok) {
             let message = text || `Erreur HTTP ${response.status}`;
@@ -588,7 +611,9 @@ export class DatabaseService {
                 }
             })
         });
+        if (!session.ok || typeof session.csrfToken !== 'string' || !session.csrfToken) throw new Error('Session mobile non finalisée.');
         setMobileCsrfToken(session.csrfToken);
+        markMobileRelayAuthenticated();
         markMobilePasskeyReady();
     }
 
@@ -622,13 +647,15 @@ export class DatabaseService {
                 }
             })
         });
+        if (!session.ok || typeof session.csrfToken !== 'string' || !session.csrfToken) throw new Error('Session mobile non finalisée.');
         setMobileCsrfToken(session.csrfToken);
+        markMobileRelayAuthenticated();
         markMobilePasskeyReady();
     }
 
     private assertPasskeyAvailable() {
         if (!window.isSecureContext) {
-            throw new Error('La clé d’accès nécessite HTTPS. Ouvre la PWA depuis dmxmoney.develop-max.com.');
+            throw new Error('La clé d’accès nécessite HTTPS. Ouvrez la web app depuis le QR code de votre ordinateur.');
         }
         if (!window.PublicKeyCredential || !navigator.credentials) {
             throw new Error('Passkey indisponible dans ce navigateur.');
@@ -731,16 +758,61 @@ export class DatabaseService {
         return this.isMobileNetworkError(error);
     }
 
+    private async requestMobileTransactions(): Promise<Transaction[]> {
+        type Page = { transactions: Transaction[]; dataVersion: number; nextOffset: number | null };
+        const limit = 2000;
+        const maxTransactions = 1_000_000;
+        for (let attempt = 0; attempt <= 2; attempt += 1) {
+            let offset = 0;
+            let version: number | undefined;
+            const transactions: Transaction[] = [];
+            const ids = new Set<string>();
+            try {
+                while (true) {
+                    const suffix = version === undefined ? '' : `&version=${version}`;
+                    const page = await this.request<Page>(`/api/transactions/page?offset=${offset}&limit=${limit}${suffix}`);
+                    if (!page || !Array.isArray(page.transactions) || page.transactions.length > limit
+                        || !Number.isSafeInteger(page.dataVersion) || page.dataVersion < 0
+                        || (version !== undefined && page.dataVersion !== version)) {
+                        throw new Error('Page de transactions invalide. Le cache précédent est conservé.');
+                    }
+                    version = page.dataVersion;
+                    for (const transaction of page.transactions) {
+                        if (!transaction || typeof transaction.id !== 'string' || ids.has(transaction.id)) {
+                            throw new Error('Transactions dupliquées ou invalides dans la synchronisation.');
+                        }
+                        ids.add(transaction.id);
+                        transactions.push(transaction);
+                    }
+                    if (transactions.length > maxTransactions) throw new Error('Le journal dépasse la capacité du compagnon mobile.');
+                    if (page.nextOffset === null) return transactions;
+                    if (!Number.isSafeInteger(page.nextOffset) || page.nextOffset <= offset
+                        || page.nextOffset !== offset + page.transactions.length || page.nextOffset > maxTransactions) {
+                        throw new Error('Pagination de transactions invalide. Le cache précédent est conservé.');
+                    }
+                    offset = page.nextOffset;
+                }
+            } catch (error) {
+                if (!(error instanceof MobileHttpError) || error.status !== 409) throw error;
+                if (attempt === 2) throw new Error('Le journal change pendant la synchronisation. Réessayez ; le cache précédent est conservé.');
+            }
+        }
+        throw new Error('Synchronisation du journal interrompue.');
+    }
+
     private async getMobileData<K extends OfflineDataKey>(
         key: K,
         path: string,
     ): Promise<Awaited<ReturnType<typeof offlineStore.getData<K>>>> {
+        if (!isMobileRelayUnlocked()) await this.ensureSecureMobileSession();
         const cached = await offlineStore.getData(key);
         if (this.mobileOffline && cached !== null) return cached as Awaited<ReturnType<typeof offlineStore.getData<K>>>;
         try {
             await this.flushPendingMobileMutations();
             const revision = await offlineStore.getRevision(key);
-            const data = await this.request<Awaited<ReturnType<typeof offlineStore.getData<K>>>>(path);
+            const data = key === 'transactions' && getMobileRelayEndpoint()
+                ? await this.requestMobileTransactions() as Awaited<ReturnType<typeof offlineStore.getData<K>>>
+                : await this.request<Awaited<ReturnType<typeof offlineStore.getData<K>>>>(path);
             if (data === null) return data;
             const accepted = await offlineStore.acceptRemoteData(key, data as never, revision);
             if (accepted !== data) this.mobileRefreshPending = true;
@@ -773,6 +845,7 @@ export class DatabaseService {
     }
 
     private async commitMobileMutation(path: string, method: string, body?: string, settings?: Settings) {
+        if (!isMobileRelayUnlocked()) await this.ensureSecureMobileSession();
         await offlineStore.commitBankMutation(path, method, body, settings);
         this.flushPendingMobileMutations().catch(error => {
             if (!this.isMobileNetworkError(error)) console.warn('Mobile offline sync failed:', error);
@@ -797,9 +870,8 @@ export class DatabaseService {
                         const candidate = mutations[index];
                         if (candidate.path !== '/api/settings' || candidate.method !== 'PATCH') break;
                         const parsed = parseQueuedSettingsMutation(candidate.body);
-                        if (parsed) {
-                            merged = merged ? mergeSettingsMutations(merged, parsed) : parsed;
-                        }
+                        if (!parsed) throw new Error('Modification des paramètres illisible. La file est conservée sur cet appareil.');
+                        merged = merged ? mergeSettingsMutations(merged, parsed) : parsed;
                         ids.push(candidate.id);
                         index += 1;
                     }
@@ -1021,7 +1093,7 @@ export class DatabaseService {
     // Settings
     async getSettings(): Promise<Settings | null> {
         let cachedSettings: Settings | null = null;
-        if (this.usesHttp()) {
+        if (this.usesHttp() && isMobileRelayUnlocked()) {
             try {
                 cachedSettings = parseSettings(
                     await offlineStore.getData('settings') as RawSettings | null
@@ -1099,11 +1171,10 @@ export class DatabaseService {
         if (!hasSettingsMutationChanges(mutation)) return;
 
         if (this.usesHttp()) {
-            const serialized = serializeSettingsMutation(mutation);
             await this.commitMobileMutation(
                 '/api/settings',
                 'PATCH',
-                JSON.stringify(serialized),
+                JSON.stringify(mutation),
                 localSettings,
             );
             return;

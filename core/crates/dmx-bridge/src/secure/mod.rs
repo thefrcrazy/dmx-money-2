@@ -61,6 +61,10 @@ pub use self::types::{AuthRouteOutput, MobilePasskeyInfo, SecureBridgeSettings, 
 pub(crate) use self::util::hash_secret;
 
 use self::auth::list_passkeys;
+
+pub(crate) async fn relay_passkeys(pool: &DbPool) -> Result<Vec<MobilePasskeyInfo>, String> {
+    list_passkeys(pool).await
+}
 use self::certificates::certificate_paths;
 use self::managed::{
     has_managed_device_secret, is_missing_managed_secret_error, managed_delete_txt, managed_present_txt,

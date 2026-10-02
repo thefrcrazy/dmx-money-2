@@ -74,8 +74,10 @@ public sealed partial class SettingsPage : Page
         BridgeSwitch.IsEnabled = !ViewModel.BridgeBusy;
         BridgeBadge.Text = ViewModel.BridgeStateLabel;
         BridgeDetail.Text = ViewModel.BridgeStateDetail;
-        AppUrl.Text = ViewModel.SecureBridge?.AppUrl ?? "Provisionnement automatique en attente";
-        ApiUrl.Text = ViewModel.SecureBridge?.ApiUrl ?? "Non active";
+        AppUrl.Text = ViewModel.IsRemoteBridge ? "Application mobile disponible" : ViewModel.SecureBridge?.AppUrl ?? "En préparation";
+        ApiUrl.Text = ViewModel.IsRemoteBridge
+            ? ViewModel.SecureBridge?.Active == true ? "Accès Internet chiffré" : "Connexion Internet en cours"
+            : ViewModel.SecureBridge?.ApiUrl ?? "Non active";
 
         BridgeSteps.ItemsSource = ViewModel.BridgeSteps.Select(step => new BridgeStepRow(step.Label, step.Value, step.Ready, step.Icon)).ToList();
         BridgeError.Text = ViewModel.SecureBridge?.LastError ?? string.Empty;
@@ -162,7 +164,7 @@ public sealed partial class SettingsPage : Page
     }
 }
 
-/// <summary>Étape de préparation du pont (PWA, provisionnement, DNS, certificat, API).</summary>
+/// <summary>Étape de préparation du compagnon mobile.</summary>
 public sealed class BridgeStepRow : UserControl
 {
     public BridgeStepRow(string label, string value, bool ready, string icon)

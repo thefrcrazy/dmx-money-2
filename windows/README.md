@@ -47,4 +47,6 @@ dotnet test windows/tests/DmxMoney.Tests/DmxMoney.Tests.csproj
 * Reprise automatique de DmxMoney 1.x (`%APPDATA%\com.dmxmoney.desktop`) au premier lancement ;
   la base d'origine n'est jamais modifiée.
 * `DMXMONEY_DATA_DIR` permet de travailler sur un dossier de test (pont PWA désactivé).
-* `DMXMONEY_UPDATE_URL` remplace la source de mise à jour Velopack.
+* `DMXMONEY_UPDATE_URL` remplace la source de mise à jour Velopack par une URL HTTPS.
+* Les releases officielles signent l'installeur et tous les EXE/DLL via Azure Artifact Signing ;
+  la configuration et les limites Smart App Control sont décrites dans [`docs/release.md`](../docs/release.md#windows).

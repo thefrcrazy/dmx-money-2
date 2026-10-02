@@ -17,6 +17,9 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   # Secret d'enregistrement du pont managé : compilé dans le noyau (option_env!).
@@ -32,13 +35,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: resolve
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            version="${{ inputs.version }}"
+          if [ -n "$REQUESTED_VERSION" ]; then
+            version="$REQUESTED_VERSION"
           elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
           else
             version="$(cat VERSION)"
+          fi
+          if ! [[ "$version" =~ ^2\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::Version invalide : 2.x.y ou 2.x.y-prerelease requis."
+            exit 1
+          fi
+          if [ "$version" != "$(cat VERSION)" ]; then
+            echo "::error::La version demandée doit correspondre à VERSION avant toute construction."
+            exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "==> version $version"
@@ -117,11 +130,29 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ICLOUD_CONTAINER: ${{ secrets.DMX_ICLOUD_CONTAINER }}
         run: |
+          python3 - <<'PYTHON'
+          import os, plistlib, re
+          from pathlib import Path
+          source = Path('apple/DmxMoney-macOS/DmxMoney.entitlements')
+          if os.environ.get('APPLE_TEAM_ID'):
+              source = source.with_name('DmxMoney-iCloud.entitlements')
+              container = os.environ.get('ICLOUD_CONTAINER', '')
+              if not re.fullmatch(r'iCloud\.[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*', container):
+                  raise SystemExit('Conteneur iCloud valide requis pour les entitlements de publication.')
+          entitlements = plistlib.loads(source.read_bytes())
+          if os.environ.get('APPLE_TEAM_ID'):
+              entitlements['com.apple.developer.icloud-container-identifiers'] = [container]
+          encoded = plistlib.dumps(entitlements)
+          if b'$(' in encoded:
+              raise SystemExit('Variable Xcode non développée dans les entitlements de publication.')
+          Path('/tmp/DmxMoney-release.entitlements').write_bytes(encoded)
+          PYTHON
           echo "$APPLE_API_KEY" | base64 --decode > /tmp/AuthKey.p8
           for variant in modern legacy; do
             codesign --force --deep --options runtime --timestamp \
-              --entitlements "apple/DmxMoney-macOS/DmxMoney$( [ -n "$APPLE_TEAM_ID" ] && echo -iCloud ).entitlements" \
+              --entitlements /tmp/DmxMoney-release.entitlements \
               --sign "Developer ID Application" "dist/$variant/DmxMoney.app"
             ditto -c -k --keepParent "dist/$variant/DmxMoney.app" "/tmp/DmxMoney-$variant.zip"
             xcrun notarytool submit "/tmp/DmxMoney-$variant.zip" --wait \
@@ -159,25 +190,118 @@ jobs:
     needs: version
     # Visual Studio 2026, comme dans ci.yml : compilation XAML en processus et ciblage de .NET 10.
     runs-on: windows-2025-vs2026
+    environment: windows-signing
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      WINDOWS_SIGNING_MODE: ${{ vars.WINDOWS_SIGNING_MODE || 'public-trust' }}
     strategy:
       matrix:
         rid: [win-x64, win-arm64]
     steps:
       - uses: actions/checkout@v4
+      - name: Mode de signature Windows explicite
+        run: |
+          if ($env:WINDOWS_SIGNING_MODE -notin @('public-trust', 'self-signed')) {
+            throw 'WINDOWS_SIGNING_MODE doit être public-trust ou self-signed.'
+          }
+      - name: Configuration de signature publique obligatoire
+        if: env.WINDOWS_SIGNING_MODE == 'public-trust'
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          SIGNING_ENDPOINT: ${{ vars.WINDOWS_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.WINDOWS_SIGNING_ACCOUNT }}
+          SIGNING_PROFILE: ${{ vars.WINDOWS_SIGNING_PROFILE }}
+        run: |
+          foreach ($name in @('AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID', 'SIGNING_ENDPOINT', 'SIGNING_ACCOUNT', 'SIGNING_PROFILE')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Signature Windows non configurée ($name). Créez un profil Azure Artifact Signing Public Trust et les variables de l'environnement windows-signing ; la release ne publiera pas d'installeur non signé."
+            }
+          }
+      - uses: azure/login@v2
+        if: env.WINDOWS_SIGNING_MODE == 'public-trust'
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          # Le client de signature Microsoft nécessite le runtime .NET 8 x64.
+          dotnet-version: |
+            8.0.x
+            10.0.x
       - run: cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.11.0+v0.31.0 --locked
       # Même version que le paquet Velopack de l'app (DmxMoney.App.csproj).
       - run: dotnet tool install -g vpk --version 0.0.1298
-      - name: Application et installeur Velopack
-        run: pwsh scripts/build-windows.ps1 -Rid ${{ matrix.rid }} -Version ${{ needs.version.outputs.version }}
+      - name: Client Microsoft et métadonnées de signature
+        id: signing
+        if: env.WINDOWS_SIGNING_MODE == 'public-trust'
+        env:
+          SIGNING_ENDPOINT: ${{ vars.WINDOWS_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.WINDOWS_SIGNING_ACCOUNT }}
+          SIGNING_PROFILE: ${{ vars.WINDOWS_SIGNING_PROFILE }}
+        run: |
+          ./scripts/prepare-windows-signing.ps1 -Endpoint $env:SIGNING_ENDPOINT -AccountName $env:SIGNING_ACCOUNT -CertificateProfileName $env:SIGNING_PROFILE -OutputDirectory (Join-Path $env:RUNNER_TEMP 'windows-signing')
+      - name: Identité autosignée stable (sans ajout de confiance)
+        if: env.WINDOWS_SIGNING_MODE == 'self-signed'
+        id: self_signing
+        env:
+          WINDOWS_SELF_SIGNED_PFX: ${{ secrets.WINDOWS_SELF_SIGNED_PFX }}
+          WINDOWS_SELF_SIGNED_PASSWORD: ${{ secrets.WINDOWS_SELF_SIGNED_PASSWORD }}
+          EXPECTED_THUMBPRINT: ${{ vars.WINDOWS_SELF_SIGNED_THUMBPRINT }}
+        run: |
+          foreach ($name in @('WINDOWS_SELF_SIGNED_PFX', 'WINDOWS_SELF_SIGNED_PASSWORD', 'EXPECTED_THUMBPRINT')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Identité autosignée stable non configurée ($name). Aucun certificat temporaire ne sera publié."
+            }
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'dmxmoney-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_SELF_SIGNED_PFX))
+            $password = ConvertTo-SecureString $env:WINDOWS_SELF_SIGNED_PASSWORD -AsPlainText -Force
+            try {
+              $certificate = ./scripts/prepare-windows-self-signed-release.ps1 -PfxPath $pfxPath `
+                -PfxPassword $password -ExpectedThumbprint $env:EXPECTED_THUMBPRINT `
+                -PublicCertificatePath (Join-Path $env:RUNNER_TEMP 'dmxmoney-public.cer')
+              "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
+            }
+            finally { if ($password) { $password.Dispose() } }
+          }
+          finally {
+            if (Test-Path -LiteralPath $pfxPath) { Remove-Item -LiteralPath $pfxPath -Force }
+          }
+      - name: Application et installeur Public Trust
+        if: env.WINDOWS_SIGNING_MODE == 'public-trust'
+        env:
+          SIGN_TOOL: ${{ steps.signing.outputs.signtool }}
+          SIGNING_DLIB: ${{ steps.signing.outputs.dlib }}
+          SIGNING_METADATA: ${{ steps.signing.outputs.metadata }}
+        run: |
+          ./scripts/build-windows.ps1 -Rid ${{ matrix.rid }} -Version ${{ needs.version.outputs.version }} -RequireSigning -SignToolPath $env:SIGN_TOOL -SigningDlibPath $env:SIGNING_DLIB -SigningMetadataPath $env:SIGNING_METADATA
+      - name: Application et installeur autosigné
+        if: env.WINDOWS_SIGNING_MODE == 'self-signed'
+        env:
+          SIGNING_THUMBPRINT: ${{ steps.self_signing.outputs.thumbprint }}
+        run: |
+          ./scripts/build-windows.ps1 -Rid ${{ matrix.rid }} -Version ${{ needs.version.outputs.version }} `
+            -DevelopmentCertificateThumbprint $env:SIGNING_THUMBPRINT -SelfSignedRelease
+      - name: Suppression de la clé de signature du runner
+        if: always() && env.WINDOWS_SIGNING_MODE == 'self-signed'
+        env:
+          SIGNING_THUMBPRINT: ${{ steps.self_signing.outputs.thumbprint }}
+        run: |
+          if ($env:SIGNING_THUMBPRINT) {
+            Remove-Item -LiteralPath "Cert:/CurrentUser/My/$env:SIGNING_THUMBPRINT" -DeleteKey -Force
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.rid }}
-          path: target/windows/releases/${{ matrix.rid }}
+          path: target/windows/${{ env.WINDOWS_SIGNING_MODE == 'self-signed' && 'self-signed-releases' || 'releases' }}/${{ matrix.rid }}
           if-no-files-found: error
 
   linux:
@@ -223,6 +347,12 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: PWA embarquée
+        working-directory: pwa
+        run: bun install --frozen-lockfile && bun run build
       - uses: flathub-infra/flatpak-github-actions/flatpak-builder@master
         with:
           bundle: com.dmxmoney.app.flatpak

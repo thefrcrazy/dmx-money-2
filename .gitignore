@@ -40,6 +40,8 @@ pwa/dist-ssr/
 *.log
 
 # Cloudflare
+cloudflare/**/node_modules/
+cloudflare/remote-relay/.assets/
 cloudflare/managed-bridge/wrangler.local.toml
 .wrangler/
 
@@ -50,6 +52,7 @@ cloudflare/managed-bridge/wrangler.local.toml
 # Signature et secrets locaux (jamais versionnés)
 apple/Config/Signing.local.xcconfig
 *.p12
+*.pfx
 *.mobileprovision
 *.provisionprofile
 .env

@@ -5,7 +5,7 @@ import SearchableSelect from '../../components/ui/SearchableSelect';
 import { useBank } from '../../context/BankContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useToast } from '../../context/ToastContext';
-import { parseOfxTransactions } from '../../utils/importParsers';
+import { parseBankAmount, parseOfxTransactions } from '../../utils/importParsers';
 
 interface OfxImportModalProps {
     isOpen: boolean;
@@ -28,7 +28,7 @@ const OfxImportModal: React.FC<OfxImportModalProps> = ({ isOpen, onClose, file, 
     const [finalBalance, setFinalBalance] = useState('');
     const [categoryMapping, setCategoryMapping] = useState<Record<string, string>>({});
     const [isImporting, setIsImporting] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [importError, setError] = useState<string | null>(null);
 
     // Reset state when file changes or modal opens
     useEffect(() => {
@@ -43,16 +43,16 @@ const OfxImportModal: React.FC<OfxImportModalProps> = ({ isOpen, onClose, file, 
         }
     }, [isOpen, file]);
 
-    const parsedData = useMemo(() => {
-        if (!file) return [];
+    const parsedResult = useMemo(() => {
+        if (!file) return { data: [], error: null };
         try {
-            return parseOfxTransactions(file.content).map(transaction => ({ ...transaction, category: '' }));
-        } catch (e: any) {
-            console.error("Parsing error:", e);
-            setError(e.message || "Erreur lors de la lecture du fichier OFX");
-            return [];
+            return { data: parseOfxTransactions(file.content).map(transaction => ({ ...transaction, category: '' })), error: null };
+        } catch (error) {
+            return { data: [], error: error instanceof Error ? error.message : 'Erreur lors de la lecture du fichier OFX' };
         }
     }, [file]);
+    const parsedData = parsedResult.data;
+    const error = importError || parsedResult.error;
 
     const uniqueOfxCategories = useMemo(() => {
         // OFX rarely has categories, but if we extracted some (maybe from MEMO?), we'd list them here.
@@ -126,10 +126,7 @@ const OfxImportModal: React.FC<OfxImportModalProps> = ({ isOpen, onClose, file, 
                         return sum + (tx.type === 'income' ? tx.amount : -tx.amount);
                     }, 0);
 
-                    const final = parseFloat(finalBalance.replace(',', '.'));
-                    if (!isNaN(final)) {
-                        initialBalance = final - netChange;
-                    }
+                    initialBalance = parseBankAmount(finalBalance) - netChange;
                 }
 
                 targetAccountId = await addAccount({

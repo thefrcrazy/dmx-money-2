@@ -1,7 +1,7 @@
 # Synchronisation du compagnon mobile
 
 Le Mac/PC héberge la base de référence. La PWA conserve la dernière copie reçue et une
-file persistante de modifications. Hors du réseau local, les pages utilisent cette copie ;
+file persistante de modifications. Lorsque le bureau est injoignable, les pages utilisent cette copie ;
 les échéances affichées ne deviennent des écritures définitives que lorsque le moteur Rust
 peut les traiter. Les analyses et les soldes utilisent les opérations de cette même copie.
 
@@ -31,8 +31,27 @@ peut les traiter. Les analyses et les soldes utilisent les opérations de cette 
 Les modifications déjà mises en file par une ancienne PWA conservent leur protocole d'origine :
 il n'est pas possible de reconstruire rétroactivement une version de départ absente. Installer
 la nouvelle version sur l'ordinateur puis charger la PWA connectée avant les nouvelles saisies.
-Le mode hors ligne ne permet pas de recevoir les changements du Mac en 4G : la synchronisation
-reprend quand le pont est accessible et que la PWA s'exécute (notamment à sa réouverture).
+Le pont local historique reste limité au réseau local. Le nouveau relais Internet permet
+de synchroniser en Wi-Fi, 4G ou 5G tant que le bureau est allumé, connecté et DmxMoney ouvert.
+La PWA active vérifie les changements toutes les 2,5 secondes. Une PWA suspendue en
+arrière-plan par le téléphone reprend à sa réouverture ; elle ne peut pas garantir un
+traitement continu en arrière-plan.
+
+Le relais utilise le même moteur et le même protocole de mutations. Les transactions
+sont téléchargées par pages de 2 000, avec une version bancaire contrôlée entre les pages
+et un remplacement du cache seulement après réception complète. Un changement concurrent
+fait recommencer la lecture, au plus deux fois, puis conserve le cache existant.
+
+La clé du relais passe par le fragment du QR et ne va pas au Worker. Les passkeys imposent
+une vérification utilisateur. Le cache financier et les corps des messages hors ligne sont
+stockés dans des enveloppes JSON UTF-8/base64 versionnées. Les anciennes valeurs sont
+migrées dans une transaction IndexedDB, sans perdre les messages en attente. L’encodage
+masque la lecture directe et ajoute environ 33 % à la taille du JSON UTF-8 ; il reste
+facilement décodable et n’apporte pas de confidentialité. La garde d’interface masque les
+données avant authentification et après 45 minutes, sans chiffrement au repos. Après
+fermeture de la PWA, une connexion au bureau est requise pour déverrouiller.
+Un opérateur qui contrôlerait le JavaScript livré pourrait compromettre ce client.
+Voir [les limites et le déploiement du relais](../cloudflare/remote-relay/README.md).
 
 ## Vérifications
 

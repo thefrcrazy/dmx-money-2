@@ -392,11 +392,20 @@ fn start_bridge(store: &Rc<Store>) {
 }
 
 fn pwa_assets_directory() -> Option<std::path::PathBuf> {
-    let candidates = [
+    let mut candidates = Vec::new();
+    // AppImage et préfixes d'installation personnalisés : les ressources suivent le binaire.
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(directory) = executable.parent() {
+            candidates.push(directory.join("../share/dmx-money/pwa"));
+        }
+    }
+    candidates.extend([
         std::path::PathBuf::from("/app/share/dmx-money/pwa"),
         std::path::PathBuf::from("/usr/share/dmx-money/pwa"),
-    ];
-    candidates.into_iter().find(|path| path.exists())
+        std::path::PathBuf::from("/usr/local/share/dmx-money/pwa"),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../pwa/dist"),
+    ]);
+    candidates.into_iter().find(|path| path.join("index.html").is_file())
 }
 
 fn present_whats_new(store: &Rc<Store>) {

@@ -97,12 +97,17 @@ public final class CloudSyncController {
         let stateURL = URL(fileURLWithPath: store.engine.openReport().databasePath)
             .deletingLastPathComponent()
             .appendingPathComponent("cloudkit-sync-state.json")
-        let backend = CloudSyncBackend(store: store, containerIdentifier: container, stateURL: stateURL) { [weak self] date, error in
+        let backend = CloudSyncBackend(store: store, containerIdentifier: container, stateURL: stateURL, report: { [weak self] date, error in
             DispatchQueue.main.async {
                 if let date = date { self?.lastSync = date }
                 self?.lastError = error
             }
-        }
+        }, accountChanged: { [weak self] in
+            DispatchQueue.main.async {
+                self?.setEnabled(false)
+                self?.lastError = "Compte iCloud modifié : vérifiez le compte connecté avant de réactiver la synchronisation."
+            }
+        })
         self.backend = backend
         backend.bootstrap(initial: initial)
         cancellable = store.$dataVersion
@@ -114,7 +119,7 @@ public final class CloudSyncController {
     private func stop() {
         cancellable = nil
         guard #available(macOS 14.0, iOS 17.0, *), let backend = backend as? CloudSyncBackend else { return }
-        backend.reset()
+        backend.stop()
         self.backend = nil
         lastError = nil
     }
@@ -129,8 +134,10 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
     private let engine: DmxEngine
     private let stateURL: URL
     private let report: (Date?, String?) -> Void
+    private let accountChanged: () -> Void
     private var syncEngine: CKSyncEngine!
     private let lock = NSLock()
+    private var stopped = false
     /// Dernier changement local connu par enregistrement CloudKit.
     private var outgoing: [String: SyncChange] = [:]
     /// Changement réellement envoyé (sert à l'acquittement).
@@ -138,11 +145,12 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
     /// Enregistrements serveur connus (conservent l'étiquette de modification).
     private var serverRecords: [String: CKRecord] = [:]
 
-    init(store: AppStore, containerIdentifier: String, stateURL: URL, report: @escaping (Date?, String?) -> Void) {
+    init(store: AppStore, containerIdentifier: String, stateURL: URL, report: @escaping (Date?, String?) -> Void, accountChanged: @escaping () -> Void) {
         self.store = store
         engine = store.engine
         self.stateURL = stateURL
         self.report = report
+        self.accountChanged = accountChanged
         let container = CKContainer(identifier: containerIdentifier)
         var configuration = CKSyncEngine.Configuration(
             database: container.privateCloudDatabase,
@@ -163,15 +171,34 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
     }
 
     func syncNow() {
+        guard isRunning else { return }
         Task {
             do {
                 try await syncEngine.fetchChanges()
+                guard isRunning else { return }
                 try await syncEngine.sendChanges()
                 report(Date(), nil)
             } catch {
                 report(nil, error.localizedDescription)
             }
         }
+    }
+
+    private var isRunning: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !stopped
+    }
+
+    func stop() {
+        lock.lock()
+        stopped = true
+        lock.unlock()
+        syncEngine.state.remove(pendingRecordZoneChanges: syncEngine.state.pendingRecordZoneChanges)
+        syncEngine.state.remove(pendingDatabaseChanges: syncEngine.state.pendingDatabaseChanges)
+        reset()
+        let currentEngine = syncEngine!
+        Task { await currentEngine.cancelOperations() }
     }
 
     func reset() {
@@ -186,13 +213,24 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
     // MARK: - Envoi
 
     func enqueuePending() {
+        guard isRunning else { return }
         guard let changes = try? engine.pendingSyncChanges(limit: 2000), !changes.isEmpty else { return }
+        let queued = syncEngine.state.pendingRecordZoneChanges
+        let saves = Set(queued.compactMap { pending -> String? in
+            if case let .saveRecord(id) = pending { return id.recordName }
+            return nil
+        })
+        let deletes = Set(queued.compactMap { pending -> String? in
+            if case let .deleteRecord(id) = pending { return id.recordName }
+            return nil
+        })
         var additions: [CKSyncEngine.PendingRecordZoneChange] = []
         var removals: [CKSyncEngine.PendingRecordZoneChange] = []
         lock.lock()
         for change in changes {
             let name = Self.recordName(change.entity, change.recordId)
-            if outgoing[name]?.seq == change.seq { continue }
+            let isQueued = change.deleted ? deletes.contains(name) : saves.contains(name)
+            if outgoing[name]?.seq == change.seq && isQueued { continue }
             outgoing[name] = change
             let id = CKRecord.ID(recordName: name, zoneID: Self.zoneID)
             additions.append(change.deleted ? .deleteRecord(id) : .saveRecord(id))
@@ -205,11 +243,24 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
     }
 
     func nextRecordZoneChangeBatch(_ context: CKSyncEngine.SendChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.RecordZoneChangeBatch? {
+        guard isRunning else { return nil }
         let scope = context.options.scope
         let changes = syncEngine.state.pendingRecordZoneChanges.filter { scope.contains($0) }
         guard !changes.isEmpty else { return nil }
+        markDeletionsSent(changes)
         return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: changes) { [weak self] recordID in
             self?.record(for: recordID)
+        }
+    }
+
+    private func markDeletionsSent(_ changes: [CKSyncEngine.PendingRecordZoneChange]) {
+        lock.lock()
+        defer { lock.unlock() }
+        for pending in changes {
+            if case let .deleteRecord(recordID) = pending,
+               let change = outgoing[recordID.recordName], change.deleted {
+                sent[recordID.recordName] = change
+            }
         }
     }
 
@@ -217,6 +268,7 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         let name = recordID.recordName
+        guard !stopped else { return nil }
         guard let change = outgoing[name], let payload = change.payload else { return nil }
         let record = serverRecords[name] ?? CKRecord(recordType: Self.recordType(change.entity), recordID: recordID)
         record["entity"] = change.entity
@@ -230,6 +282,7 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
     // MARK: - Événements
 
     func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
+        guard isRunning else { return }
         switch event {
         case let .stateUpdate(update):
             saveState(update.stateSerialization)
@@ -264,9 +317,9 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
             syncEngine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: Self.zoneID))])
             enqueuePending()
         case .signOut, .switchAccounts:
-            reset()
-            _ = try? engine.enqueueAllForSync()
-            enqueuePending()
+            // Les données locales ne sont jamais envoyées automatiquement à un autre compte.
+            stop()
+            accountChanged()
         @unknown default:
             break
         }
@@ -324,6 +377,7 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
         }
         if !outcome.acknowledged.isEmpty {
             try? engine.acknowledgeSyncChanges(changes: outcome.acknowledged)
+            enqueuePending()
         }
         await apply(outcome.serverWins)
         report(outcome.failure == nil ? Date() : nil, outcome.failure)
@@ -340,17 +394,12 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
         for record in result.savedRecords {
             let name = record.recordID.recordName
             serverRecords[name] = record
-            if let change = sent.removeValue(forKey: name) {
-                acknowledged.append(change)
-                if outgoing[name]?.seq == change.seq { outgoing.removeValue(forKey: name) }
-            }
+            Self.acknowledgeSentRecord(record.recordID, sent: &sent, outgoing: &outgoing, acknowledged: &acknowledged, retry: &retry)
         }
         for recordID in result.deletedRecordIDs {
             let name = recordID.recordName
             serverRecords.removeValue(forKey: name)
-            if let change = outgoing.removeValue(forKey: name) {
-                acknowledged.append(change)
-            }
+            Self.acknowledgeSentRecord(recordID, sent: &sent, outgoing: &outgoing, acknowledged: &acknowledged, retry: &retry)
         }
         for failed in result.failedRecordSaves {
             let recordID = failed.record.recordID
@@ -384,17 +433,33 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
             sent.removeValue(forKey: name)
         }
         for (recordID, error) in result.failedRecordDeletes where error.code == .unknownItem {
-            if let change = outgoing.removeValue(forKey: recordID.recordName) {
-                acknowledged.append(change)
-            }
+            Self.acknowledgeSentRecord(recordID, sent: &sent, outgoing: &outgoing, acknowledged: &acknowledged, retry: &retry)
         }
         lock.unlock()
 
         return SentOutcome(acknowledged: acknowledged, retry: retry, serverWins: serverWins, needsZone: needsZone, failure: failure)
     }
 
+    /// Acquitte la version réellement envoyée et conserve une écriture arrivée pendant l'envoi.
+    static func acknowledgeSentRecord(
+        _ recordID: CKRecord.ID,
+        sent: inout [String: SyncChange],
+        outgoing: inout [String: SyncChange],
+        acknowledged: inout [SyncChange],
+        retry: inout [CKSyncEngine.PendingRecordZoneChange]
+    ) {
+        let name = recordID.recordName
+        guard let change = sent.removeValue(forKey: name) else { return }
+        acknowledged.append(change)
+        if outgoing[name]?.seq == change.seq {
+            outgoing.removeValue(forKey: name)
+        } else if let newer = outgoing[name] {
+            retry.append(newer.deleted ? .deleteRecord(recordID) : .saveRecord(recordID))
+        }
+    }
+
     private func apply(_ changes: [RemoteChange]) async {
-        guard !changes.isEmpty else { return }
+        guard isRunning, !changes.isEmpty else { return }
         do {
             _ = try engine.applyRemoteChanges(changes: changes)
             await MainActor.run { store.reload() }

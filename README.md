@@ -26,6 +26,7 @@ La version 2 est une réécriture **native sur chaque plateforme** autour d'un *
 ├── linux/dmx-money-gtk/         # app GTK4/libadwaita
 ├── pwa/                         # client web du compagnon mobile, embarqué par les apps de bureau
 ├── cloudflare/managed-bridge/   # Worker du pont HTTPS managé
+├── cloudflare/remote-relay/     # relais Internet chiffré, PWA commune et connexion sortante
 ├── shared/                      # icônes (catalogue, correspondances natives, kit GNOME), logos
 ├── tools/seed-demo/             # jeu de données de démonstration (captures, essais)
 └── scripts/                     # builds et génération des bindings
@@ -44,7 +45,18 @@ Principe directeur : **les interfaces n'effectuent aucun calcul métier**. Solde
 Deux options indépendantes, activables dans Paramètres :
 
 - **iCloud** : synchronisation entre Mac, iPhone et iPad (macOS 14+ / iOS 17+).
-- **Compagnon PWA** : le desktop expose l'API locale HTTPS du pont managé ; la PWA existante fonctionne sans modification.
+- **Compagnon PWA distant** : le desktop ouvre une connexion sortante au relais commun
+  Cloudflare. Le téléphone fonctionne en Wi-Fi, 4G ou 5G, avec appairage QR, passkey et
+  transport chiffré entre appareils. Le PC doit rester allumé et DmxMoney ouvert.
+  Aucun DNS n’est à configurer par l’utilisateur. Les installations du pont local
+  existant restent compatibles ; un nouvel appairage est nécessaire pour passer au relais.
+
+Les garanties, le cache hors ligne et les limites de confidentialité sont détaillés dans
+[le fonctionnement du relais](cloudflare/remote-relay/README.md) et [la synchronisation mobile](docs/mobile-sync.md).
+Le cache mobile est obfusqué en base64 pour masquer la lecture directe ; cet encodage
+reste décodable et ne remplace pas le chiffrement ni la protection du téléphone.
+Les corrections, mesures et limites de validation sont recensées dans
+[l’audit du 1 octobre 2026](docs/verification/2026-10-01-audit-compagnon.md).
 
 ## Assistant (Siri, compagnon mobile)
 
@@ -73,6 +85,10 @@ cargo test --workspace
 ```
 
 Les instructions propres à chaque plateforme sont dans [apple/README.md](apple/README.md), [windows/README.md](windows/README.md) et [linux/README.md](linux/README.md) ; la publication est décrite dans [docs/release.md](docs/release.md).
+
+Sous Windows, les builds de développement peuvent être autosignés localement sans abonnement.
+Cette signature ne garantit pas l’acceptation par Smart App Control ; les mises à jour restent
+soumises aux règles d’exécution de Windows. Voir [la procédure Windows](docs/release.md#windows).
 
 Pour essayer l'application sans toucher à vos données :
 

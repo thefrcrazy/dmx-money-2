@@ -1,7 +1,7 @@
 //! Instantané en mémoire des données, point d'entrée de tous les calculs de vues.
 
 use crate::db::{self, DbPool};
-use crate::error::CoreResult;
+use crate::error::{CoreResult, DbContext};
 use crate::models::{
     Account, Budget, Category, ScheduledTransaction, Transaction, TRANSFER_CATEGORY_ICON, TRANSFER_CATEGORY_ID,
     TRANSFER_CATEGORY_NAME, TRANSFER_COLOR, UNKNOWN_CATEGORY_COLOR, UNKNOWN_CATEGORY_ICON, UNKNOWN_CATEGORY_NAME,
@@ -33,16 +33,19 @@ pub struct CategoryDisplay {
 }
 
 pub async fn load(pool: &DbPool) -> CoreResult<Snapshot> {
-    let data_version = db::data_version(pool).await?;
-    Ok(Snapshot {
+    let mut tx = pool.begin().await.ctx("lecture de l'instantané")?;
+    let data_version = db::data_version(&mut *tx).await?;
+    let snapshot = Snapshot {
         data_version,
-        accounts: repo::list_accounts(pool).await?,
-        transactions: repo::list_transactions(pool).await?,
-        categories: repo::list_categories(pool).await?,
-        scheduled: repo::list_scheduled(pool).await?,
-        budgets: repo::list_budgets(pool).await?,
-        settings: settings::load_app_settings(pool).await?,
-    })
+        accounts: repo::list_accounts(&mut *tx).await?,
+        transactions: repo::list_transactions(&mut *tx).await?,
+        categories: repo::list_categories(&mut *tx).await?,
+        scheduled: repo::list_scheduled(&mut *tx).await?,
+        budgets: repo::list_budgets(&mut *tx).await?,
+        settings: settings::load_app_settings(&mut *tx).await?,
+    };
+    tx.commit().await.ctx("lecture de l'instantané")?;
+    Ok(snapshot)
 }
 
 /// Un filtre vide sélectionne tous les comptes.

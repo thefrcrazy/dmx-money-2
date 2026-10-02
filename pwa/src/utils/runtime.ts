@@ -4,7 +4,20 @@ const MOBILE_PREVIOUS_API_BASE_KEY = 'dmxmoney.securePreviousApiBaseUrl';
 const MOBILE_CSRF_KEY = 'dmxmoney.secureCsrfToken';
 const MOBILE_PASSKEY_READY_KEY = 'dmxmoney.securePasskeyReady';
 
-const normalizeApiBaseUrl = (value: string) => value.trim().replace(/\/$/, '');
+const normalizeApiBaseUrl = (value: string) => {
+    const url = new URL(value.trim());
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new Error('Adresse API HTTPS invalide.');
+    if (url.pathname !== '/' && url.pathname !== '') return validateRelayEndpoint(value);
+    return url.origin;
+};
+
+const sameDesktopEndpoint = (previous: string, next: string) => {
+    try {
+        const first = new URL(previous);
+        const second = new URL(next);
+        return first.protocol === second.protocol && first.hostname === second.hostname && first.pathname === second.pathname;
+    } catch { return false; }
+};
 
 /** Enough history to survive a few reconnections before anything is flushed. */
 const MAX_PREVIOUS_API_BASE_URLS = 5;
@@ -34,19 +47,22 @@ export const setMobileApiBaseUrl = (value: string) => {
 
     const current = localStorage.getItem(MOBILE_API_BASE_KEY);
     if (current && current !== next) {
-        const previous = readPreviousApiBaseUrls().filter(url => url !== current && url !== next);
+        const previous = readPreviousApiBaseUrls().filter(url => url !== current && url !== next && sameDesktopEndpoint(url, next));
         localStorage.setItem(
             MOBILE_PREVIOUS_API_BASE_KEY,
-            JSON.stringify([...previous, current].slice(-MAX_PREVIOUS_API_BASE_URLS)),
+            JSON.stringify((sameDesktopEndpoint(current, next) ? [...previous, current] : previous).slice(-MAX_PREVIOUS_API_BASE_URLS)),
         );
+        localStorage.removeItem(MOBILE_CSRF_KEY);
+        if (!sameDesktopEndpoint(current, next)) localStorage.removeItem(MOBILE_PASSKEY_READY_KEY);
     }
+    if (getMobileRelayEndpoint() !== next) localStorage.removeItem('dmxmoney.remoteRelayEndpoint');
     localStorage.setItem(MOBILE_API_BASE_KEY, next);
 };
 
 export const getMobilePreviousApiBaseUrls = () => {
     if (typeof window === 'undefined') return [];
     const current = localStorage.getItem(MOBILE_API_BASE_KEY);
-    return readPreviousApiBaseUrls().filter(url => url !== current);
+    return readPreviousApiBaseUrls().filter(url => url !== current && current && sameDesktopEndpoint(url, current));
 };
 
 export const clearMobilePreviousApiBaseUrls = () => {
@@ -107,18 +123,8 @@ export const initializeMobileCompanionToken = () => {
     if (!hash) return;
 
     const params = getHashParamsFromValue(hash);
-    if (!params) return;
-    const pairing = params.get('pairing');
-    const api = params.get('api');
-
-    if (pairing || api) {
-        localStorage.removeItem(MOBILE_CSRF_KEY);
-    }
-
-    if (pairing) localStorage.setItem(MOBILE_PAIRING_KEY, pairing);
-    if (api) setMobileApiBaseUrl(api);
-
-    if (pairing || api) {
+    if (params?.has('pairing') || params?.has('api') || params?.has('relay') || params?.has('key')) {
+        applyMobileCompanionPairingUrl(hash);
         window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`);
     }
 };
@@ -131,24 +137,30 @@ export const applyMobileCompanionPairingUrl = (value: string) => {
     const params = getHashParamsFromValue(value);
     const pairing = params?.get('pairing');
     const api = params?.get('api');
+    const relay = params?.get('relay');
+    const key = params?.get('key');
 
-    if (!pairing && !api) {
-        return { ok: false, error: 'Lien QR invalide. Le lien doit contenir pairing/api.' };
+    if ((!relay && !api) || (!pairing && !api) || (relay && (!key || !pairing))) {
+        return { ok: false, error: 'Lien QR incomplet. Scannez un nouveau QR depuis l’application desktop.' };
     }
-
-    if (pairing || api) {
+    try {
+        const endpoint = relay ? validateRelayEndpoint(relay) : normalizeApiBaseUrl(api!);
+        if (relay && api && normalizeApiBaseUrl(api) !== endpoint) throw new Error('Les adresses du QR ne correspondent pas.');
+        if (!relay && new URL(endpoint).pathname !== '/') throw new Error('Une adresse de relais nécessite une clé de chiffrement.');
+        if (relay) void configureMobileRelay(endpoint, key!);
         localStorage.removeItem(MOBILE_CSRF_KEY);
+        setMobileApiBaseUrl(endpoint);
+        if (pairing) localStorage.setItem(MOBILE_PAIRING_KEY, pairing);
+        return { ok: true, error: null };
+    } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : 'Lien QR invalide.' };
     }
-
-    if (pairing) localStorage.setItem(MOBILE_PAIRING_KEY, pairing);
-    if (api) setMobileApiBaseUrl(api);
-
-    return { ok: true, error: null };
 };
 
 export const getMobileApiBaseUrl = () => {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem(MOBILE_API_BASE_KEY);
+    const value = localStorage.getItem(MOBILE_API_BASE_KEY);
+    try { return value ? normalizeApiBaseUrl(value) : null; } catch { return null; }
 };
 
 export const getMobilePairingToken = () => {
@@ -201,3 +213,4 @@ export const setMobileCsrfToken = (token: string | null) => {
     if (token) localStorage.setItem(MOBILE_CSRF_KEY, token);
     else localStorage.removeItem(MOBILE_CSRF_KEY);
 };
+import { configureMobileRelay, getMobileRelayEndpoint, validateRelayEndpoint } from '../services/relayTransport';

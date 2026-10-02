@@ -12,6 +12,19 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.0.7",
+        date: "2026-10-02",
+        title: "Compagnon mobile à distance",
+        changes: [
+            "Connexion en Wi-Fi, 4G ou 5G via le relais intégré, sans configuration DNS personnelle ; le bureau doit rester ouvert et connecté à Internet.",
+            "Échanges chiffrés entre téléphone et bureau, avec appairage par QR code et authentification par passkey.",
+            "Synchronisation et imports fiabilisés, avec conservation des modifications en attente après une coupure.",
+            "Journal virtualisé pour garder un défilement fluide avec de nombreuses opérations.",
+            "Cache local obfusqué en base64, réversible et sans chiffrement, avec migration atomique des données et modifications en attente.",
+            "Distribution Windows autosignée disponible ; cette signature locale ne garantit pas l’autorisation Smart App Control."
+        ]
+    },
+    {
         version: "2.0.6",
         date: "2026-09-17",
         title: "Synchronisation sans doublons",

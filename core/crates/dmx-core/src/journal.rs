@@ -4,11 +4,11 @@
 use crate::dates::{month_key, parse_date};
 use crate::format::{currency_fr, date_day_month, date_numeric, js_number, weekday_day_month};
 use crate::metrics::{cents, euros, signed_cents};
-use crate::models::{string_enum, Budget, Transaction, TransactionType, TRANSFER_CATEGORY_ID};
-use crate::snapshot::{is_selected, CategoryDisplay, Snapshot};
+use crate::models::{string_enum, Account, Budget, Transaction, TransactionType, TRANSFER_CATEGORY_ID};
+use crate::snapshot::{CategoryDisplay, Snapshot};
 use crate::text::{search_tokens, SearchText};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 string_enum!(CheckStatus, default = Checked, {
     Checked => "checked",
@@ -88,37 +88,35 @@ pub struct JournalView {
 }
 
 /// Dépenses (hors virements) par catégorie, compte et mois.
-pub(crate) struct BudgetSpending {
-    by_scope: HashMap<(String, Option<String>, String), i64>,
+pub(crate) struct BudgetSpending<'a> {
+    by_scope: HashMap<(&'a str, Option<&'a str>), HashMap<&'a str, i64>>,
 }
 
-impl BudgetSpending {
-    pub(crate) fn new(transactions: &[Transaction]) -> Self {
+impl<'a> BudgetSpending<'a> {
+    pub(crate) fn new(transactions: &'a [Transaction]) -> Self {
         let mut by_scope = HashMap::new();
         for transaction in transactions {
             if transaction.transaction_type != TransactionType::Expense || transaction.category == TRANSFER_CATEGORY_ID
             {
                 continue;
             }
-            let month = transaction.date.get(0..7).unwrap_or_default().to_string();
+            let month = transaction.date.get(0..7).unwrap_or_default();
             let amount = cents(transaction.amount);
-            *by_scope
-                .entry((transaction.category.clone(), None, month.clone()))
-                .or_insert(0) += amount;
-            *by_scope
-                .entry((
-                    transaction.category.clone(),
-                    Some(transaction.account_id.clone()),
-                    month,
-                ))
-                .or_insert(0) += amount;
+            for account in [None, Some(transaction.account_id.as_str())] {
+                *by_scope
+                    .entry((transaction.category.as_str(), account))
+                    .or_insert_with(HashMap::new)
+                    .entry(month)
+                    .or_insert(0) += amount;
+            }
         }
         Self { by_scope }
     }
 
     fn spent(&self, category: &str, account_id: Option<&str>, month: &str) -> i64 {
         self.by_scope
-            .get(&(category.to_string(), account_id.map(str::to_string), month.to_string()))
+            .get(&(category, account_id))
+            .and_then(|months| months.get(month))
             .copied()
             .unwrap_or(0)
     }
@@ -146,32 +144,37 @@ pub fn applicable_budget<'a>(budgets: &'a [Budget], transaction: &Transaction) -
     global
 }
 
-pub(crate) fn budget_remaining(
-    snapshot: &Snapshot,
-    spending: &BudgetSpending,
-    transaction: &Transaction,
-) -> Option<BudgetRemaining> {
-    let budget = applicable_budget(&snapshot.budgets, transaction)?;
+fn budget_remaining(budget: &Budget, spending: &BudgetSpending<'_>, transaction: &Transaction) -> BudgetRemaining {
     let month = parse_date(&transaction.date)
         .map(month_key)
         .unwrap_or_else(|| transaction.date.get(0..7).unwrap_or_default().to_string());
     let spent = spending.spent(&budget.category, budget.account_id.as_deref(), &month);
-    Some(BudgetRemaining {
+    BudgetRemaining {
         budget_id: budget.id.clone(),
         budget_name: budget.name.clone(),
         remaining: euros(cents(budget.amount) - spent),
-    })
+    }
 }
 
 /// Solde de chaque compte après chaque transaction, dans l'ordre chronologique d'insertion.
 pub fn running_balances(snapshot: &Snapshot) -> HashMap<String, i64> {
     let mut order: Vec<usize> = (0..snapshot.transactions.len()).collect();
-    order.sort_by(|left, right| {
-        snapshot.transactions[*left]
-            .date
-            .cmp(&snapshot.transactions[*right].date)
-            .then(right.cmp(left))
-    });
+    // Les instantanés SQLite sont déjà décroissants : leur inversion évite un second tri.
+    // Le repli conserve le comportement de cette fonction pour un instantané non ordonné.
+    if snapshot
+        .transactions
+        .windows(2)
+        .all(|pair| pair[0].date >= pair[1].date)
+    {
+        order.reverse();
+    } else {
+        order.sort_by(|left, right| {
+            snapshot.transactions[*left]
+                .date
+                .cmp(&snapshot.transactions[*right].date)
+                .then(right.cmp(left))
+        });
+    }
 
     let mut balances: HashMap<&str, i64> = snapshot
         .accounts
@@ -190,14 +193,14 @@ pub fn running_balances(snapshot: &Snapshot) -> HashMap<String, i64> {
 }
 
 fn search_text(
-    snapshot: &Snapshot,
+    account: Option<&Account>,
     transaction: &Transaction,
     category: &CategoryDisplay,
     budget: Option<&BudgetRemaining>,
     balance: f64,
 ) -> SearchText {
     let mut text = SearchText::new();
-    if let Some(account) = snapshot.account(&transaction.account_id) {
+    if let Some(account) = account {
         text.push(&account.name).push(&account.account_type);
     }
     text.push(&transaction.date);
@@ -233,13 +236,34 @@ pub fn journal(snapshot: &Snapshot, query: &JournalQuery) -> JournalView {
     let balances = running_balances(snapshot);
     let spending = BudgetSpending::new(&snapshot.transactions);
     let tokens = search_tokens(&query.search);
+    let selected_accounts: HashSet<_> = query.accounts.iter().map(String::as_str).collect();
+    let selected_categories: HashSet<_> = query.categories.iter().map(String::as_str).collect();
+    let accounts: HashMap<_, _> = snapshot
+        .accounts
+        .iter()
+        .map(|account| (account.id.as_str(), account))
+        .collect();
+    let mut categories = HashMap::new();
+    // Le premier budget rencontré est le plus récent, comme dans applicable_budget.
+    let mut scoped_budgets = HashMap::new();
+    let mut global_budgets = HashMap::new();
+    for budget in &snapshot.budgets {
+        if let Some(account) = budget.account_id.as_deref() {
+            scoped_budgets
+                .entry((budget.category.as_str(), account))
+                .or_insert(budget);
+        } else {
+            global_budgets.entry(budget.category.as_str()).or_insert(budget);
+        }
+    }
+    let mut remaining_by_month = HashMap::new();
 
     let mut rows = Vec::new();
     for transaction in &snapshot.transactions {
-        if !is_selected(&query.accounts, &transaction.account_id) {
+        if !selected_accounts.is_empty() && !selected_accounts.contains(transaction.account_id.as_str()) {
             continue;
         }
-        if !query.categories.is_empty() && !query.categories.contains(&transaction.category) {
+        if !selected_categories.is_empty() && !selected_categories.contains(transaction.category.as_str()) {
             continue;
         }
         let display_type = transaction.display_type();
@@ -254,7 +278,21 @@ pub fn journal(snapshot: &Snapshot, query: &JournalQuery) -> JournalView {
         if !query.statuses.is_empty() && !query.statuses.contains(&status) {
             continue;
         }
-        let budget = budget_remaining(snapshot, &spending, transaction);
+        let applicable = if transaction.transaction_type == TransactionType::Expense
+            && transaction.category != TRANSFER_CATEGORY_ID
+        {
+            scoped_budgets
+                .get(&(transaction.category.as_str(), transaction.account_id.as_str()))
+                .or_else(|| global_budgets.get(transaction.category.as_str()))
+        } else {
+            None
+        };
+        let budget = applicable.map(|budget| {
+            remaining_by_month
+                .entry((budget.id.as_str(), transaction.date.get(0..7).unwrap_or_default()))
+                .or_insert_with(|| budget_remaining(budget, &spending, transaction))
+                .clone()
+        });
         let budget_status = if budget.is_some() {
             BudgetStatus::Budgeted
         } else {
@@ -264,22 +302,23 @@ pub fn journal(snapshot: &Snapshot, query: &JournalQuery) -> JournalView {
             continue;
         }
 
-        let category = snapshot.category_display(&transaction.category);
+        let category = categories
+            .entry(transaction.category.as_str())
+            .or_insert_with(|| snapshot.category_display(&transaction.category));
         let balance = euros(balances.get(&transaction.id).copied().unwrap_or(0));
+        let account = accounts.get(transaction.account_id.as_str()).copied();
 
-        if !tokens.is_empty()
-            && !search_text(snapshot, transaction, &category, budget.as_ref(), balance).matches(&tokens)
+        if !tokens.is_empty() && !search_text(account, transaction, category, budget.as_ref(), balance).matches(&tokens)
         {
             continue;
         }
 
-        let account = snapshot.account(&transaction.account_id);
         rows.push(JournalRow {
             transaction: transaction.clone(),
             balance,
             account_name: account.map(|account| account.name.clone()).unwrap_or_default(),
             account_color: account.map(|account| account.color.clone()).unwrap_or_default(),
-            category,
+            category: category.clone(),
             display_type,
             budget,
         });
@@ -433,5 +472,82 @@ mod tests {
         assert_eq!(view.day_groups[0].count, 2);
         assert_eq!(view.day_groups[0].net, -50.0);
         assert_eq!(view.day_groups[0].label, "jeudi 10 sept.");
+    }
+
+    #[test]
+    fn account_budget_overrides_global_and_uses_newest_matching_budget() {
+        let mut snapshot = snapshot();
+        snapshot.budgets.insert(
+            0,
+            Budget {
+                id: "account-budget".into(),
+                name: "Courses du compte".into(),
+                amount: 80.0,
+                category: "5".into(),
+                account_id: Some("a1".into()),
+            },
+        );
+        snapshot.budgets.push(Budget {
+            id: "older-account-budget".into(),
+            name: "Ancienne enveloppe".into(),
+            amount: 500.0,
+            category: "5".into(),
+            account_id: Some("a1".into()),
+        });
+        let view = journal(&snapshot, &JournalQuery::default());
+        for row in &view.rows[..2] {
+            let budget = row.budget.as_ref().unwrap();
+            assert_eq!(budget.budget_id, "account-budget");
+            assert_eq!(budget.remaining, 30.0);
+        }
+        assert!(view.rows[2].budget.is_none());
+    }
+
+    #[test]
+    fn running_balance_supports_snapshots_not_sorted_by_date() {
+        let mut snapshot = snapshot();
+        snapshot.transactions.swap(1, 3);
+        let balances = running_balances(&snapshot);
+        assert_eq!(balances["t1"], 110_000);
+        assert_eq!(balances["t4"], 105_000);
+        assert_eq!(balances["t3"], 107_000);
+        assert_eq!(balances["t2"], 5_000);
+    }
+
+    #[test]
+    fn large_journal_keeps_full_balances_when_filtering_visible_rows() {
+        let mut snapshot = snapshot();
+        snapshot.transactions = (0..20_000)
+            .map(|index| {
+                tx(
+                    &format!("t{index}"),
+                    "2026-09-10",
+                    "a1",
+                    TransactionType::Expense,
+                    1.0,
+                    "5",
+                )
+            })
+            .collect();
+        let full = journal(&snapshot, &JournalQuery::default());
+        assert_eq!(full.rows.len(), 20_000);
+        assert_eq!(full.day_groups[0].count, 20_000);
+        assert_eq!(full.visible_net, -20_000.0);
+        assert_eq!(full.rows[0].balance, -19_900.0);
+        assert_eq!(full.rows.last().unwrap().balance, 99.0);
+        assert_eq!(full.rows[0].budget.as_ref().unwrap().remaining, -19_800.0);
+
+        let filtered = journal(
+            &snapshot,
+            &JournalQuery {
+                search: "Opération t19999".into(),
+                ..JournalQuery::default()
+            },
+        );
+        assert_eq!(filtered.rows.len(), 1);
+        assert_eq!(filtered.total_transaction_count, 20_000);
+        assert_eq!(filtered.rows[0].balance, 99.0);
+        assert_eq!(filtered.rows[0].budget.as_ref().unwrap().remaining, -19_800.0);
+        assert_eq!(filtered.visible_net, -1.0);
     }
 }

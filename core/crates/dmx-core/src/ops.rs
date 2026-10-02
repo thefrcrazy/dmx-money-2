@@ -390,7 +390,8 @@ pub fn transaction_draft(snapshot: &Snapshot, id: &str) -> Option<TransactionDra
     let linked = transaction
         .linked_transaction_id
         .as_deref()
-        .and_then(|linked_id| snapshot.transaction(linked_id));
+        .and_then(|linked_id| snapshot.transaction(linked_id))
+        .filter(|linked| repo::are_transfer_counterparts(transaction, linked));
 
     if let (true, Some(linked)) = (transaction.category == TRANSFER_CATEGORY_ID, linked) {
         let (from, to) = if transaction.is_income() {
@@ -501,6 +502,11 @@ pub async fn save_transaction(pool: &DbPool, draft: TransactionDraft) -> CoreRes
         Some(linked_id) => repo::get_transaction(&mut tx, &linked_id).await?,
         None => None,
     };
+    let linked = linked.filter(|linked| {
+        existing
+            .as_ref()
+            .is_some_and(|transaction| repo::are_transfer_counterparts(transaction, linked))
+    });
 
     let ids = match (existing, linked, to_account) {
         (Some(existing), Some(linked), Some(to_account)) => {
@@ -609,10 +615,14 @@ pub async fn toggle_transactions_checked(pool: &DbPool, snapshot: &Snapshot, ids
     let checked = !all_checked;
     let mut targets: Vec<String> = ids.to_vec();
     for id in ids {
-        if let Some(linked) = snapshot
-            .transaction(id)
-            .and_then(|transaction| transaction.linked_transaction_id.clone())
-        {
+        if let Some(linked) = snapshot.transaction(id).and_then(|transaction| {
+            transaction
+                .linked_transaction_id
+                .as_deref()
+                .and_then(|linked| snapshot.transaction(linked))
+                .filter(|linked| repo::are_transfer_counterparts(transaction, linked))
+                .map(|linked| linked.id.clone())
+        }) {
             if !targets.contains(&linked) {
                 targets.push(linked);
             }
@@ -639,6 +649,7 @@ pub async fn update_transaction_inline(pool: &DbPool, id: &str, edit: InlineEdit
         Some(linked_id) => repo::get_transaction(&mut tx, linked_id).await?,
         None => None,
     };
+    let linked = linked.filter(|linked| repo::are_transfer_counterparts(&transaction, linked));
 
     let apply = |mut target: Transaction| -> CoreResult<Transaction> {
         match &edit {

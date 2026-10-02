@@ -77,4 +77,21 @@ describe('importParsers', () => {
         expect(result.unique).toHaveLength(0);
         expect(result.duplicateCount).toBe(1);
     });
+
+    test('preserves legitimate identical purchases and matches repeated statement occurrences', () => {
+        const purchase = { date: '2026-05-18', amount: 10, type: 'expense' as const, description: 'Café', category: 'food', accountId: 'account-1' };
+        expect(filterDuplicateTransactions([purchase, purchase], [], 'account-1').unique).toHaveLength(2);
+        const firstImport = [{ ...purchase, id: 'first' }, { ...purchase, id: 'second' }];
+        expect(filterDuplicateTransactions([purchase, purchase], firstImport, 'account-1').duplicateCount).toBe(2);
+        expect(filterDuplicateTransactions([purchase, purchase], [firstImport[0]], 'account-1').unique).toHaveLength(1);
+    });
+
+    test('rejects invalid monetary values and impossible dates without replacing them silently', () => {
+        for (const amount of ['', 'abc', 'NaN', '1e5', 'Infinity', '12,34,56']) expect(() => parseBankAmount(amount)).toThrow();
+        for (const date of ['', '31/02/2026', '2026-13-01', 'oops']) expect(() => parseBankDate(date)).toThrow();
+        expect(parseBankDate('29/02/2024')).toBe('2024-02-29');
+        expect(() => parseOfxTransactions('<STMTTRN><DTPOSTED>20260231<TRNAMT>12')).toThrow();
+        expect(() => parseQifTransactions('!Type:Bank\nPCafe\n^')).toThrow();
+        expect(() => parseDelimitedRows('"unfinished;123', ';')).toThrow();
+    });
 });

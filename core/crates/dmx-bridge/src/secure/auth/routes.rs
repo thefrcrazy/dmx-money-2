@@ -52,12 +52,26 @@ pub async fn regenerate_pairing_token(pool: &DbPool) -> Result<(String, String),
 
 pub async fn revoke_passkey(pool: &DbPool, passkey_id: String) -> Result<(), String> {
     let now = Utc::now().to_rfc3339();
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| map_db_error(error, "révocation du mobile"))?;
     sqlx::query("UPDATE mobile_passkeys SET revoked_at = $1 WHERE id = $2")
-        .bind(now)
-        .bind(passkey_id)
-        .execute(pool)
+        .bind(&now)
+        .bind(&passkey_id)
+        .execute(&mut *transaction)
         .await
         .map_err(|error| map_db_error(error, "révocation de la passkey"))?;
+    sqlx::query("UPDATE mobile_sessions SET revoked_at = $1 WHERE passkey_id = $2")
+        .bind(&now)
+        .bind(&passkey_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| map_db_error(error, "révocation des sessions du mobile"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| map_db_error(error, "révocation du mobile"))?;
     Ok(())
 }
 
@@ -155,12 +169,16 @@ async fn pairing_start(pool: &DbPool, body: &[u8]) -> Result<AuthRouteOutput, St
         return Err("Token de pairing expiré ou déjà utilisé.".to_string());
     }
 
-    sqlx::query("UPDATE mobile_pairing_tokens SET consumed_at = $1 WHERE id = $2")
-        .bind(&now)
-        .bind(token_id)
-        .execute(pool)
-        .await
-        .map_err(|error| map_db_error(error, "consommation du pairing mobile"))?;
+    let consumed =
+        sqlx::query("UPDATE mobile_pairing_tokens SET consumed_at = $1 WHERE id = $2 AND consumed_at IS NULL")
+            .bind(&now)
+            .bind(token_id)
+            .execute(pool)
+            .await
+            .map_err(|error| map_db_error(error, "consommation du pairing mobile"))?;
+    if consumed.rows_affected() != 1 {
+        return Err("Token de pairing déjà utilisé.".into());
+    }
 
     let session = create_session(pool, None, payload.device_label).await?;
     Ok(session_response(session, true))

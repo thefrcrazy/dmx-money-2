@@ -28,7 +28,7 @@ export async function stampServiceWorker(directory: string, version: string) {
     if (!/^const CACHE_NAME = .+;$/m.test(source)) throw new Error('Service worker cache marker missing');
     const assets = files.map(file => relative(directory, file))
         .filter(file => file.startsWith('assets/') && /\.(js|css)$/.test(file))
-        .sort().map(file => `/${file}`);
+        .sort();
     if (!/^const BUILD_ASSETS = .+;$/m.test(source)) throw new Error('Service worker asset marker missing');
     await writeFile(path, source.replace(/^const CACHE_NAME = .+;$/m,
         `const CACHE_NAME = ${JSON.stringify(`dmxmoney-shell-${version}-${build}`)};`)

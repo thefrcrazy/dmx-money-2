@@ -2,6 +2,11 @@ use super::*;
 
 pub async fn ensure_auto_configuration(pool: &DbPool, data_dir: &Path) -> Result<(), String> {
     let current = load_settings(pool).await?;
+    if (current.device_id.is_none() || current.local_host.is_none())
+        && crate::companion::relay::try_provision(pool).await?
+    {
+        return Ok(());
+    }
     let has_secret = has_managed_device_secret();
     let has_valid_certificate = current
         .certificate_expires_at
@@ -198,7 +203,7 @@ pub(super) async fn provision_managed_device(
 
 pub async fn set_enabled(pool: &DbPool, data_dir: &Path, enabled: bool) -> Result<(), String> {
     log::info!("Secure bridge set_enabled requested: enabled={enabled}");
-    if enabled {
+    if enabled && !crate::companion::relay::try_provision(pool).await? {
         ensure_auto_configuration(pool, data_dir).await?;
     }
 

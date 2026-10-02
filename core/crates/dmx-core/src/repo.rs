@@ -3,14 +3,13 @@
 //! Les écritures prennent une connexion (souvent une transaction SQL ouverte par l'appelant)
 //! afin de composer des opérations atomiques.
 
-use crate::db::DbPool;
 use crate::error::{CoreError, CoreResult, DbContext};
 use crate::models::{
     Account, AppData, Budget, Category, Periodicity, ScheduledTransaction, Transaction, TransactionType,
     DEFAULT_ACCOUNT_COLOR, DEFAULT_ACCOUNT_ICON,
 };
 use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, SqliteConnection};
+use sqlx::{Executor, Row, Sqlite, SqliteConnection};
 
 fn validate_money(value: f64) -> CoreResult<()> {
     if crate::metrics::is_valid_money(value) {
@@ -130,9 +129,9 @@ pub fn scheduled_from_row(row: &SqliteRow) -> ScheduledTransaction {
 
 // --- Comptes ---
 
-pub async fn list_accounts(pool: &DbPool) -> CoreResult<Vec<Account>> {
+pub async fn list_accounts<'e>(executor: impl Executor<'e, Database = Sqlite>) -> CoreResult<Vec<Account>> {
     let rows = sqlx::query("SELECT * FROM accounts ORDER BY rowid ASC")
-        .fetch_all(pool)
+        .fetch_all(executor)
         .await
         .ctx("récupération des comptes")?;
     Ok(rows.iter().map(account_from_row).collect())
@@ -199,9 +198,9 @@ pub async fn delete_account(connection: &mut SqliteConnection, id: &str) -> Core
 
 // --- Transactions ---
 
-pub async fn list_transactions(pool: &DbPool) -> CoreResult<Vec<Transaction>> {
+pub async fn list_transactions<'e>(executor: impl Executor<'e, Database = Sqlite>) -> CoreResult<Vec<Transaction>> {
     let rows = sqlx::query("SELECT * FROM transactions ORDER BY date DESC, rowid DESC")
-        .fetch_all(pool)
+        .fetch_all(executor)
         .await
         .ctx("récupération des transactions")?;
     Ok(rows.iter().map(transaction_from_row).collect())
@@ -279,18 +278,25 @@ pub async fn update_transaction(connection: &mut SqliteConnection, transaction: 
 
 /// Supprime une transaction et, pour un virement, sa contrepartie liée.
 pub async fn delete_transaction(connection: &mut SqliteConnection, id: &str) -> CoreResult<()> {
-    let linked: Option<String> = sqlx::query_scalar("SELECT \"linkedTransactionId\" FROM transactions WHERE id = $1")
-        .bind(id)
-        .fetch_optional(&mut *connection)
-        .await
-        .ctx("récupération du virement lié")?
-        .flatten();
+    let transaction = get_transaction(connection, id).await?;
+    let linked = match transaction
+        .as_ref()
+        .and_then(|transaction| transaction.linked_transaction_id.as_deref())
+    {
+        Some(linked_id) => get_transaction(connection, linked_id).await?,
+        None => None,
+    };
+    let linked = linked.filter(|linked| {
+        transaction
+            .as_ref()
+            .is_some_and(|transaction| are_transfer_counterparts(transaction, linked))
+    });
 
-    match linked.filter(|linked| !linked.is_empty()) {
+    match linked {
         Some(linked) => {
             sqlx::query("DELETE FROM transactions WHERE id = $1 OR id = $2")
                 .bind(id)
-                .bind(linked)
+                .bind(linked.id)
                 .execute(&mut *connection)
                 .await
                 .ctx("suppression du virement lié")?;
@@ -306,6 +312,15 @@ pub async fn delete_transaction(connection: &mut SqliteConnection, id: &str) -> 
     Ok(())
 }
 
+pub(crate) fn are_transfer_counterparts(first: &Transaction, second: &Transaction) -> bool {
+    first.display_type() == TransactionType::Transfer
+        && second.display_type() == TransactionType::Transfer
+        && first.linked_transaction_id.as_deref() == Some(second.id.as_str())
+        && second.linked_transaction_id.as_deref() == Some(first.id.as_str())
+        && first.account_id != second.account_id
+        && first.is_income() != second.is_income()
+}
+
 pub async fn set_transaction_checked(connection: &mut SqliteConnection, id: &str, checked: bool) -> CoreResult<()> {
     sqlx::query("UPDATE transactions SET checked = $1 WHERE id = $2")
         .bind(checked)
@@ -318,9 +333,9 @@ pub async fn set_transaction_checked(connection: &mut SqliteConnection, id: &str
 
 // --- Catégories ---
 
-pub async fn list_categories(pool: &DbPool) -> CoreResult<Vec<Category>> {
+pub async fn list_categories<'e>(executor: impl Executor<'e, Database = Sqlite>) -> CoreResult<Vec<Category>> {
     let rows = sqlx::query("SELECT * FROM categories ORDER BY rowid ASC")
-        .fetch_all(pool)
+        .fetch_all(executor)
         .await
         .ctx("récupération des catégories")?;
     Ok(rows.iter().map(category_from_row).collect())
@@ -361,9 +376,9 @@ pub async fn delete_category(connection: &mut SqliteConnection, id: &str) -> Cor
 
 // --- Budgets ---
 
-pub async fn list_budgets(pool: &DbPool) -> CoreResult<Vec<Budget>> {
+pub async fn list_budgets<'e>(executor: impl Executor<'e, Database = Sqlite>) -> CoreResult<Vec<Budget>> {
     let rows = sqlx::query("SELECT * FROM budgets ORDER BY rowid DESC")
-        .fetch_all(pool)
+        .fetch_all(executor)
         .await
         .ctx("récupération des budgets")?;
     Ok(rows.iter().map(budget_from_row).collect())
@@ -427,9 +442,11 @@ pub async fn delete_budget(connection: &mut SqliteConnection, id: &str) -> CoreR
 
 // --- Échéances ---
 
-pub async fn list_scheduled(pool: &DbPool) -> CoreResult<Vec<ScheduledTransaction>> {
+pub async fn list_scheduled<'e>(
+    executor: impl Executor<'e, Database = Sqlite>,
+) -> CoreResult<Vec<ScheduledTransaction>> {
     let rows = sqlx::query("SELECT * FROM scheduled_transactions ORDER BY rowid ASC")
-        .fetch_all(pool)
+        .fetch_all(executor)
         .await
         .ctx("récupération des échéances")?;
     Ok(rows.iter().map(scheduled_from_row).collect())
@@ -522,6 +539,27 @@ pub async fn replace_all_data(connection: &mut SqliteConnection, data: &AppData)
         .chain(data.budgets.iter().map(|item| item.amount))
     {
         validate_money(value)?;
+    }
+    if data.transactions.iter().any(|transaction| transaction.amount < 0.0)
+        || data.scheduled.iter().any(|scheduled| scheduled.amount < 0.0)
+        || data.budgets.iter().any(|budget| budget.amount < 0.0)
+    {
+        return Err(CoreError::validation(
+            "Les montants des opérations, échéances et budgets doivent être positifs ou nuls.",
+        ));
+    }
+    let valid_date = |date: &str| date.len() == 10 && crate::dates::parse_date(date).is_some();
+    if data
+        .transactions
+        .iter()
+        .any(|transaction| !valid_date(&transaction.date))
+        || data.scheduled.iter().any(|scheduled| {
+            !valid_date(&scheduled.next_date) || scheduled.end_date.as_deref().is_some_and(|date| !valid_date(date))
+        })
+    {
+        return Err(CoreError::validation(
+            "La sauvegarde contient une date d'opération ou d'échéance invalide.",
+        ));
     }
     for (table, context) in [
         ("transactions", "nettoyage des transactions"),
