@@ -45,9 +45,10 @@ git tag v2.0.1 && git push origin v2.0.1
 ## Secrets attendus
 
 Aucun secret n'est nécessaire pour la CI. La release Windows exige une identité de signature
-publique configurée dans l'environnement GitHub `windows-signing` (voir ci-dessous) : sans
-elle, la publication échoue avant de distribuer un installeur non signé. Les secrets Apple
-restent optionnels ; leur absence produit des builds macOS non signés.
+configurée dans l'environnement GitHub `windows-signing` : Public Trust par défaut, ou
+autosignée stable avec le mode `self-signed` choisi explicitement. Sans l'identité du mode
+choisi, la publication échoue. Les secrets Apple restent optionnels ; leur absence produit
+des builds macOS sans identité Developer ID.
 
 | Secret | Usage |
 |---|---|
@@ -110,8 +111,8 @@ le projet ou un certificat auto-signé ne corrige pas ce blocage. La signature d
 l'application, le noyau Rust, les DLL et les exécutables générés par Velopack, dont Setup et
 Update. Voir [Microsoft : Smart App Control](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/overview).
 
-Le workflow choisit explicitement `WINDOWS_SIGNING_MODE` dans l'environnement GitHub
-`windows-signing` : `public-trust` par défaut, ou `self-signed` pour une publication gratuite
+Le workflow choisit explicitement la variable de dépôt `WINDOWS_SIGNING_MODE` :
+`public-trust` par défaut, ou `self-signed` pour une publication gratuite
 avec une identité autosignée stable. Les deux modes refusent une configuration absente et
 ne basculent jamais automatiquement vers un paquet non signé. Le mode autosigné est décrit
 ci-dessous ; il ne nécessite aucun abonnement Azure.
@@ -235,12 +236,16 @@ un PFX **chiffré**, hors du dépôt et des assets publics, ainsi que son mot de
 Le certificat exporté par `new-windows-development-certificate.ps1` a une clé non exportable :
 ce script local ne peut pas fournir le PFX persistant destiné à la CI.
 
-Après autorisation du responsable de publication, configurer dans l'environnement GitHub
-`windows-signing`, limité aux références de publication autorisées :
+Après autorisation du responsable de publication, définir `WINDOWS_SIGNING_MODE=self-signed`
+comme **variable du dépôt** : le mode est évalué dès la préparation du job. Les variables
+d'environnement ne sont disponibles qu'après son démarrage
+([GitHub : disponibilité des variables](https://docs.github.com/en/actions/reference/workflows-and-actions/variables#configuration-variable-precedence)).
+Configurer les autres valeurs dans l'environnement GitHub `windows-signing`, limité aux
+références de publication autorisées :
 
 | Configuration | Type | Contenu |
 |---|---|---|
-| `WINDOWS_SIGNING_MODE` | variable | `self-signed` |
+| `WINDOWS_SIGNING_MODE` | variable du dépôt | `self-signed` |
 | `WINDOWS_SELF_SIGNED_THUMBPRINT` | variable publique | empreinte SHA-1 attendue du certificat, 40 caractères HEX |
 | `WINDOWS_SELF_SIGNED_PFX` | secret | PFX chiffré encodé en Base64 |
 | `WINDOWS_SELF_SIGNED_PASSWORD` | secret | mot de passe du PFX |

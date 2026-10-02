@@ -19,6 +19,29 @@ function Assert-Rejected([scriptblock]$Action, [string]$Expected) {
     }
     throw "L'action aurait dû être refusée : $Expected"
 }
+function New-FixturePfx([Security.Cryptography.X509Certificates.X509Certificate2[]]$Certificates,
+    [Security.Cryptography.RSA]$Key, [string]$Password) {
+    Add-Type -AssemblyName System.Security.Cryptography.Pkcs
+    $encryption = [Security.Cryptography.PbeParameters]::new([Security.Cryptography.PbeEncryptionAlgorithm]::Aes256Cbc,
+        [Security.Cryptography.HashAlgorithmName]::SHA256, 10000)
+    $keyContents = [Security.Cryptography.Pkcs.Pkcs12SafeContents]::new()
+    $certificateContents = [Security.Cryptography.Pkcs.Pkcs12SafeContents]::new()
+    $keyBag = $keyContents.AddShroudedKey($Key, $Password, $encryption)
+    $idOid = [Security.Cryptography.Oid]::new('1.2.840.113549.1.9.21')
+    [byte[]]$localKeyId = @([byte]4, [byte]20) + $Certificates[0].GetCertHash()
+    $idValue = [Security.Cryptography.AsnEncodedDataCollection]::new(
+        [Security.Cryptography.AsnEncodedData]::new($idOid, $localKeyId))
+    $null = $keyBag.Attributes.Add([Security.Cryptography.CryptographicAttributeObject]::new($idOid, $idValue))
+    for ($i = 0; $i -lt $Certificates.Count; $i++) {
+        $bag = $certificateContents.AddCertificate($Certificates[$i])
+        if ($i -eq 0) { $null = $bag.Attributes.Add([Security.Cryptography.CryptographicAttributeObject]::new($idOid, $idValue)) }
+    }
+    $builder = [Security.Cryptography.Pkcs.Pkcs12Builder]::new()
+    $builder.AddSafeContentsEncrypted($certificateContents, $Password, $encryption)
+    $builder.AddSafeContentsUnencrypted($keyContents)
+    $builder.SealWithMac($Password, [Security.Cryptography.HashAlgorithmName]::SHA256, 10000)
+    return ,$builder.Encode()
+}
 try {
     $request = [Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=Collignon Maxim, O=Developmax', $rsa,
         [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
@@ -32,11 +55,11 @@ try {
         $rsa, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
     $certificate = $request.Create($request.SubjectName, $generator, (Get-Date).AddMinutes(-1),
         (Get-Date).AddDays(1), [Security.Cryptography.RandomNumberGenerator]::GetBytes(16))
-    if ($IsWindows) {
-        $withPrivateKey = [Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey($certificate, $rsa)
-        $certificate.Dispose()
-        $certificate = $withPrivateKey
-    }
+    # PFX standard AES256/SHA256, comme celui du publisher Python ; pas d'attributs CSP/KSP natifs.
+    $pfxPath = Join-Path $temporary 'fixture.pfx'
+    $fixtureBytes = New-FixturePfx -Certificates @($certificate) -Key $rsa -Password $fixturePassword
+    try { [IO.File]::WriteAllBytes($pfxPath, $fixtureBytes) }
+    finally { [Array]::Clear($fixtureBytes, 0, $fixtureBytes.Length) }
     foreach ($rid in @('win-x64', 'win-arm64')) {
         Write-WindowsSelfSignedReleaseNotice -ReleaseDirectory $temporary -Rid $rid -Version '2.0.7' -Certificate $certificate
         $metadata = Get-Content -LiteralPath (Join-Path $temporary "WINDOWS-SIGNATURE-$rid.json") -Raw | ConvertFrom-Json
@@ -61,8 +84,6 @@ try {
 
     if ($IsWindows) {
         $prepare = Join-Path $scripts 'prepare-windows-self-signed-release.ps1'
-        $pfxPath = Join-Path $temporary 'fixture.pfx'
-        [IO.File]::WriteAllBytes($pfxPath, $certificate.Export([Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $password))
         Assert-Rejected { & $prepare -PfxPath $pfxPath -PfxPassword $password -ExpectedThumbprint ('0' * 40) `
             -PublicCertificatePath (Join-Path $temporary 'wrong.cer') } 'ne correspond pas à ExpectedThumbprint'
         if (Test-Path "Cert:/CurrentUser/My/$($certificate.Thumbprint)") { throw 'Le mauvais pin ne doit rien importer.' }
@@ -72,11 +93,10 @@ try {
         $secondCertificate = $secondRequest.Create($secondRequest.SubjectName, $generator, (Get-Date).AddMinutes(-1),
             (Get-Date).AddDays(1), [Security.Cryptography.RandomNumberGenerator]::GetBytes(16))
         try {
-            $collection = [Security.Cryptography.X509Certificates.X509Certificate2Collection]::new()
-            $null = $collection.Add($certificate)
-            $null = $collection.Add($secondCertificate)
             $multiplePfx = Join-Path $temporary 'multiple.pfx'
-            [IO.File]::WriteAllBytes($multiplePfx, $collection.Export([Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $fixturePassword))
+            $multipleBytes = New-FixturePfx -Certificates @($certificate, $secondCertificate) -Key $rsa -Password $fixturePassword
+            try { [IO.File]::WriteAllBytes($multiplePfx, $multipleBytes) }
+            finally { [Array]::Clear($multipleBytes, 0, $multipleBytes.Length) }
             Assert-Rejected { & $prepare -PfxPath $multiplePfx -PfxPassword $password -ExpectedThumbprint $certificate.Thumbprint `
                 -PublicCertificatePath (Join-Path $temporary 'multiple.cer') } 'exactement un certificat'
             if ((Test-Path "Cert:/CurrentUser/My/$($certificate.Thumbprint)") -or

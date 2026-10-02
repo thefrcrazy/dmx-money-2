@@ -130,11 +130,29 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ICLOUD_CONTAINER: ${{ secrets.DMX_ICLOUD_CONTAINER }}
         run: |
+          python3 - <<'PYTHON'
+          import os, plistlib, re
+          from pathlib import Path
+          source = Path('apple/DmxMoney-macOS/DmxMoney.entitlements')
+          if os.environ.get('APPLE_TEAM_ID'):
+              source = source.with_name('DmxMoney-iCloud.entitlements')
+              container = os.environ.get('ICLOUD_CONTAINER', '')
+              if not re.fullmatch(r'iCloud\.[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*', container):
+                  raise SystemExit('Conteneur iCloud valide requis pour les entitlements de publication.')
+          entitlements = plistlib.loads(source.read_bytes())
+          if os.environ.get('APPLE_TEAM_ID'):
+              entitlements['com.apple.developer.icloud-container-identifiers'] = [container]
+          encoded = plistlib.dumps(entitlements)
+          if b'$(' in encoded:
+              raise SystemExit('Variable Xcode non développée dans les entitlements de publication.')
+          Path('/tmp/DmxMoney-release.entitlements').write_bytes(encoded)
+          PYTHON
           echo "$APPLE_API_KEY" | base64 --decode > /tmp/AuthKey.p8
           for variant in modern legacy; do
             codesign --force --deep --options runtime --timestamp \
-              --entitlements "apple/DmxMoney-macOS/DmxMoney$( [ -n "$APPLE_TEAM_ID" ] && echo -iCloud ).entitlements" \
+              --entitlements /tmp/DmxMoney-release.entitlements \
               --sign "Developer ID Application" "dist/$variant/DmxMoney.app"
             ditto -c -k --keepParent "dist/$variant/DmxMoney.app" "/tmp/DmxMoney-$variant.zip"
             xcrun notarytool submit "/tmp/DmxMoney-$variant.zip" --wait \

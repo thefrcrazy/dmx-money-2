@@ -20,6 +20,9 @@ public static class SelfSignedPfx
     [DllImport("crypt32.dll", SetLastError = true)]
     private static extern IntPtr PFXImportCertStore(ref Blob data, IntPtr password, uint flags);
     [DllImport("crypt32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PFXVerifyPassword(ref Blob data, IntPtr password, uint flags);
+    [DllImport("crypt32.dll", SetLastError = true)]
     private static extern IntPtr CertEnumCertificatesInStore(IntPtr store, IntPtr previous);
     [DllImport("crypt32.dll")]
     private static extern bool CertFreeCertificateContext(IntPtr context);
@@ -53,6 +56,11 @@ public static class SelfSignedPfx
         {
             nativePassword = Marshal.SecureStringToGlobalAllocUnicode(password);
             var blob = new Blob { Length = checked((uint)pfx.Length), Data = pinned.AddrOfPinnedObject() };
+            if (!PFXVerifyPassword(ref blob, nativePassword, 0))
+            {
+                int error = Marshal.GetLastWin32Error();
+                throw new Win32Exception(error, $"Mot de passe/MAC PFX refusé (0x{error:X8}) : {new Win32Exception(error).Message}");
+            }
             // Refuse any extra certificate/key before persisting anything.
             using (var preview = ReadSingle(ref blob, nativePassword, UserKeySet | AlwaysCng | NoPersistKey))
                 Validate(preview, expectedThumbprint);
