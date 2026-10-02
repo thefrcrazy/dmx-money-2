@@ -17,16 +17,16 @@ La version 2 est une réécriture **native sur chaque plateforme** autour d'un *
 ```text
 .
 ├── core/crates/dmx-core/        # modèles, SQLite, règles métier, imports, .dmx, sync
-├── core/crates/dmx-bridge/      # pont compagnon mobile (HTTPS local, passkeys, ACME)
+├── core/crates/dmx-bridge/      # compagnon mobile (relais Internet chiffré, passkeys)
 ├── core/crates/dmx-ffi/         # façade UniFFI (Swift, C#)
 ├── core/crates/uniffi-bindgen/  # génération des bindings Swift
 ├── core/fixtures/               # jeux de données de test
 ├── apple/                       # apps macOS, iOS et iPadOS (XcodeGen)
 ├── windows/                     # app WinUI 3 (.NET)
 ├── linux/dmx-money-gtk/         # app GTK4/libadwaita
-├── pwa/                         # client web du compagnon mobile, embarqué par les apps de bureau
-├── cloudflare/managed-bridge/   # Worker du pont HTTPS managé
-├── cloudflare/remote-relay/     # relais Internet chiffré, PWA commune et connexion sortante
+├── pwa/                         # client web du compagnon mobile
+├── cloudflare/companion-pages/ # hébergement Pages de la PWA commune
+├── cloudflare/remote-relay/     # relais Internet chiffré et connexion sortante du bureau
 ├── shared/                      # icônes (catalogue, correspondances natives, kit GNOME), logos
 ├── tools/seed-demo/             # jeu de données de démonstration (captures, essais)
 └── scripts/                     # builds et génération des bindings
@@ -50,17 +50,17 @@ Deux options indépendantes, activables dans Paramètres :
   transmet les modifications au bureau par le Worker et sa connexion WebSocket.
   Le téléphone fonctionne en Wi-Fi, 4G ou 5G, avec appairage QR, passkey et
   transport chiffré entre appareils. Le PC doit rester allumé et DmxMoney ouvert.
-  Aucun DNS n’est à configurer par l’utilisateur. Les installations du pont local
-  existant restent disponibles en mode « Accès local hérité » ; sélectionner
-  « Passer à l’accès Internet » après synchronisation des anciennes saisies mobiles.
-  Les appairages du précédent relais nécessitent « Mettre à jour le compagnon » pour
-  changer d'origine vers Pages. Un nouvel appairage est nécessaire dans les deux cas.
+  Dans les paramètres, activer le compagnon puis scanner son QR pour appairer le
+  téléphone. L’adresse Pages et le relais Internet sont configurés automatiquement.
+  Aucun domaine, DNS, port entrant ou compte Cloudflare n’est demandé à l’utilisateur.
+  La session mobile chiffrée reprend à la réouverture tant qu'elle reste valide.
+  « Verrouiller » impose une nouvelle authentification en conservant les données locales.
 
 Les garanties, le cache hors ligne et les limites de confidentialité sont détaillés dans
 [le fonctionnement du relais](cloudflare/remote-relay/README.md) et [la synchronisation mobile](docs/mobile-sync.md).
 Le cache mobile est obfusqué en base64 pour masquer la lecture directe ; cet encodage
 reste décodable et ne remplace pas le chiffrement ni la protection du téléphone.
-La livraison actuelle et la migration vers Pages sont vérifiées dans
+Les vérifications de la version publiée 2.0.9 restent disponibles dans
 [le rapport 2.0.9](docs/verification/2026-10-02-pages-companion-2.0.9.md).
 Les mesures de l'audit initial restent disponibles dans
 [le rapport du 1 octobre 2026](docs/verification/2026-10-01-audit-compagnon.md).
@@ -75,7 +75,7 @@ L'analyse est déterministe et testée ; aucun montant ne sort d'un modèle.
 * **macOS** : sept intentions App Intents (`DmxIntents.swift`) et leurs phrases Siri, plus les
   Raccourcis. Chaque intention appelle le noyau, qui résout aussi les noms de compte et de
   catégorie — Siri peut dire « en alimentation » sans connaître d'identifiant.
-* **Compagnon mobile** : la PWA envoie la phrase à `POST /api/assistant` du pont local. L'app de
+* **Compagnon mobile** : la PWA transmet la phrase à `POST /api/assistant` par le relais chiffré. L'app de
   bureau la fait d'abord normaliser par son **modèle sur l'appareil** (Apple Intelligence sur
   macOS 26, `AssistantRewriter`) quand il est disponible, puis le noyau l'interprète et calcule la
   réponse. Sans modèle — Mac Intel, Apple Intelligence absente, Linux, Windows — la même analyse

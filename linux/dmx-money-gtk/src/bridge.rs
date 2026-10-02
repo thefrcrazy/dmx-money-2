@@ -1,4 +1,4 @@
-//! Compagnon mobile : relais Internet et compatibilité avec le pont local hérité.
+//! Compagnon mobile : relais Internet chiffré à connexion sortante.
 
 use std::cell::RefCell;
 use std::path::PathBuf;

@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Politique de préversions et notes de publication
+        run: python3 scripts/tests/test-release-policy.py
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -50,8 +52,6 @@ jobs:
           bunx tsc --noEmit
           bun test
           bun run build
-      - name: Contrats du Worker
-        run: bun test cloudflare/managed-bridge/src/index.test.ts
       - name: Dépendances du relais distant
         working-directory: cloudflare/remote-relay
         run: bun install --frozen-lockfile
@@ -121,12 +121,6 @@ jobs:
         run: ./scripts/build-apple-xcframework.sh
       - name: Tests DmxKit
         run: swift test --package-path apple/Packages/DmxKit
-      # Le projet Xcode embarque pwa/dist (la PWA servie par le pont local), qui n'est pas versionné.
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
-      - name: Client PWA du compagnon
-        run: ./scripts/build-pwa.sh
       - name: Projet Xcode
         run: cd apple && xcodegen generate
       - name: macOS modern (Apple Silicon, macOS 26 Tahoe)

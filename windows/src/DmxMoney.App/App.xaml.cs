@@ -50,7 +50,7 @@ public partial class App : Application
         Shell.Start(PwaAssetsDirectory());
     }
 
-    /// <summary>Dossier de la PWA embarquée, servi par le pont local quand il est présent.</summary>
+    /// <summary>Ancien argument de bindings conservé ; le compagnon est hébergé sur Cloudflare Pages.</summary>
     private static string? PwaAssetsDirectory()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "Assets", "pwa");

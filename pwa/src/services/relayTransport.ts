@@ -1,4 +1,6 @@
 const RELAY_ENDPOINT_KEY = 'dmxmoney.remoteRelayEndpoint';
+export const MOBILE_RELAY_LOCK_STORAGE_KEY = 'dmxmoney.remoteRelayLocked';
+export const MOBILE_RELAY_SESSION_EPOCH_KEY = 'dmxmoney.remoteRelaySessionEpoch';
 const DATABASE_NAME = 'dmxmoney-relay-keys';
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const encoder = new TextEncoder();
@@ -9,6 +11,18 @@ interface RelayKeys {
     requestKey: CryptoKey;
     responseKey: CryptoKey;
     authorization: string;
+    session?: StoredRelaySession;
+}
+
+interface StoredRelaySession {
+    nonce: string;
+    ciphertext: string;
+    expiresAt: number;
+    epoch: string;
+}
+
+export class MobileRelayLockedError extends Error {
+    constructor() { super('Session mobile verrouillée. Déverrouillez avec votre clé d’accès.'); }
 }
 
 interface RelayEnvelope {
@@ -26,10 +40,15 @@ interface RelayResponse {
 
 const pendingConfigurations = new Map<string, Promise<void>>();
 // Authentication cookies travel only inside encrypted envelopes. They never
-// become cookies of the relay operator's origin, and disappear when this tab closes.
+// become cookies of the relay operator's origin. Finalized sessions are saved
+// encrypted with a nonextractable key to survive a PWA restart.
 const sessionCookies = new Map<string, string>();
+let sessionGeneration = 0;
+let sessionCsrfToken: string | null = null;
+let sessionCsrfEndpoint: string | null = null;
 let unlockedUntil = 0;
 let unlockedEndpoint: string | null = null;
+let unlockedEpoch: string | null = null;
 let lockTimer: ReturnType<typeof setTimeout> | null = null;
 export const MOBILE_RELAY_LOCK_EVENT = 'dmxmoney-mobile-relay-lock';
 
@@ -37,24 +56,78 @@ const lockRelay = () => {
     if (unlockedEndpoint) sessionCookies.delete(unlockedEndpoint);
     unlockedUntil = 0;
     unlockedEndpoint = null;
+    unlockedEpoch = null;
+    sessionCsrfToken = null;
+    sessionCsrfEndpoint = null;
     if (lockTimer) clearTimeout(lockTimer);
     lockTimer = null;
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') window.dispatchEvent(new Event(MOBILE_RELAY_LOCK_EVENT));
 };
 
-export const markMobileRelayAuthenticated = () => {
+/** Drop this document's memory on dismissal; the encrypted session survives. */
+export const suspendMobileRelayRuntime = () => {
+    sessionGeneration += 1;
+    sessionCookies.clear();
+    unlockedUntil = 0;
+    unlockedEndpoint = null;
+    unlockedEpoch = null;
+    sessionCsrfToken = null;
+    sessionCsrfEndpoint = null;
+    if (lockTimer) clearTimeout(lockTimer);
+    lockTimer = null;
+};
+
+export const getMobileRelaySessionGeneration = () => sessionGeneration;
+export const getMobileRelaySessionEpoch = () => localStorage.getItem(MOBILE_RELAY_SESSION_EPOCH_KEY) || '';
+export const getMobileRelayCsrfToken = () => sessionCsrfEndpoint === getMobileRelayEndpoint()
+    && (!unlockedEndpoint || unlockedEpoch === getMobileRelaySessionEpoch()) ? sessionCsrfToken : null;
+export const setMobileRelayCsrfToken = (token: string | null) => {
+    sessionCsrfToken = token;
+    sessionCsrfEndpoint = token ? getMobileRelayEndpoint() : null;
+};
+
+export const markMobileRelayAuthenticated = async (expiresAt: string, generation = sessionGeneration, epoch = getMobileRelaySessionEpoch(), allowUnlock = false) => {
     const endpoint = getMobileRelayEndpoint();
     if (!endpoint) return;
+    if (generation !== sessionGeneration || epoch !== getMobileRelaySessionEpoch()) throw new MobileRelayLockedError();
+    if (!allowUnlock && localStorage.getItem(MOBILE_RELAY_LOCK_STORAGE_KEY) === '1') throw new MobileRelayLockedError();
+    const expiry = Date.parse(expiresAt);
+    if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new Error('Expiration de session invalide.');
+    const cookie = sessionCookies.get(endpoint);
+    if (cookie) {
+        const keys = await loadKeys(endpoint);
+        const nonce = crypto.getRandomValues(new Uint8Array(12));
+        const ciphertext = await crypto.subtle.encrypt({
+            name: 'AES-GCM', iv: nonce, additionalData: encoder.encode(`dmx-session-v1:${endpoint}`),
+        }, keys.responseKey, encoder.encode(cookie));
+        if (generation !== sessionGeneration || epoch !== getMobileRelaySessionEpoch()) throw new MobileRelayLockedError();
+        await updateStoredSession(keys, { nonce: bytesToBase64Url(nonce), ciphertext: bytesToBase64Url(new Uint8Array(ciphertext)), expiresAt: expiry, epoch }, generation, epoch);
+    }
+    if (generation !== sessionGeneration || epoch !== getMobileRelaySessionEpoch()) throw new MobileRelayLockedError();
+    if (!allowUnlock && localStorage.getItem(MOBILE_RELAY_LOCK_STORAGE_KEY) === '1') throw new MobileRelayLockedError();
     if (lockTimer) clearTimeout(lockTimer);
     unlockedEndpoint = endpoint;
-    unlockedUntil = Date.now() + 45 * 60 * 1000;
-    lockTimer = setTimeout(lockRelay, 45 * 60 * 1000);
+    unlockedEpoch = epoch;
+    unlockedUntil = expiry;
+    if (allowUnlock) localStorage.removeItem(MOBILE_RELAY_LOCK_STORAGE_KEY);
+    if (generation !== sessionGeneration || epoch !== getMobileRelaySessionEpoch()) {
+        localStorage.setItem(MOBILE_RELAY_LOCK_STORAGE_KEY, '1');
+        lockRelay();
+        throw new MobileRelayLockedError();
+    }
+    lockTimer = setTimeout(lockRelay, Math.min(expiry - Date.now(), 2_147_483_647));
 };
 
 export const isMobileRelayUnlocked = () => {
     const endpoint = getMobileRelayEndpoint();
-    if (!endpoint) return true;
-    return unlockedEndpoint === endpoint && unlockedUntil > Date.now();
+    if (!endpoint) return false;
+    return localStorage.getItem(MOBILE_RELAY_LOCK_STORAGE_KEY) !== '1'
+        && unlockedEndpoint === endpoint && unlockedEpoch === getMobileRelaySessionEpoch() && unlockedUntil > Date.now();
+};
+
+export const mobileRelaySessionNeedsRenewal = () => {
+    const endpoint = getMobileRelayEndpoint();
+    return Boolean(endpoint && unlockedEndpoint === endpoint && unlockedUntil - Date.now() <= 60_000);
 };
 
 export const bytesToBase64Url = (bytes: Uint8Array): string => {
@@ -111,10 +184,86 @@ const loadKeys = async (endpoint: string): Promise<RelayKeys> => {
     } finally { db.close(); }
 };
 
+const updateStoredSession = async (keys: RelayKeys, session?: StoredRelaySession, generation = sessionGeneration, epoch = getMobileRelaySessionEpoch(), removeSessionEpoch?: string) => {
+    const db = await openKeyDatabase();
+    try {
+        await new Promise<void>((resolve, reject) => {
+            const transaction = db.transaction('keys', 'readwrite');
+            const store = transaction.objectStore('keys');
+            const request = store.get(keys.endpoint);
+            request.onsuccess = () => {
+                const current = request.result as RelayKeys | undefined;
+                if (current?.authorization === keys.authorization && generation === sessionGeneration && epoch === getMobileRelaySessionEpoch()) {
+                    if (session) current.session = session;
+                    else if (removeSessionEpoch === undefined || current.session?.epoch === undefined || current.session.epoch === removeSessionEpoch) delete current.session;
+                    store.put(current);
+                }
+            };
+            transaction.oncomplete = () => resolve();
+            transaction.onabort = transaction.onerror = () => reject(transaction.error || new Error('Stockage de session indisponible.'));
+        });
+    } finally { db.close(); }
+};
+
+/** Load only the cookie; the desktop must still validate the resumed session. */
+export const restoreMobileRelaySession = async (): Promise<boolean> => {
+    const endpoint = getMobileRelayEndpoint();
+    if (!endpoint || localStorage.getItem(MOBILE_RELAY_LOCK_STORAGE_KEY) === '1') return false;
+    // A different document may have replaced this session before its storage
+    // event reaches us. Read shared state directly before reusing the cookie.
+    if (unlockedEndpoint === endpoint && unlockedEpoch !== getMobileRelaySessionEpoch()) {
+        sessionCookies.delete(endpoint);
+        lockRelay();
+    }
+    if (sessionCookies.has(endpoint)) return true;
+    const generation = sessionGeneration;
+    const epoch = getMobileRelaySessionEpoch();
+    const keys = await loadKeys(endpoint);
+    if (!keys.session) return false;
+    if (keys.session.epoch !== undefined && keys.session.epoch !== epoch) return false;
+    if (!Number.isFinite(keys.session.expiresAt)) {
+        await updateStoredSession(keys, undefined, generation, epoch);
+        return false;
+    }
+    try {
+        const plaintext = await crypto.subtle.decrypt({
+            name: 'AES-GCM', iv: base64UrlToBytes(keys.session.nonce), additionalData: encoder.encode(`dmx-session-v1:${endpoint}`),
+        }, keys.responseKey, base64UrlToBytes(keys.session.ciphertext));
+        const cookie = decoder.decode(plaintext);
+        if (!/^dmxmoney_session=[A-Za-z0-9_-]+$/.test(cookie)) throw new Error('Session conservée invalide.');
+        if (generation !== sessionGeneration || epoch !== getMobileRelaySessionEpoch()
+            || localStorage.getItem(MOBILE_RELAY_LOCK_STORAGE_KEY) === '1') throw new MobileRelayLockedError();
+        sessionCookies.set(endpoint, cookie);
+        return true;
+    } catch (error) {
+        if (error instanceof MobileRelayLockedError) throw error;
+        await updateStoredSession(keys, undefined, generation, epoch);
+        return false;
+    }
+};
+
+/** Keep pairing keys and pending edits; only the active session is invalidated. */
+export const invalidateMobileRelaySession = async (): Promise<void> => {
+    const previousEpoch = getMobileRelaySessionEpoch();
+    sessionGeneration += 1;
+    localStorage.setItem(MOBILE_RELAY_SESSION_EPOCH_KEY, crypto.randomUUID());
+    localStorage.setItem(MOBILE_RELAY_LOCK_STORAGE_KEY, '1');
+    const endpoint = getMobileRelayEndpoint();
+    const generation = sessionGeneration;
+    const epoch = getMobileRelaySessionEpoch();
+    sessionCookies.clear();
+    lockRelay();
+    if (endpoint) await updateStoredSession(await loadKeys(endpoint), undefined, generation, epoch, previousEpoch);
+};
+
 export const configureMobileRelay = (endpointInput: string, encodedSecret: string): Promise<void> => {
     const endpoint = validateRelayEndpoint(endpointInput);
     const secret = base64UrlToBytes(encodedSecret);
     if (secret.length !== 32 || bytesToBase64Url(secret) !== encodedSecret) throw new Error('La clé du relais doit contenir 32 octets.');
+    sessionGeneration += 1;
+    localStorage.setItem(MOBILE_RELAY_SESSION_EPOCH_KEY, crypto.randomUUID());
+    sessionCookies.clear();
+    lockRelay();
     const configuration = (async () => {
         const material = await crypto.subtle.importKey('raw', secret, 'HKDF', false, ['deriveKey']);
         const derive = (direction: 'request' | 'response') => crypto.subtle.deriveKey({
@@ -137,15 +286,19 @@ export const configureMobileRelay = (endpointInput: string, encodedSecret: strin
 
 export const getMobileRelayEndpoint = (): string | null => {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem(RELAY_ENDPOINT_KEY);
+    const value = localStorage.getItem(RELAY_ENDPOINT_KEY);
+    try { return value ? validateRelayEndpoint(value) : null; } catch { return null; }
 };
 
 export const clearMobileRelay = async (): Promise<void> => {
+    sessionGeneration += 1;
+    localStorage.setItem(MOBILE_RELAY_SESSION_EPOCH_KEY, crypto.randomUUID());
     await Promise.allSettled(pendingConfigurations.values());
     pendingConfigurations.clear();
     sessionCookies.clear();
     lockRelay();
     localStorage.removeItem(RELAY_ENDPOINT_KEY);
+    localStorage.removeItem(MOBILE_RELAY_LOCK_STORAGE_KEY);
     const db = await openKeyDatabase();
     try {
         await new Promise<void>((resolve, reject) => {
@@ -159,12 +312,16 @@ export const clearMobileRelay = async (): Promise<void> => {
 
 export const mobileTransportFetch = async (path: string, apiBaseUrl: string, init: RequestInit): Promise<Response> => {
     const endpoint = getMobileRelayEndpoint();
-    if (!endpoint || endpoint !== apiBaseUrl) return fetch(new URL(path, apiBaseUrl).toString(), init);
+    if (!endpoint || endpoint !== validateRelayEndpoint(apiBaseUrl)) {
+        throw new Error('Compagnon Internet non appairé. Scannez le QR affiché dans DmxMoney sur votre ordinateur.');
+    }
     if (!/^\/(?:api|auth)\//.test(path) || path.includes('..')) throw new Error('Route de relais interdite.');
+    const generation = sessionGeneration;
+    const epoch = getMobileRelaySessionEpoch();
+    const cookie = sessionCookies.get(endpoint);
     const keys = await loadKeys(endpoint);
     const id = crypto.randomUUID();
     const headers = Object.fromEntries(new Headers(init.headers).entries());
-    const cookie = sessionCookies.get(endpoint);
     if (cookie) headers.cookie = cookie;
     const body = typeof init.body === 'string' ? init.body : '';
     if (encoder.encode(body).length > MAX_BODY_BYTES) throw new Error('La modification dépasse la taille autorisée par le relais.');
@@ -177,6 +334,7 @@ export const mobileTransportFetch = async (path: string, apiBaseUrl: string, ini
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${keys.authorization}` },
         body: JSON.stringify({ id, nonce: bytesToBase64Url(nonce), ciphertext: bytesToBase64Url(new Uint8Array(ciphertext)) }),
     });
+    if (generation !== sessionGeneration || epoch !== getMobileRelaySessionEpoch()) throw new MobileRelayLockedError();
     if (!response.ok) return response;
     const envelope = await response.json() as RelayEnvelope;
     if (envelope.id !== id || typeof envelope.nonce !== 'string' || envelope.nonce.length !== 16
@@ -185,6 +343,7 @@ export const mobileTransportFetch = async (path: string, apiBaseUrl: string, ini
     }
     const clear = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64UrlToBytes(envelope.nonce) }, keys.responseKey, base64UrlToBytes(envelope.ciphertext));
     const payload = JSON.parse(decoder.decode(clear)) as RelayResponse;
+    if (generation !== sessionGeneration || epoch !== getMobileRelaySessionEpoch()) throw new MobileRelayLockedError();
     if (payload.id !== id || !Number.isInteger(payload.status) || payload.status < 200 || payload.status > 599
         || typeof payload.body !== 'string' || !payload.headers || typeof payload.headers !== 'object') {
         throw new Error('Réponse chiffrée du relais invalide.');
@@ -194,7 +353,10 @@ export const mobileTransportFetch = async (path: string, apiBaseUrl: string, ini
     if (setCookie) {
         const session = setCookie.split(';')[0];
         if (!/^dmxmoney_session=/.test(session)) throw new Error('Session du relais invalide.');
-        if (/max-age=0(?:;|$)/i.test(setCookie) || session === 'dmxmoney_session=') sessionCookies.delete(endpoint);
+        if (/max-age=0(?:;|$)/i.test(setCookie) || session === 'dmxmoney_session=') {
+            sessionCookies.delete(endpoint);
+            await updateStoredSession(keys, undefined, generation, epoch);
+        }
         else sessionCookies.set(endpoint, session);
         responseHeaders.delete('set-cookie');
     }

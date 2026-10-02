@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.0-rc.1 — 2026-10-02
+
+- Compagnon Internet unique : activation puis appairage QR/passkey sur la PWA Cloudflare Pages, avec relais chiffré et connexion WebSocket sortante du bureau.
+- Suppression du serveur HTTPS local, de la gestion DNS/ACME, de l'ancien Worker et des boutons de migration sur SwiftUI, AppKit, WinUI et GTK.
+- Configuration du compagnon simplifiée : aucune adresse de service ni domaine à saisir ; l'identité et les appareils déjà appairés au relais actuel sont conservés.
+- Reprise de la session mobile après réouverture et reconnexion, avec identifiants chiffrés dans IndexedDB, expiration après sept jours d'inactivité ou trente jours au total, révocation immédiate des sessions d'un appareil et verrouillage volontaire. La passkey reste requise à l'appairage et après verrouillage ou expiration.
+- PWA publiée séparément sur Pages ; suppression de son embarquement dans les paquets macOS et Linux et des anciens secrets partagés de la chaîne de publication.
+- Pré-version RC1 publiée sur le canal GitHub des préversions, avec flux macOS `updates-rc.json` séparé ; la version stable reste disponible pour les installations qui n'autorisent pas les préversions.
+- Le bureau doit rester allumé, connecté à Internet et DmxMoney ouvert. Le cache financier mobile reste obfusqué en base64, décodable et sans chiffrement au repos ; la session seule est protégée par chiffrement.
+
 ## 2.0.9 — 2026-10-02
 
 - PWA hébergée sur Cloudflare Pages ; API de relais séparée sur un Worker et WebSocket sortant depuis le bureau, sans DNS individuel.

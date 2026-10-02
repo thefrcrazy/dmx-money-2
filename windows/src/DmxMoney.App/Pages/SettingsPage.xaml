@@ -86,10 +86,6 @@
                                 </StackPanel>
                                 <ToggleSwitch Grid.Column="2" x:Name="BridgeSwitch" OnContent="Activé" OffContent="Activer" Toggled="OnBridgeToggled" />
                             </Grid>
-                            <StackPanel x:Name="LegacyBridgeMigration" Spacing="8" Visibility="Collapsed">
-                                <TextBlock x:Name="CompanionMigrationDetail" Style="{StaticResource DmxCaption}" TextWrapping="Wrap" />
-                                <Button x:Name="MigrateBridgeButton" Command="{x:Bind ViewModel.MigrateBridgeCommand}" Style="{StaticResource AccentButtonStyle}" />
-                            </StackPanel>
                             <Grid ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />

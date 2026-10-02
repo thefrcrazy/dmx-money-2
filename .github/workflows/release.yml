@@ -22,9 +22,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Secret d'enregistrement du pont managé : compilé dans le noyau (option_env!).
-  DMXMONEY_MANAGED_BRIDGE_REGISTRATION_SECRET: ${{ secrets.DMXMONEY_MANAGED_BRIDGE_REGISTRATION_SECRET }}
-  DMXMONEY_MANAGED_BRIDGE_URL: ${{ secrets.DMXMONEY_MANAGED_BRIDGE_URL }}
 
 jobs:
   version:
@@ -32,11 +29,14 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.resolve.outputs.version }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+      update_feed: ${{ steps.resolve.outputs.update_feed }}
     steps:
       - uses: actions/checkout@v4
       - id: resolve
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_PRERELEASE: ${{ inputs.prerelease }}
         run: |
           if [ -n "$REQUESTED_VERSION" ]; then
             version="$REQUESTED_VERSION"
@@ -53,7 +53,17 @@ jobs:
             echo "::error::La version demandée doit correspondre à VERSION avant toute construction."
             exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          prerelease=false
+          update_feed=updates.json
+          if [ "$REQUESTED_PRERELEASE" = "true" ] || [[ "$version" == *-* ]]; then
+            prerelease=true
+            update_feed=updates-rc.json
+          fi
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "update_feed=$update_feed"
+          } >> "$GITHUB_OUTPUT"
           echo "==> version $version"
 
   macos:
@@ -107,13 +117,6 @@ jobs:
           } > apple/Config/Signing.local.xcconfig
           cat apple/Config/Signing.local.xcconfig
           cd apple && xcodegen generate
-
-      # Le projet Xcode embarque pwa/dist (la PWA servie par le pont local), qui n'est pas versionné.
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
-      - name: Client PWA du compagnon
-        run: ./scripts/build-pwa.sh
 
       # Deux builds séparés, comme en DmxMoney 1.x : Apple Silicon (macOS 26+) et
       # Intel/Catalina (macOS 10.15+). Aucun binaire universel n'est publié.
@@ -174,10 +177,12 @@ jobs:
             "artifacts/DmxMoney-$version-intel-catalina.dmg" dist/legacy
 
       - name: Flux de mise à jour
+        env:
+          UPDATE_FEED: ${{ needs.version.outputs.update_feed }}
         run: |
           python3 scripts/update-feed.py "${{ needs.version.outputs.version }}" "${{ github.repository }}" \
-            > artifacts/updates.json
-          cat artifacts/updates.json
+            > "artifacts/$UPDATE_FEED"
+          cat "artifacts/$UPDATE_FEED"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -317,11 +322,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libdbus-1-dev \
                                   libfuse2t64 desktop-file-utils
-      - name: Client PWA du compagnon
-        run: |
-          curl -fsSL https://bun.sh/install | bash
-          export PATH="$HOME/.bun/bin:$PATH"
-          cd pwa && bun install --frozen-lockfile && bun run build
       - name: appimagetool
         run: |
           sudo curl -fsSL -o /usr/local/bin/appimagetool \
@@ -347,12 +347,6 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
-      - name: PWA embarquée
-        working-directory: pwa
-        run: bun install --frozen-lockfile && bun run build
       - uses: flathub-infra/flatpak-github-actions/flatpak-builder@master
         with:
           bundle: com.dmxmoney.app.flatpak
@@ -387,7 +381,7 @@ jobs:
       - name: Release GitHub
         env:
           GH_TOKEN: ${{ github.token }}
-          PRERELEASE: ${{ inputs.prerelease }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
           version="${{ needs.version.outputs.version }}"
           # Les assets d'une release doivent porter des noms uniques.
@@ -397,8 +391,8 @@ jobs:
             exit 1
           fi
           flags=()
-          if [ "$PRERELEASE" = "true" ] || [[ "$version" == *-* ]]; then
-            flags+=(--prerelease)
+          if [ "$PRERELEASE" = "true" ]; then
+            flags+=(--prerelease --latest=false)
           fi
           gh release create "v$version" --target "$GITHUB_SHA" --title "DmxMoney $version" \
             --notes-file notes.md "${flags[@]}" $(find artifacts -type f | tr '\n' ' ')

@@ -54,8 +54,6 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>© Maxim Collignon. Licence MIT.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>DmxMoney sert l'application compagnon mobile sur votre réseau local.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSupportsAutomaticTermination</key>

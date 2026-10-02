@@ -249,24 +249,17 @@ python3 -c "import json;print(list(json.load(open('dist/modern/DmxMoney.app/Cont
 
 ## Compagnon mobile et PWA
 
-> **Les deux versions partagent le pont.** DmxMoney 1.x et 2.x utilisent la même entrée de
-> trousseau (`DmxMoney Secure Bridge`), donc le même sous-domaine et le même certificat. Si la
-> 1.x tourne, elle garde le port habituel et un mobile déjà appairé continue de lui parler — avec
-> l'ancien client PWA. Pour tester la 2.x : quitter la 1.x, puis réappairer le mobile avec le QR
-> de la 2.x (le port change, donc le lien d'appairage aussi). La page Compagnon mobile affiche
-> l'adresse réellement servie et rappelle ce point.
+Dans les paramètres, activer le compagnon puis scanner le QR sur le téléphone. La PWA
+est hébergée sur [Cloudflare Pages](https://dmxmoney-companion.pages.dev/mobile/) et
+les demandes passent par le relais Internet chiffré. Le Mac ouvre une connexion
+WebSocket sortante ; aucun serveur HTTPS local, DNS personnel ou port entrant n'est utilisé.
+Le téléphone fonctionne en Wi-Fi, 4G ou 5G tant que le Mac est allumé, connecté à Internet
+et DmxMoney ouvert. L'appairage impose une passkey avec vérification utilisateur.
 
-
-Les apps de bureau **embarquent le client PWA** (`pwa/dist`, construit par
-`scripts/build-pwa.sh` et copié dans `Resources`). Le pont local le sert lui-même et le QR
-d'appairage pointe vers le pont : le mobile charge donc la PWA de *cette* version, et non celle
-déployée sur le Worker Cloudflare. Sans ce dossier, le pont redirige vers la PWA publique
-(comportement 1.x).
-
-```bash
-./scripts/build-pwa.sh          # pwa/dist
-./scripts/build-macos.sh        # embarque pwa/dist dans l'app
-```
+Les deux apps macOS utilisent ce même fonctionnement. Leurs paquets n'embarquent pas
+de PWA ; le client mobile est publié séparément avec `scripts/deploy-pwa.sh`.
+Voir [les garanties de synchronisation](../docs/mobile-sync.md) et
+[le fonctionnement du relais](../cloudflare/remote-relay/README.md).
 
 ## Reprise d'une base DmxMoney 1.x
 

@@ -11,10 +11,10 @@ public static class AppInfo
 
     public static IReadOnlyList<string> ReleaseNotes { get; } =
     [
-        "DmxMoney devient une application native : WinUI 3 sur Windows, AppKit et SwiftUI sur Mac, GTK4 sur Linux.",
-        "Vos données DmxMoney 1.x sont reprises au premier lancement ; la base d'origine n'est jamais modifiée.",
-        "Pont PWA sécurisé pour accéder à vos comptes depuis un mobile, avec appairage par QR et passkey.",
-        "Budget, échéancier, analyses et prédictions sont calculés par le même noyau sur les trois systèmes.",
-        "Installation et mises à jour légères, sans navigateur embarqué.",
+        "Compagnon Internet unique : activez-le puis scannez le QR pour appairer votre téléphone.",
+        "La PWA Cloudflare Pages transmet les modifications au bureau par un relais chiffré en Wi-Fi, 4G ou 5G.",
+        "Le serveur local, les certificats DNS et les actions de migration ont été retirés.",
+        "La connexion mobile reprend après réouverture, avec une passkey et un verrouillage volontaire.",
+        "Pré-version 2.1.0 RC1 : les mises à jour stables restent séparées.",
     ];
 }

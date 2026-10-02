@@ -42,6 +42,22 @@ cargo fmt --all --check && cargo clippy --workspace --all-targets && cargo test 
 git tag v2.0.1 && git push origin v2.0.1
 ```
 
+Pour une RC, utiliser la même version SemVer partout, par exemple `2.1.0-rc.1`
+et le tag `v2.1.0-rc.1`. Apple conserve `MARKETING_VERSION=2.1.0` et un numéro de
+build croissant ; l'interface affiche la version complète du noyau. Windows garde
+la version complète pour Velopack et `AssemblyInformationalVersion`, avec des
+versions de fichiers et d'assemblage numériques. AppStream utilise `2.1.0~rc.1`
+avec `type="development"` pour classer la RC avant la version stable.
+Voir [le guide de publication GNOME](https://handbook.gnome.org/maintainers/making-a-release.html#before-tagging-the-release).
+
+Le suffixe de préversion impose une release GitHub `prerelease=true` et
+`--latest=false`, même sur un tag. Son flux macOS est publié uniquement dans
+`updates-rc.json` sur cette release ; `updates.json` et Latest restent réservés
+à la version stable. Les apps macOS et Windows savent consulter les préversions
+si ce choix est activé, et les installations RC les autorisent par défaut.
+Les versions macOS anciennes peuvent conserver leur propre réglage d'autorisation.
+La publication d'une RC ne modifie aucun asset d'une release stable existante.
+
 ## Secrets attendus
 
 Aucun secret n'est nécessaire pour la CI. La release Windows exige une identité de signature
@@ -52,8 +68,6 @@ des builds macOS sans identité Developer ID.
 
 | Secret | Usage |
 |---|---|
-| `DMXMONEY_MANAGED_BRIDGE_REGISTRATION_SECRET` | secret d'enregistrement du pont managé, compilé dans le noyau (`option_env!`) |
-| `DMXMONEY_MANAGED_BRIDGE_URL` | URL du Worker Cloudflare du pont managé |
 | `APPLE_CERTIFICATE_P12` / `APPLE_CERTIFICATE_PASSWORD` | certificat Developer ID (base64) et son mot de passe |
 | `APPLE_TEAM_ID` | équipe de signature ; active aussi les entitlements iCloud |
 | `DMX_ICLOUD_CONTAINER` | conteneur CloudKit (`iCloud.com.dmxmoney.app`) |
@@ -306,5 +320,23 @@ Références Microsoft :
   Cargo pendant le build (`--share=network`) ; pour Flathub, générer `cargo-sources.json` avec
   `flatpak-builder-tools/cargo` et retirer ce réglage.
 
-Le client PWA (`pwa/dist`) est construit avant l'installation pour être servi par le pont local ;
-sans lui, le pont expose seulement l'API.
+Le compagnon PWA est hébergé sur Cloudflare Pages. Les paquets Linux embarquent
+uniquement l'application native ; aucun serveur web local ni client PWA n'est installé.
+
+## Compagnon Cloudflare Pages
+
+La publication du client mobile est indépendante des paquets de bureau :
+
+```bash
+./scripts/deploy-pwa.sh
+```
+
+Ce script construit `pwa/dist`, prépare le dossier Pages `/mobile/` avec ses en-têtes
+de sécurité et publie sur le projet `dmxmoney-companion`, branche `main`. Il utilise
+Wrangler verrouillé par `cloudflare/remote-relay/package.json` et la session Cloudflare
+de l'éditeur, ou un jeton autorisé à publier ce projet. Aucun secret d'enregistrement
+commun, accès DNS ou namespace KV n'est nécessaire. Les utilisateurs activent simplement
+le compagnon dans les paramètres puis appairent leur téléphone avec le QR.
+
+La publication du Worker `dmxmoney-remote-relay` reste séparée et conserve son Durable
+Object et ses identités. Voir [le déploiement du relais](../cloudflare/remote-relay/README.md).

@@ -12,7 +12,7 @@ def notes(changelog: Path, version: str) -> str:
         if line.startswith("## "):
             if capture:
                 break
-            capture = line[3:].lstrip("[").startswith(version)
+            capture = line[3:].strip().split(maxsplit=1)[0].strip("[]") == version
             continue
         if capture:
             lines.append(line)

@@ -83,8 +83,9 @@ pub async fn authorize_api_request(
 ) -> Result<(), String> {
     let session = extract_cookie(headers, SESSION_COOKIE).ok_or_else(|| "Session mobile manquante.".to_string())?;
     let row = sqlx::query(
-        "SELECT id, csrf_hash, passkey_id, expires_at, revoked_at
-         FROM mobile_sessions WHERE session_hash = $1",
+        "SELECT s.id, s.csrf_hash, s.passkey_id, s.expires_at, s.revoked_at, s.created_at
+         FROM mobile_sessions s JOIN mobile_passkeys p ON p.id=s.passkey_id
+         WHERE s.session_hash = $1 AND p.revoked_at IS NULL",
     )
     .bind(hash_secret(&session))
     .fetch_optional(pool)
@@ -97,7 +98,15 @@ pub async fn authorize_api_request(
         .map_err(|error| error.to_string())?;
     let revoked_at = row.try_get::<Option<String>, _>("revoked_at").unwrap_or(None);
     let passkey_id = row.try_get::<Option<String>, _>("passkey_id").unwrap_or(None);
-    if revoked_at.is_some() || is_past(&expires_at) || passkey_id.is_none() {
+    let created_at: String = row.try_get("created_at").map_err(|error| error.to_string())?;
+    let created = chrono::DateTime::parse_from_rfc3339(&created_at)
+        .map_err(|_| "Session mobile invalide.")?
+        .with_timezone(&Utc);
+    if revoked_at.is_some()
+        || is_past(&expires_at)
+        || created + ChronoDuration::days(SESSION_ABSOLUTE_TTL_DAYS) <= Utc::now()
+        || passkey_id.is_none()
+    {
         return Err("Session mobile expirée ou non finalisée.".to_string());
     }
 
@@ -113,10 +122,14 @@ pub async fn authorize_api_request(
         }
     }
 
-    let now = Utc::now().to_rfc3339();
-    let _ = sqlx::query("UPDATE mobile_sessions SET last_used_at = $1 WHERE id = $2")
-        .bind(now)
+    let now = Utc::now();
+    let renewed_expiry = (now + ChronoDuration::days(SESSION_IDLE_TTL_DAYS))
+        .min(created + ChronoDuration::days(SESSION_ABSOLUTE_TTL_DAYS))
+        .to_rfc3339();
+    let _ = sqlx::query("UPDATE mobile_sessions SET last_used_at = $1, expires_at = MAX(expires_at, $3) WHERE id = $2 AND revoked_at IS NULL")
+        .bind(now.to_rfc3339())
         .bind(row.try_get::<String, _>("id").unwrap_or_default())
+        .bind(renewed_expiry)
         .execute(pool)
         .await;
 
@@ -131,6 +144,7 @@ pub async fn handle_auth_request(
     body: &[u8],
 ) -> Result<AuthRouteOutput, String> {
     match (method, path) {
+        ("POST", "/auth/session") => resume_session(pool, headers).await,
         ("POST", "/auth/pairing/start") => pairing_start(pool, body).await,
         ("POST", "/auth/passkey/register/options") => register_options(pool, headers, body).await,
         ("POST", "/auth/passkey/register/verify") => register_verify(pool, headers, body).await,
@@ -295,22 +309,12 @@ async fn unlink(pool: &DbPool, headers: &HashMap<String, String>) -> Result<Auth
             .map_err(|error| map_db_error(error, "lecture de session mobile"))?;
 
         if let Some(row) = row {
-            let now = Utc::now().to_rfc3339();
             let session_id = row.try_get::<String, _>("id").map_err(|error| error.to_string())?;
             let passkey_id = row.try_get::<Option<String>, _>("passkey_id").unwrap_or(None);
-
-            let _ = sqlx::query("UPDATE mobile_sessions SET revoked_at = $1 WHERE id = $2")
-                .bind(&now)
-                .bind(session_id)
-                .execute(pool)
-                .await;
-
             if let Some(passkey_id) = passkey_id {
-                let _ = sqlx::query("UPDATE mobile_passkeys SET revoked_at = $1 WHERE id = $2 AND revoked_at IS NULL")
-                    .bind(&now)
-                    .bind(passkey_id)
-                    .execute(pool)
-                    .await;
+                revoke_passkey(pool, passkey_id).await?;
+            } else {
+                revoke_session(pool, &session_id).await?;
             }
         }
     }
@@ -331,46 +335,21 @@ fn build_webauthn(settings: &SecureBridgeSettings, headers: &HashMap<String, Str
     Ok(Webauthn::new(rp_id, "DmxMoney", &origin).require_user_verification(true))
 }
 
-/// Origine attendue dans `clientDataJSON`, que `passkey-auth` compare telle quelle. La PWA vient
-/// soit du Worker public, soit du pont lui-même quand l'application l'embarque : le QR d'appairage
-/// ouvre alors `https://{hôte local}:{port}`. Les deux partagent le RP ID du domaine : l'origine de
-/// la requête est retenue quand c'est l'une d'elles, l'origine publique sinon, comme en 1.x.
-fn passkey_origin(settings: &SecureBridgeSettings, headers: &HashMap<String, String>) -> Result<String, String> {
-    let public = secure_app_origin(settings).ok_or_else(|| "Origine PWA manquante.".to_string())?;
-    match headers.get("origin").map(|value| value.trim()) {
-        Some(origin) if origin == public || is_local_bridge_origin(settings, origin) => Ok(origin.to_string()),
-        _ => Ok(public),
-    }
-}
-
-/// Vrai pour l'origine exacte d'une page servie en HTTPS par ce pont, quel que soit le port : seul le
-/// pont détient le certificat de son hôte local.
-fn is_local_bridge_origin(settings: &SecureBridgeSettings, origin: &str) -> bool {
-    let Some(local_host) = settings
-        .local_host
-        .as_deref()
-        .map(str::trim)
-        .filter(|host| !host.is_empty())
-    else {
-        return false;
-    };
-    url::Url::parse(origin).is_ok_and(|url| {
-        url.scheme() == "https"
-            && url.host_str().is_some_and(|host| host.eq_ignore_ascii_case(local_host))
-            && url.origin().ascii_serialization() == origin
-    })
+/// L'origine WebAuthn est exclusivement celle de la PWA HTTPS configurée.
+fn passkey_origin(settings: &SecureBridgeSettings, _headers: &HashMap<String, String>) -> Result<String, String> {
+    secure_app_origin(settings).ok_or_else(|| "Origine PWA manquante.".to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const PUBLIC_ORIGIN: &str = "https://dmxmoney.develop-max.com";
+    const PUBLIC_ORIGIN: &str = "https://dmxmoney-companion.pages.dev";
 
     fn settings() -> SecureBridgeSettings {
         SecureBridgeSettings {
             enabled: true,
-            domain: Some("develop-max.com".to_string()),
+            domain: Some("dmxmoney-companion.pages.dev".to_string()),
             app_url: Some(format!("{PUBLIC_ORIGIN}/mobile")),
             local_host: Some("mac-1234.sync.develop-max.com".to_string()),
             device_id: Some("mac-1234".to_string()),
@@ -387,9 +366,12 @@ mod tests {
     }
 
     #[test]
-    fn passkeys_accept_the_pwa_served_by_the_local_bridge() {
+    fn passkeys_never_accept_the_previous_local_bridge_origin() {
         let origin = "https://mac-1234.sync.develop-max.com:8801";
-        assert_eq!(passkey_origin(&settings(), &from_origin(origin)).unwrap(), origin);
+        assert_eq!(
+            passkey_origin(&settings(), &from_origin(origin)).unwrap(),
+            PUBLIC_ORIGIN
+        );
     }
 
     #[test]

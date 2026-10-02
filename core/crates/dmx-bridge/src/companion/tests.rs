@@ -1,8 +1,6 @@
-//! Tests de contrat de l'API compagnon : routes, authentification par session et CORS, via un
-//! vrai serveur HTTP local (sans TLS ni service managé).
+//! Contrat du dispatch exécuté sur le bureau par le relais : routes, sessions et mutations.
 
 use super::*;
-use crate::NoopEvents;
 use dmx_core::Engine;
 use std::sync::atomic::AtomicI64;
 
@@ -17,8 +15,7 @@ impl crate::BridgeEvents for CountingEvents {
 
 struct Harness {
     engine: Engine,
-    companion: Arc<MobileCompanion>,
-    port: u16,
+    host: BridgeHost,
     cookie: String,
     csrf: String,
     events: Arc<CountingEvents>,
@@ -28,16 +25,12 @@ impl Harness {
     fn start() -> Self {
         let engine = Engine::open_in_memory().unwrap();
         let events = Arc::new(CountingEvents(AtomicI64::new(-1)));
-        let preferred_port = 20000 + (std::process::id() % 20000) as u16;
 
         let (cookie, csrf) = ("session-brute".to_string(), "csrf-brut".to_string());
         engine.block_on(async {
             sqlx::query("INSERT OR IGNORE INTO settings (id) VALUES (1)").execute(engine.pool()).await.unwrap();
-            sqlx::query("UPDATE settings SET \"mobileAccessEnabled\" = 1, \"mobileAccessPort\" = $1 WHERE id = 1")
-                .bind(i64::from(preferred_port))
-                .execute(engine.pool())
-                .await
-                .unwrap();
+            sqlx::query("INSERT INTO mobile_passkeys (id, credential_id, public_key, created_at) VALUES ('pk1', 'test-credential', '{}', $1)")
+                .bind(chrono::Utc::now().to_rfc3339()).execute(engine.pool()).await.unwrap();
             sqlx::query(
                 "INSERT INTO mobile_sessions (id, session_hash, csrf_hash, passkey_id, device_label, expires_at, created_at)
                  VALUES ('s1', $1, $2, 'pk1', 'Test', $3, $4)",
@@ -51,20 +44,17 @@ impl Harness {
             .unwrap();
         });
 
-        let companion = MobileCompanion::new(BridgeHost {
+        let host = BridgeHost {
             pool: engine.pool().clone(),
             runtime: engine.handle(),
             data_dir: std::env::temp_dir().join(format!("dmx-bridge-test-{}", uuid::Uuid::new_v4())),
             assets_dir: None,
             events: events.clone(),
-        });
-        companion.bootstrap().unwrap();
-        let port = companion.status().unwrap().port.expect("serveur démarré");
+        };
 
         Self {
             engine,
-            companion,
-            port,
+            host,
             cookie,
             csrf,
             events,
@@ -72,33 +62,38 @@ impl Harness {
     }
 
     fn request(&self, method: &str, path: &str, body: Option<&str>, authenticated: bool) -> (u16, String, String) {
-        let mut stream = TcpStream::connect(("127.0.0.1", self.port)).unwrap();
-        let body = body.unwrap_or_default();
-        let mut headers = format!(
-            "{method} {path} HTTP/1.1\r\nHost: localhost\r\nOrigin: https://pwa.example\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
-            body.len()
-        );
-        if authenticated {
-            headers.push_str(&format!(
-                "Cookie: dmxmoney_session={}\r\nX-Dmx-Csrf: {}\r\n",
-                self.cookie, self.csrf
-            ));
-        }
-        headers.push_str("\r\n");
-        stream.write_all(headers.as_bytes()).unwrap();
-        stream.write_all(body.as_bytes()).unwrap();
-
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        let (head, body) = response.split_once("\r\n\r\n").unwrap_or((&response, ""));
-        let status = head.split_whitespace().nth(1).unwrap_or("0").parse().unwrap_or(0);
-        (status, head.to_string(), body.to_string())
+        self.request_with_csrf(method, path, body, authenticated, true)
     }
-}
 
-impl Drop for Harness {
-    fn drop(&mut self) {
-        self.companion.shutdown();
+    fn request_with_csrf(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&str>,
+        authenticated: bool,
+        csrf: bool,
+    ) -> (u16, String, String) {
+        let mut headers = HashMap::from([("content-type".into(), "application/json".into())]);
+        if authenticated {
+            headers.insert("cookie".into(), format!("dmxmoney_session={}", self.cookie));
+            if csrf {
+                headers.insert("x-dmx-csrf".into(), self.csrf.clone());
+            }
+        }
+        let response = http::handle_request(
+            HttpRequest {
+                method: method.into(),
+                path: path.into(),
+                headers,
+                body: body.unwrap_or_default().as_bytes().to_vec(),
+            },
+            &self.host,
+        );
+        (
+            response.status,
+            String::new(),
+            String::from_utf8(response.body).unwrap(),
+        )
     }
 }
 
@@ -108,10 +103,6 @@ fn api_requires_a_finalized_session() {
     let (status, _, body) = harness.request("GET", "/api/accounts", None, false);
     assert_eq!(status, 401);
     assert!(body.contains("Session mobile manquante."));
-
-    let (status, head, _) = harness.request("OPTIONS", "/api/accounts", None, false);
-    assert_eq!(status, 204);
-    assert!(head.contains("Access-Control-Allow-Origin: https://pwa.example"));
 }
 
 #[test]
@@ -293,26 +284,17 @@ fn crud_routes_match_the_v1_contract() {
 #[test]
 fn mutations_require_the_csrf_token() {
     let harness = Harness::start();
-    let mut stream = TcpStream::connect(("127.0.0.1", harness.port)).unwrap();
     let body = r##"{"id":"c1","name":"Test","icon":"Tag","color":"#000"}"##;
-    let request = format!(
-        "POST /api/categories HTTP/1.1\r\nHost: localhost\r\nCookie: dmxmoney_session={}\r\nContent-Length: {}\r\n\r\n{body}",
-        harness.cookie,
-        body.len()
-    );
-    stream.write_all(request.as_bytes()).unwrap();
-    let mut response = String::new();
-    stream.read_to_string(&mut response).unwrap();
-    assert!(response.starts_with("HTTP/1.1 401"));
+    let (status, _, response) = harness.request_with_csrf("POST", "/api/categories", Some(body), true, false);
+    assert_eq!(status, 401);
     assert!(response.contains("Jeton CSRF manquant."));
 }
 
 #[test]
-fn pages_redirect_or_404_without_local_assets() {
+fn the_relay_dispatch_never_serves_a_local_pwa() {
     let harness = Harness::start();
     let (status, _, _) = harness.request("GET", "/mobile", None, false);
     assert_eq!(status, 404);
-    let _ = NoopEvents;
 }
 
 #[test]

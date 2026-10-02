@@ -32,10 +32,22 @@ class Handler(BaseHTTPRequestHandler):
 
 source = (ROOT / 'apple/DmxMoney-macOS-Shared/UpdateChecker.swift').read_text()
 source = source.replace('import DmxKit', '''enum AppInfo {
-    static let version = "1.0"
+    static var version = "2.0.9"
     static let systemVersion = "26.0"
     static func isVersion(_ version: String, newerThan other: String) -> Bool { true }
-}''')
+}
+let fixtureSuite = "DmxMoneyUpdaterFixture.\\(UUID().uuidString)"
+let fixtureDefaults = UserDefaults(suiteName: fixtureSuite)!
+var offeredVersion: String?
+''')
+source = source.replace('UserDefaults.standard', 'fixtureDefaults')
+a = source.index('    private func presentUpdate(')
+b = source.index('    private func performDownloadAndRestart(', a)
+source = source[:a] + '''    private func presentUpdate(_ feed: Feed, build: Feed.Build, current: String, silent: Bool) {
+        offeredVersion = feed.version
+    }
+
+''' + source[b:]
 a = source.index('    private func applyDmgAndRestart(')
 b = source.index('    private func presentUpToDate', a)
 source = source[:a] + '''    private func applyDmgAndRestart(dmgURL: URL) {
@@ -48,9 +60,41 @@ source = source[:a] + '''    private func applyDmgAndRestart(dmgURL: URL) {
 ''' + source[b:]
 source += '''
 extension UpdateChecker {
+    func testReleasePolicy() {
+        defer { fixtureDefaults.removePersistentDomain(forName: fixtureSuite) }
+        func offer(_ version: String) -> String? {
+            offeredVersion = nil
+            handle(Feed(version: version, notes: nil, platforms: nil,
+                        url: URL(string: "https://updates.example.com/fixture.dmg"),
+                        minimumSystemVersion: nil), silent: true)
+            return offeredVersion
+        }
+        fixtureDefaults.removeObject(forKey: "DmxIncludePrereleases")
+        AppInfo.version = "2.0.9"
+        precondition(!includePrereleases, "stable installations must default to stable updates")
+        precondition(offer("2.1.0-rc.1") == nil, "a direct JSON feed must honor prerelease opt-in")
+        precondition(offer("2.1.0") == "2.1.0", "stable updates must remain available")
+        precondition(!allowsVersion("2.1.0", prerelease: true), "the GitHub prerelease flag must also be honored")
+        precondition(allowsVersion("2.1.0+build-debug"), "build metadata is not a prerelease")
+        includePrereleases = true
+        precondition(offer("2.1.0-rc.1") == "2.1.0-rc.1", "explicit opt-in allows RC updates")
+        AppInfo.version = "2.1.0-rc.1"
+        includePrereleases = false
+        precondition(offer("2.1.0-rc.2") == nil, "explicit opt-out must override the installed RC")
+        fixtureDefaults.removeObject(forKey: "DmxIncludePrereleases")
+        precondition(includePrereleases, "RC installations must default to RC updates")
+        precondition(offer("2.1.0-rc.2") == "2.1.0-rc.2")
+        precondition(offer("2.1.0") == "2.1.0", "an RC can update to the final stable release")
+        print("PASS: stable/RC defaults and explicit opt-in apply to JSON and GitHub feeds")
+    }
+
     func testDownload(_ url: URL) {
         performDownloadAndRestart(build: Feed.Build(url: url, minimumSystemVersion: nil), version: "test")
     }
+}
+if CommandLine.arguments[1] == "policy" {
+    UpdateChecker.shared.testReleasePolicy()
+    exit(0)
 }
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
@@ -92,7 +136,7 @@ try:
         env = dict(os.environ)
         env.setdefault('DEVELOPER_DIR', '/Applications/Xcode.app/Contents/Developer')
         subprocess.run(['xcrun', 'swiftc', '-module-cache-path', str(folder / 'cache'), str(swift), '-o', str(binary)], env=env, check=True)
-        for mode in ('success', 'error', 'cancel'):
+        for mode in ('policy', 'success', 'error', 'cancel'):
             subprocess.run([str(binary), mode, f'http://127.0.0.1:{server.server_port}/{mode}'], env=env, check=True, timeout=15)
 finally:
     server.shutdown()

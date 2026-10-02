@@ -119,6 +119,7 @@ export interface BankContextType {
     mobileConnectionState: 'idle' | 'disconnected' | 'connecting' | 'connected' | 'offline' | 'error';
     mobileConnectionError: string | null;
     connectMobileCompanion: () => Promise<void>;
+    lockMobileCompanion: () => Promise<void>;
     unlinkMobileCompanion: () => Promise<void>;
 }
 
