@@ -90,7 +90,11 @@ public static class SelfSignedPfx
     private static X509Certificate2 ReadSingle(ref Blob blob, IntPtr password, uint flags)
     {
         IntPtr store = PFXImportCertStore(ref blob, password, flags);
-        if (store == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "Import PFX refusé.");
+        if (store == IntPtr.Zero)
+        {
+            int error = Marshal.GetLastWin32Error();
+            throw new Win32Exception(error, $"Import PFX refusé (0x{error:X8}) : {new Win32Exception(error).Message}");
+        }
         IntPtr context = IntPtr.Zero;
         X509Certificate2 certificate = null;
         try
