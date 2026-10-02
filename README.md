@@ -60,8 +60,10 @@ Les garanties, le cache hors ligne et les limites de confidentialité sont déta
 [le fonctionnement du relais](cloudflare/remote-relay/README.md) et [la synchronisation mobile](docs/mobile-sync.md).
 Le cache mobile est obfusqué en base64 pour masquer la lecture directe ; cet encodage
 reste décodable et ne remplace pas le chiffrement ni la protection du téléphone.
-Les corrections, mesures et limites de validation sont recensées dans
-[l’audit du 1 octobre 2026](docs/verification/2026-10-01-audit-compagnon.md).
+La livraison actuelle et la migration vers Pages sont vérifiées dans
+[le rapport 2.0.9](docs/verification/2026-10-02-pages-companion-2.0.9.md).
+Les mesures de l'audit initial restent disponibles dans
+[le rapport du 1 octobre 2026](docs/verification/2026-10-01-audit-compagnon.md).
 
 ## Assistant (Siri, compagnon mobile)
 
