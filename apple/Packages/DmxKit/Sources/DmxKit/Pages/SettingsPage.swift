@@ -68,7 +68,7 @@ public struct SettingsPage: View {
     @State private var selectedTab: SettingsTab = .general
     @State private var bridgeBusy = false
     @State private var refreshTick = 0
-    @State private var includePrereleases: Bool = (UserDefaults.standard.object(forKey: "DmxIncludePrereleases") as? Bool) ?? true
+    @State private var includePrereleases: Bool = (UserDefaults.standard.object(forKey: "DmxIncludePrereleases") as? Bool) ?? AppInfo.version.contains("-")
 
     public init(actions: SettingsActions) {
         self.actions = actions
@@ -257,46 +257,30 @@ public struct SettingsPage: View {
         }
     }
 
-    // MARK: Pont PWA
+    // MARK: Compagnon Internet
 
     private var bridgeSection: some View {
         let status = store.bridgeStatus
         let bridge = status?.secureBridge
         let enabled = bridge?.enabled ?? false
         let active = bridge?.active ?? false
-        let certificateReady = bridge?.certificateReady ?? false
-        let isRemote = bridge?.apiUrl?.contains("/relay/") == true
-        let hasLegacyBridge = !isRemote && bridge?.localHost != nil
-        let needsHostedPwaUpdate = CompanionMigration.needsHostedPwaUpdate(apiUrl: bridge?.apiUrl, appUrl: bridge?.appUrl)
         let passkeys = bridge?.passkeys.filter { $0.revokedAt == nil } ?? []
-        let localLabel = (status?.active ?? false) ? "Actif" : (enabled ? "Démarrage" : "Inactif")
 
         let state: (label: String, detail: String, color: Color) = {
             if !enabled { return ("Désactivé", "Activez l’accès Internet pour modifier les données de cet ordinateur depuis votre téléphone, en Wi-Fi, 4G ou 5G, puis scannez le QR.", .secondary) }
-            if isRemote { return (active ? "Prêt à appairer" : "Connexion Internet", "Les modifications de votre téléphone passent par le relais chiffré jusqu’à cet ordinateur, en Wi-Fi, 4G ou 5G. DmxMoney doit rester ouvert sur cet ordinateur allumé et connecté à Internet.", active ? DmxColors.income : DmxColors.warning) }
-            return ("Accès local hérité", "Ancien accès local : le téléphone doit être sur le même réseau que cet ordinateur. Cet accès ne fonctionne pas en 4G ou 5G.", DmxColors.warning)
+            return (active ? "Prêt à appairer" : "Connexion Internet", "Les modifications de votre téléphone passent par le relais chiffré jusqu’à cet ordinateur, en Wi-Fi, 4G ou 5G. DmxMoney doit rester ouvert sur cet ordinateur allumé et connecté à Internet.", active ? DmxColors.income : DmxColors.warning)
         }()
 
         let provisioningReady = bridge?.configured ?? false
-        let provisioningLabel = provisioningReady ? "Prêt" : (!enabled ? "En attente d’activation" : "En cours ou indisponible")
-        let dnsLabel = bridge?.dnsRecordId != nil ? "Configuré" : ((bridge?.managedCredentialReady ?? false) ? "Prêt" : (enabled ? "En attente" : "En attente d’activation"))
-        let steps: [(label: String, value: String, ready: Bool, icon: String)] = !hasLegacyBridge ? [
+        let steps: [(label: String, value: String, ready: Bool, icon: String)] = [
             ("Compagnon mobile", bridge?.appUrl != nil ? "Disponible" : "En attente", bridge?.appUrl != nil, "Globe2"),
             ("Chiffrement entre appareils", (bridge?.managedCredentialReady ?? false) ? "Prêt" : "En préparation", bridge?.managedCredentialReady ?? false, "ShieldCheck"),
             ("Connexion Internet", active ? "Connectée" : "Reconnexion en cours", active, "Wifi"),
             ("Relais sécurisé", provisioningReady ? "Prêt" : "En préparation", provisioningReady, "Server"),
-        ] : [
-            ("PWA publique", bridge?.appUrl != nil ? "Disponible" : "En attente", bridge?.appUrl != nil, "Globe2"),
-            ("Provisionnement", provisioningLabel, provisioningReady, "KeyRound"),
-            ("DNS local", dnsLabel, bridge?.dnsRecordId != nil, "Wifi"),
-            ("Certificat HTTPS", certificateReady ? "Prêt" : (enabled ? "En génération" : "Absent"), certificateReady, "ShieldCheck"),
-            ("API locale", bridge?.apiUrl != nil ? localLabel : "Non active", active, "Server"),
         ]
-        let pairingLabel = active ? "Nouveau QR" : (enabled ? (isRemote ? "Connexion…" : "Préparation HTTPS") : "Activer d’abord")
+        let pairingLabel = active ? "Nouveau QR" : (enabled ? "Connexion…" : "Activer d’abord")
         let qrEmpty = !enabled ? "Le QR sera disponible après activation."
-            : (isRemote ? (active ? "Générez un QR pour appairer un mobile." : "Connexion Internet en cours.")
-            : (!certificateReady ? "Certificat HTTPS en cours de génération."
-               : (!active ? "Serveur local en démarrage." : "Génère un QR pour appairer un mobile.")))
+            : (active ? "Générez un QR pour appairer un mobile." : "Connexion Internet en cours.")
 
         return section("Mode compagnon mobile", icon: "Smartphone") {
             VStack(alignment: .leading, spacing: 12) {
@@ -313,20 +297,12 @@ public struct SettingsPage: View {
                     Toggle(isOn: Binding(get: { enabled }, set: setBridgeEnabled)) {
                         Text("Activer").font(.system(size: 13, weight: .semibold))
                     }
+                    .accessibilityLabel("Activer le compagnon Internet")
                     .disabled(bridgeBusy || status == nil)
                 }
-                if hasLegacyBridge || needsHostedPwaUpdate {
-                    Text(hasLegacyBridge
-                        ? "Votre ancien compagnon utilise le réseau local. L’accès en 4G ou 5G nécessite le compagnon Internet."
-                        : "Votre compagnon Internet utilise l’ancienne page. Mettez-le à jour pour ouvrir la PWA Cloudflare Pages.")
-                        .font(.system(size: 12)).foregroundColor(.secondary)
-                    Button(hasLegacyBridge ? "Passer à l’accès Internet" : "Mettre à jour le compagnon") { setBridgeEnabled(true) }
-                        .buttonStyle(DmxButtonStyle(.primary))
-                        .disabled(bridgeBusy)
-                }
                 HStack(spacing: 8) {
-                    infoTile(icon: "Globe2", label: "Compagnon mobile", value: isRemote ? "Application mobile disponible" : bridge?.appUrl ?? "En préparation")
-                    infoTile(icon: "Server", label: "Connexion au bureau", value: isRemote ? (active ? "Accès Internet chiffré" : "Connexion Internet en cours") : bridge?.apiUrl ?? "Non active")
+                    infoTile(icon: "Globe2", label: "Compagnon mobile", value: bridge?.appUrl != nil ? "Application mobile disponible" : "En préparation")
+                    infoTile(icon: "Server", label: "Connexion au bureau", value: !enabled ? "Désactivée" : (active ? "Accès Internet chiffré" : "Connexion Internet en cours"))
                 }
             }
             .padding(16)
@@ -359,8 +335,8 @@ public struct SettingsPage: View {
                         }
                     }
                     HStack(spacing: 6) {
-                        badge(isRemote ? "Internet" : "Local", isRemote ? (active ? "Connecté" : "En cours") : localLabel)
-                        badge(isRemote ? "Chiffrement" : "Certificat", isRemote ? "Entre appareils" : (certificateReady ? "Prêt" : "Absent"))
+                        badge("Internet", !enabled ? "Désactivé" : (active ? "Connecté" : "En cours"))
+                        badge("Chiffrement", "Entre appareils")
                         badge("Mobiles", "\(passkeys.count)")
                     }
                     if enabled, let error = bridge?.lastError {
@@ -494,9 +470,7 @@ public struct SettingsPage: View {
             }
             .padding(12)
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(DmxPalette.separator, lineWidth: 0.5))
-            Text(store.bridgeStatus?.secureBridge?.localHost == nil
-                ? "Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. Vos modifications seront envoyées à DmxMoney sur cet ordinateur par Internet. Un QR par appareil."
-                : "Ce QR utilise l’ancien accès local, disponible sur le même réseau que cet ordinateur. Passez à l’accès Internet pour utiliser la 4G ou la 5G.")
+            Text("Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. Vos modifications seront envoyées à DmxMoney sur cet ordinateur par Internet. Un QR par appareil.")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -513,22 +487,6 @@ public struct SettingsPage: View {
 
     private func setBridgeEnabled(_ enabled: Bool) {
         guard !bridgeBusy else { return }
-        let bridge = store.bridgeStatus?.secureBridge
-        let legacy = bridge?.localHost != nil && bridge?.apiUrl?.contains("/relay/") != true
-        let update = CompanionMigration.needsHostedPwaUpdate(apiUrl: bridge?.apiUrl, appUrl: bridge?.appUrl)
-        if enabled && (legacy || update) {
-            store.confirm(
-                title: legacy ? "Passer à l’accès Internet ?" : "Mettre à jour le compagnon ?",
-                message: "Synchronisez d’abord les saisies en attente dans l’ancienne PWA. Vos mobiles devront ensuite être appairés avec un nouveau QR ; les anciennes sessions seront révoquées.",
-                confirmTitle: legacy ? "Passer à Internet" : "Mettre à jour",
-                destructive: false
-            ) { applyBridgeEnabled(true) }
-        } else {
-            applyBridgeEnabled(enabled)
-        }
-    }
-
-    private func applyBridgeEnabled(_ enabled: Bool) {
         bridgeBusy = true
         store.perform({ engine in try engine.setSecureBridgeEnabled(enabled: enabled) }, completion: { [store] status in
             store.updateBridgeStatus(status)

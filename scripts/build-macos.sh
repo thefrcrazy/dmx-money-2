@@ -36,12 +36,14 @@ bash "$DMX_ROOT/scripts/sync-apple-app-icons.sh" > /dev/null
 (cd "$DMX_ROOT/apple" && xcodegen generate > /dev/null)
 
 VERSION="$(cat "$DMX_ROOT/VERSION" | tr -d '[:space:]')"
+# Apple requiert trois entiers ; AppInfo affiche la version SemVer complète du noyau.
+MARKETING_VERSION="${VERSION%%-*}"
 echo "==> DmxMoney $VARIANT ($SCHEME, $ARCHS, macOS $DEPLOYMENT+, $CONFIG, v$VERSION)"
 xcodebuild -project "$DMX_ROOT/apple/DmxMoney.xcodeproj" -scheme "$SCHEME" \
     -configuration "$CONFIG" -destination 'generic/platform=macOS' \
     -derivedDataPath "$BUILD" \
     ARCHS="$ARCHS" ONLY_ACTIVE_ARCH=NO MACOSX_DEPLOYMENT_TARGET="$DEPLOYMENT" \
-    MARKETING_VERSION="$VERSION" \
+    MARKETING_VERSION="$MARKETING_VERSION" \
     CODE_SIGNING_ALLOWED=NO build | tail -1
 
 mkdir -p "$DIST"

@@ -4,18 +4,13 @@ const MOBILE_PREVIOUS_API_BASE_KEY = 'dmxmoney.securePreviousApiBaseUrl';
 const MOBILE_CSRF_KEY = 'dmxmoney.secureCsrfToken';
 const MOBILE_PASSKEY_READY_KEY = 'dmxmoney.securePasskeyReady';
 
-const normalizeApiBaseUrl = (value: string) => {
-    const url = new URL(value.trim());
-    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new Error('Adresse API HTTPS invalide.');
-    if (url.pathname !== '/' && url.pathname !== '') return validateRelayEndpoint(value);
-    return url.origin;
-};
+const normalizeApiBaseUrl = (value: string) => validateRelayEndpoint(value.trim());
 
 const sameDesktopEndpoint = (previous: string, next: string) => {
     try {
         const first = new URL(previous);
         const second = new URL(next);
-        return first.protocol === second.protocol && first.hostname === second.hostname && first.pathname === second.pathname;
+        return first.origin === second.origin && first.pathname === second.pathname;
     } catch { return false; }
 };
 
@@ -34,10 +29,8 @@ const readPreviousApiBaseUrls = (): string[] => {
 
 /**
  * The offline cache and the queued mutations are keyed by the API base URL, so a
- * desktop that comes back on another port (or after a re-provisioning) would
- * otherwise strand everything the mobile changed while it was away. Remember the
- * URLs we are leaving so the pending work can be carried over to the new one --
- * a list, because the endpoint can move again before anything is flushed.
+ * same encrypted endpoint can retain queued work across reconnections. A
+ * different endpoint must never receive another desktop's pending edits.
  */
 export const setMobileApiBaseUrl = (value: string) => {
     if (typeof window === 'undefined') return;
@@ -53,6 +46,7 @@ export const setMobileApiBaseUrl = (value: string) => {
             JSON.stringify((sameDesktopEndpoint(current, next) ? [...previous, current] : previous).slice(-MAX_PREVIOUS_API_BASE_URLS)),
         );
         localStorage.removeItem(MOBILE_CSRF_KEY);
+        setMobileRelayCsrfToken(null);
         if (!sameDesktopEndpoint(current, next)) localStorage.removeItem(MOBILE_PASSKEY_READY_KEY);
     }
     if (getMobileRelayEndpoint() !== next) localStorage.removeItem('dmxmoney.remoteRelayEndpoint');
@@ -75,7 +69,7 @@ const getHashParamsFromValue = (value: string) => {
     if (!trimmed) return null;
 
     try {
-        const url = new URL(trimmed, typeof window !== 'undefined' ? window.location.origin : 'https://dmxmoney.develop-max.com');
+        const url = new URL(trimmed, typeof window !== 'undefined' ? window.location.origin : 'https://dmxmoney-companion.pages.dev');
         const hash = url.hash.startsWith('#') ? url.hash.slice(1) : url.hash;
         if (hash) return new URLSearchParams(hash);
     } catch {
@@ -140,17 +134,16 @@ export const applyMobileCompanionPairingUrl = (value: string) => {
     const relay = params?.get('relay');
     const key = params?.get('key');
 
-    if ((!relay && !api) || (!pairing && !api) || (relay && (!key || !pairing))) {
-        return { ok: false, error: 'Lien QR incomplet. Scannez un nouveau QR depuis l’application desktop.' };
+    if (!relay || !key || !pairing) {
+        return { ok: false, error: 'Lien d’appairage Internet incomplet. Scannez le QR affiché dans DmxMoney sur votre ordinateur.' };
     }
     try {
-        const endpoint = relay ? validateRelayEndpoint(relay) : normalizeApiBaseUrl(api!);
-        if (relay && api && normalizeApiBaseUrl(api) !== endpoint) throw new Error('Les adresses du QR ne correspondent pas.');
-        if (!relay && new URL(endpoint).pathname !== '/') throw new Error('Une adresse de relais nécessite une clé de chiffrement.');
-        if (relay) void configureMobileRelay(endpoint, key!);
+        const endpoint = validateRelayEndpoint(relay);
+        if (api && normalizeApiBaseUrl(api) !== endpoint) throw new Error('Les adresses du QR ne correspondent pas.');
+        void configureMobileRelay(endpoint, key);
         localStorage.removeItem(MOBILE_CSRF_KEY);
         setMobileApiBaseUrl(endpoint);
-        if (pairing) localStorage.setItem(MOBILE_PAIRING_KEY, pairing);
+        localStorage.setItem(MOBILE_PAIRING_KEY, pairing);
         return { ok: true, error: null };
     } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : 'Lien QR invalide.' };
@@ -170,17 +163,16 @@ export const getMobilePairingToken = () => {
 
 export const hasMobileCompanionSetup = () => {
     if (typeof window === 'undefined') return false;
-    return Boolean(
-        localStorage.getItem(MOBILE_PAIRING_KEY)
-        || localStorage.getItem(MOBILE_API_BASE_KEY)
-        || localStorage.getItem(MOBILE_CSRF_KEY)
-    );
+    const endpoint = getMobileApiBaseUrl();
+    return Boolean(endpoint && getMobileRelayEndpoint() === endpoint);
 };
 
 export const hasMobilePasskeySetup = () => {
     if (typeof window === 'undefined') return false;
-    return Boolean(localStorage.getItem(MOBILE_PASSKEY_READY_KEY))
-        || Boolean(localStorage.getItem(MOBILE_API_BASE_KEY) && !localStorage.getItem(MOBILE_PAIRING_KEY));
+    return hasMobileCompanionSetup() && (
+        Boolean(localStorage.getItem(MOBILE_PASSKEY_READY_KEY))
+        || !localStorage.getItem(MOBILE_PAIRING_KEY)
+    );
 };
 
 export const markMobilePasskeyReady = () => {
@@ -205,12 +197,12 @@ export const clearMobileCompanionLocalState = () => {
 
 export const getMobileCsrfToken = () => {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem(MOBILE_CSRF_KEY);
+    return getMobileRelayCsrfToken();
 };
 
 export const setMobileCsrfToken = (token: string | null) => {
     if (typeof window === 'undefined') return;
-    if (token) localStorage.setItem(MOBILE_CSRF_KEY, token);
-    else localStorage.removeItem(MOBILE_CSRF_KEY);
+    setMobileRelayCsrfToken(token);
+    localStorage.removeItem(MOBILE_CSRF_KEY);
 };
-import { configureMobileRelay, getMobileRelayEndpoint, validateRelayEndpoint } from '../services/relayTransport';
+import { configureMobileRelay, getMobileRelayCsrfToken, getMobileRelayEndpoint, setMobileRelayCsrfToken, validateRelayEndpoint } from '../services/relayTransport';

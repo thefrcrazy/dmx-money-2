@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Account, Transaction, Category, ScheduledTransaction, BankContextType, AppData, Budget } from '../types';
 import { dbService } from '../services/db';
 import { hasTauriRuntime, isMobileCompanion } from '../utils/runtime';
-import { getMobileRelayEndpoint, isMobileRelayUnlocked, MOBILE_RELAY_LOCK_EVENT } from '../services/relayTransport';
+import { getMobileRelayEndpoint, isMobileRelayUnlocked, MOBILE_RELAY_LOCK_EVENT, MOBILE_RELAY_LOCK_STORAGE_KEY, suspendMobileRelayRuntime } from '../services/relayTransport';
 
 const BankContext = createContext<BankContextType | undefined>(undefined);
 const SETTINGS_REFRESH_EVENT = 'dmxmoney-settings-refresh';
@@ -262,12 +262,22 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setMobileConnectionState('error');
             setMobileConnectionError('Session mobile verrouillée. Reconnectez-vous avec votre clé d’accès.');
         };
+        const onStorage = (event: StorageEvent) => {
+            if (event.key === MOBILE_RELAY_LOCK_STORAGE_KEY && event.newValue === '1') {
+                suspendMobileRelayRuntime();
+                lock();
+            }
+        };
         window.addEventListener(MOBILE_RELAY_LOCK_EVENT, lock);
         window.addEventListener('focus', lock);
+        window.addEventListener('pagehide', suspendMobileRelayRuntime);
+        window.addEventListener('storage', onStorage);
         document.addEventListener('visibilitychange', lock);
         return () => {
             window.removeEventListener(MOBILE_RELAY_LOCK_EVENT, lock);
             window.removeEventListener('focus', lock);
+            window.removeEventListener('pagehide', suspendMobileRelayRuntime);
+            window.removeEventListener('storage', onStorage);
             document.removeEventListener('visibilitychange', lock);
         };
     }, []);
@@ -425,6 +435,39 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     }, [loadBankData]);
 
+    useEffect(() => {
+        if (!isMobileCompanion() || isLoading || mobileConnectionState !== 'error') return;
+        let disposed = false;
+        let inFlight = false;
+        const resume = async () => {
+            if (disposed || inFlight || document.visibilityState !== 'visible' || !navigator.onLine) return;
+            inFlight = true;
+            try {
+                await dbService.connectMobileCompanion(false);
+                if (disposed || !await loadBankData({ processScheduled: false })) return;
+                const status = await dbService.getSyncStatus();
+                if (disposed) return;
+                lastDataVersionRef.current = status.dataVersion;
+                notifySettingsRefresh();
+                setMobileConnectionError(null);
+                setMobileConnectionState('connected');
+            } catch {
+                // A wake never opens WebAuthn or removes pairing/offline data.
+            } finally { inFlight = false; }
+        };
+        window.addEventListener('online', resume);
+        window.addEventListener('focus', resume);
+        window.addEventListener('pageshow', resume);
+        document.addEventListener('visibilitychange', resume);
+        return () => {
+            disposed = true;
+            window.removeEventListener('online', resume);
+            window.removeEventListener('focus', resume);
+            window.removeEventListener('pageshow', resume);
+            document.removeEventListener('visibilitychange', resume);
+        };
+    }, [isLoading, loadBankData, mobileConnectionState]);
+
     const unlinkMobileCompanion = useCallback(async () => {
         if (!isMobileCompanion()) return;
 
@@ -443,6 +486,11 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } finally {
             setIsLoading(false);
         }
+    }, []);
+
+    const lockMobileCompanion = useCallback(async () => {
+        if (!isMobileCompanion()) return;
+        await dbService.lockMobileCompanion();
     }, []);
 
     useEffect(() => {
@@ -490,7 +538,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 } catch (error) {
                     consecutiveSyncFailures += 1;
                     if (!disposed) {
-                        setMobileConnectionState('offline');
+                        setMobileConnectionState(dbService.isAuthenticationRequired(error) ? 'error' : 'offline');
                         setMobileConnectionError(dbService.isOfflineError(error) ? null :
                             `Synchronisation en attente. Vos modifications sont conservées sur cet appareil. ${error instanceof Error ? error.message : String(error)}`);
                     }
@@ -511,6 +559,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
             };
             window.addEventListener('online', wakeSync);
             window.addEventListener('focus', wakeSync);
+            window.addEventListener('pageshow', wakeSync);
             document.addEventListener('visibilitychange', wakeSync);
             syncTimeout = setTimeout(checkForRemoteChanges, 2500);
         }
@@ -520,6 +569,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (wakeSync) {
                 window.removeEventListener('online', wakeSync);
                 window.removeEventListener('focus', wakeSync);
+                window.removeEventListener('pageshow', wakeSync);
                 document.removeEventListener('visibilitychange', wakeSync);
             }
             if (unlisten) unlisten();
@@ -763,10 +813,11 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
         mobileConnectionState,
         mobileConnectionError,
         connectMobileCompanion,
+        lockMobileCompanion,
         unlinkMobileCompanion
     }), [
         accounts, transactions, categories, scheduled, budgets, filterAccount, isLoading,
-        mobileConnectionState, mobileConnectionError, connectMobileCompanion, unlinkMobileCompanion,
+        mobileConnectionState, mobileConnectionError, connectMobileCompanion, lockMobileCompanion, unlinkMobileCompanion,
         addAccount, updateAccount, deleteAccount,
         addTransaction, addTransfer, updateTransaction, deleteTransaction, toggleTransactionCheck,
         addCategory, updateCategory, deleteCategory,

@@ -23,12 +23,4 @@ find "$DATA/icons/hicolor" -type f | while read -r icon; do
     install -Dm644 "$icon" "$PREFIX/share/icons/hicolor/${icon#"$DATA/icons/hicolor/"}"
 done
 
-# Client PWA du compagnon mobile, servi par le pont local quand il est activé.
-if [[ -d "$DMX_ROOT/pwa/dist" ]]; then
-    mkdir -p "$PREFIX/share/dmx-money/pwa"
-    cp -r "$DMX_ROOT/pwa/dist/." "$PREFIX/share/dmx-money/pwa/"
-else
-    echo "-- pwa/dist absent : le pont servira l'API sans la PWA locale"
-fi
-
 echo "==> DmxMoney installé dans $PREFIX"

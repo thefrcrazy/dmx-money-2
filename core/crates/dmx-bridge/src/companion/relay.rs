@@ -21,18 +21,12 @@ const MAX_AGE_MS: i64 = 120_000;
 const DEFAULT_REMOTE_RELAY_URL: &str = "https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev";
 const DEFAULT_COMPANION_URL: &str = "https://dmxmoney-companion.pages.dev/mobile/";
 
-fn companion_url(config: &RelayConfig) -> Result<String, String> {
+fn companion_url(_config: &RelayConfig) -> Result<String, String> {
     let value = option_env!("DMXMONEY_COMPANION_URL")
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
-        .unwrap_or_else(|| {
-            if config.service == DEFAULT_REMOTE_RELAY_URL {
-                DEFAULT_COMPANION_URL.into()
-            } else {
-                format!("{}/mobile/", config.service)
-            }
-        });
+        .unwrap_or_else(|| DEFAULT_COMPANION_URL.into());
     let url = Url::parse(&value).map_err(|_| "Adresse du compagnon invalide")?;
     if url.scheme() != "https"
         || !url.username().is_empty()
@@ -190,13 +184,23 @@ fn read_secret(id: &str) -> Result<RelayConfig, String> {
 }
 
 #[cfg(test)]
-fn save_secret(_: &RelayConfig) -> Result<(), String> {
+fn save_secret(config: &RelayConfig) -> Result<(), String> {
+    TEST_SECRETS.lock().unwrap().insert(config.id.clone(), config.clone());
     Ok(())
 }
 #[cfg(test)]
-fn read_secret(_: &str) -> Result<RelayConfig, String> {
-    Err("Trousseau absent des tests".into())
+fn read_secret(id: &str) -> Result<RelayConfig, String> {
+    TEST_SECRETS
+        .lock()
+        .unwrap()
+        .get(id)
+        .cloned()
+        .ok_or_else(|| "Clé du relais absente des tests".into())
 }
+
+#[cfg(test)]
+static TEST_SECRETS: std::sync::LazyLock<std::sync::Mutex<HashMap<String, RelayConfig>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
 pub(super) async fn load_config(pool: &DbPool) -> Result<Option<RelayConfig>, String> {
     schema(pool).await?;
@@ -218,9 +222,8 @@ pub(super) async fn load_config(pool: &DbPool) -> Result<Option<RelayConfig>, St
 
 /// No network access in unit tests; production discovers the relay before opting into it.
 pub(crate) async fn try_provision(pool: &DbPool) -> Result<bool, String> {
-    if load_config(pool).await?.is_some() {
-        // Merely reading status or restarting the desktop must not change an
-        // existing WebAuthn origin and revoke the mobile without user action.
+    if let Some(config) = load_config(pool).await? {
+        prepare_existing(pool, &config).await?;
         return Ok(true);
     }
     if cfg!(test) {
@@ -344,7 +347,7 @@ async fn activate(pool: &DbPool, config: &RelayConfig) -> Result<(), String> {
                 .bind(&now)
                 .execute(&mut *transaction)
                 .await
-                .map_err(|e| map_db_error(e, "migration de l’appairage"))?;
+                .map_err(|e| map_db_error(e, "mise à jour de l’appairage"))?;
         }
     }
     sqlx::query("INSERT OR REPLACE INTO remote_relay (id, device_id, service) VALUES (1, $1, $2)")
@@ -353,7 +356,7 @@ async fn activate(pool: &DbPool, config: &RelayConfig) -> Result<(), String> {
         .execute(&mut *transaction)
         .await
         .map_err(|e| map_db_error(e, "enregistrement du relais"))?;
-    sqlx::query("UPDATE settings SET \"secureBridgeDomain\"=$1, \"secureBridgeAppUrl\"=$2, \"secureBridgeLocalHost\"=NULL, \"secureBridgeDeviceId\"=$3, \"secureBridgeManagedServiceUrl\"=$4, \"secureBridgeLastError\"=NULL WHERE id=1")
+    sqlx::query("UPDATE settings SET \"secureBridgeDomain\"=$1, \"secureBridgeAppUrl\"=$2, \"secureBridgeLocalHost\"=NULL, \"secureBridgeDeviceId\"=$3, \"secureBridgeManagedServiceUrl\"=$4, \"secureBridgeLastError\"=NULL, \"secureBridgeManagedDeviceSecret\"=NULL, \"secureBridgeManagedRegisteredAt\"=NULL, \"secureBridgeDnsRecordId\"=NULL, \"secureBridgeDnsLastUpdatedAt\"=NULL, \"secureBridgeCertificateExpiresAt\"=NULL, \"mobileAccessToken\"=NULL WHERE id=1")
         .bind(domain).bind(app).bind(&config.id).bind(&config.service)
         .execute(&mut *transaction).await.map_err(|e| map_db_error(e, "activation du relais"))?;
     transaction
@@ -361,6 +364,52 @@ async fn activate(pool: &DbPool, config: &RelayConfig) -> Result<(), String> {
         .await
         .map_err(|e| map_db_error(e, "activation du relais"))?;
     Ok(())
+}
+
+pub(super) async fn prepare_existing(pool: &DbPool, config: &RelayConfig) -> Result<(), String> {
+    let app = companion_url(config)?;
+    let current: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM settings WHERE id=1 AND \"secureBridgeDeviceId\"=$1 AND \"secureBridgeAppUrl\"=$2 AND \"secureBridgeDomain\"=$3 AND \"secureBridgeManagedServiceUrl\"=$4 AND \"secureBridgeLocalHost\" IS NULL AND \"secureBridgeDnsRecordId\" IS NULL AND \"secureBridgeDnsLastUpdatedAt\" IS NULL AND \"secureBridgeCertificateExpiresAt\" IS NULL AND \"secureBridgeManagedDeviceSecret\" IS NULL AND \"mobileAccessToken\" IS NULL)")
+        .bind(&config.id).bind(&app).bind(Url::parse(&app).unwrap().host_str()).bind(&config.service)
+        .fetch_one(pool).await.map_err(|e| map_db_error(e, "lecture de la configuration Internet"))?;
+    if !current {
+        activate(pool, config).await?;
+    }
+    Ok(())
+}
+
+pub(super) async fn unconfigured_status(
+    pool: &DbPool,
+    settings: &secure::SecureBridgeSettings,
+) -> Result<SecureBridgeStatus, String> {
+    Ok(SecureBridgeStatus {
+        enabled: settings.enabled,
+        configured: false,
+        active: false,
+        domain: None,
+        app_url: Some(DEFAULT_COMPANION_URL.into()),
+        local_host: None,
+        device_id: None,
+        api_url: None,
+        port: None,
+        pairing_url: None,
+        pairing_token_expires_at: None,
+        certificate_expires_at: None,
+        certificate_ready: false,
+        dns_record_id: None,
+        dns_last_updated_at: None,
+        managed: true,
+        managed_service_url: DEFAULT_REMOTE_RELAY_URL.into(),
+        managed_credential_ready: false,
+        passkeys: secure::relay_passkeys(pool).await?,
+        last_error: if settings.enabled {
+            Some(settings.last_error.clone().unwrap_or_else(|| {
+                "Préparation du compagnon Internet en cours ; vérifiez la connexion de l’ordinateur.".into()
+            }))
+        } else {
+            None
+        },
+        degraded: false,
+    })
 }
 
 pub(super) async fn build_status(
@@ -375,6 +424,7 @@ pub(super) async fn build_status(
         .await?
         .app_url
         .unwrap_or(companion_url(config)?);
+    let pairing = pairing.filter(|_| enabled);
     let pairing_url = pairing
         .as_ref()
         .map(|(token, _)| format!("{app}#pairing={token}&relay={api}&key={}", config.key));
@@ -539,10 +589,6 @@ fn dispatch(host: &BridgeHost, request: RelayRequest, origin: &str) -> HttpRespo
             body: request.body.into_bytes(),
         },
         host,
-        &ServerSecurity {
-            secure_app_origin: Some(origin.clone()),
-            app_url: Some(format!("{origin}/mobile")),
-        },
     )
 }
 
@@ -566,6 +612,8 @@ mod tests {
         // Test-only fixture for the state after a successful passkey ceremony. The
         // production handler still validates the session, CSRF and revocation.
         engine.block_on(async {
+            sqlx::query("INSERT OR IGNORE INTO mobile_passkeys (id, credential_id, public_key, created_at) VALUES ('relay-mutation-passkey', 'test-credential', '{}', $1)")
+                .bind(chrono::Utc::now().to_rfc3339()).execute(engine.pool()).await.unwrap();
             sqlx::query(
                 "INSERT INTO mobile_sessions (id, session_hash, csrf_hash, passkey_id, device_label, expires_at, created_at)
                  VALUES ('relay-mutation-session', $1, $2, 'relay-mutation-passkey', 'Relay mutation test', $3, $4)",
@@ -914,7 +962,7 @@ mod tests {
             schema(engine.pool()).await.unwrap();
             sqlx::query("UPDATE settings SET \"secureBridgeDeviceId\"=$1, \"secureBridgeAppUrl\"=$2 WHERE id=1")
                 .bind(&config.id).bind(format!("{}/mobile/", config.service)).execute(engine.pool()).await.unwrap();
-            sqlx::query("INSERT INTO mobile_passkeys (id, credential_id, public_key, created_at) VALUES ('relay-mutation-passkey', 'old-worker-credential', '{}', $1)")
+            sqlx::query("INSERT OR REPLACE INTO mobile_passkeys (id, credential_id, public_key, created_at) VALUES ('relay-mutation-passkey', 'old-worker-credential', '{}', $1)")
                 .bind(chrono::Utc::now().to_rfc3339()).execute(engine.pool()).await.unwrap();
             let (old_qr, _) = secure::regenerate_pairing_token(engine.pool()).await.unwrap();
             activate(engine.pool(), &config).await.unwrap();
@@ -951,7 +999,7 @@ mod tests {
                 .execute(engine.pool()).await.unwrap();
             let (old_qr, _) = secure::regenerate_pairing_token(engine.pool()).await.unwrap();
             let before = secure::load_settings(engine.pool()).await.unwrap();
-            let error = secure::set_enabled(engine.pool(), std::path::Path::new("/unused-test-directory"), true).await.unwrap_err();
+            let error = secure::set_enabled(engine.pool(), true).await.unwrap_err();
             assert!(error.contains("Service d’accès Internet indisponible"));
             let after = secure::load_settings(engine.pool()).await.unwrap();
             assert_eq!(after.enabled, before.enabled);
@@ -967,6 +1015,144 @@ mod tests {
             let relays: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM remote_relay").fetch_one(engine.pool()).await.unwrap();
             assert_eq!(relays, 0);
         });
+    }
+
+    fn companion_for(engine: &dmx_core::Engine) -> Arc<MobileCompanion> {
+        MobileCompanion::new(BridgeHost {
+            pool: engine.pool().clone(),
+            runtime: engine.handle(),
+            data_dir: std::env::temp_dir().join("dmx-online-only-test"),
+            assets_dir: None,
+            events: Arc::new(crate::NoopEvents),
+        })
+    }
+
+    fn configured_companion(engine: &dmx_core::Engine) -> Arc<MobileCompanion> {
+        let config = RelayConfig {
+            id: Uuid::new_v4().simple().to_string(),
+            service: DEFAULT_REMOTE_RELAY_URL.into(),
+            key: random_token(),
+            desktop_token: random_token(),
+        };
+        save_secret(&config).unwrap();
+        engine.block_on(async {
+            schema(engine.pool()).await.unwrap();
+            activate(engine.pool(), &config).await.unwrap();
+            secure::set_enabled(engine.pool(), true).await.unwrap();
+        });
+        companion_for(engine)
+    }
+
+    #[test]
+    fn old_local_settings_never_start_a_listener_and_financial_data_stays_intact() {
+        let engine = dmx_core::Engine::open_in_memory().unwrap();
+        engine.block_on(async {
+            sqlx::query("INSERT INTO accounts (id,name,type,\"initialBalance\",color,icon) VALUES ('kept','Kept','Courant',123.45,'#007AFF','Wallet')").execute(engine.pool()).await.unwrap();
+            sqlx::query("UPDATE settings SET \"mobileAccessEnabled\"=1, \"secureBridgeEnabled\"=1, \"secureBridgeLocalHost\"='old.sync.example.com', \"secureBridgeAppUrl\"='https://old.example.com/mobile', \"secureBridgeDeviceId\"='old-device'").execute(engine.pool()).await.unwrap();
+        });
+        let companion = companion_for(&engine);
+        companion.bootstrap().unwrap();
+        let status = companion.status().unwrap();
+        assert!(status.enabled);
+        assert!(!status.active);
+        assert!(status.host.is_none() && status.port.is_none());
+        assert_eq!(status.url.as_deref(), Some(DEFAULT_COMPANION_URL));
+        let bridge = status.secure_bridge.unwrap();
+        assert!(!bridge.configured);
+        assert!(bridge.local_host.is_none() && bridge.dns_record_id.is_none() && bridge.pairing_url.is_none());
+        let snapshot = engine.snapshot().unwrap();
+        let account = snapshot.accounts.iter().find(|account| account.id == "kept").unwrap();
+        assert_eq!(account.name, "Kept");
+        assert_eq!(account.initial_balance, 123.45);
+        companion.shutdown();
+    }
+
+    #[test]
+    fn desktop_restarts_preserve_the_pages_pairing_and_the_mobile_session() {
+        let engine = dmx_core::Engine::open_in_memory().unwrap();
+        let companion = configured_companion(&engine);
+        let (cookie, csrf) = finalized_session(&engine);
+        let qr = companion
+            .regenerate_secure_pairing_token()
+            .unwrap()
+            .secure_bridge
+            .unwrap()
+            .pairing_url
+            .unwrap();
+        assert_eq!(
+            companion
+                .status()
+                .unwrap()
+                .secure_bridge
+                .unwrap()
+                .pairing_url
+                .as_deref(),
+            Some(qr.as_str())
+        );
+        companion.shutdown();
+        let restarted = companion_for(&engine);
+        restarted.bootstrap().unwrap();
+        assert_eq!(restarted.status().unwrap().url.as_deref(), Some(DEFAULT_COMPANION_URL));
+        engine
+            .block_on(secure::authorize_api_request(
+                engine.pool(),
+                "GET",
+                "/api/accounts",
+                &session_headers(&cookie, &csrf),
+            ))
+            .unwrap();
+        restarted.shutdown();
+    }
+
+    #[test]
+    fn a_consumed_cached_qr_disappears_and_disabled_or_closed_companions_cannot_restart() {
+        let engine = dmx_core::Engine::open_in_memory().unwrap();
+        let companion = configured_companion(&engine);
+        assert!(companion
+            .regenerate_secure_pairing_token()
+            .unwrap()
+            .secure_bridge
+            .unwrap()
+            .pairing_url
+            .is_some());
+        engine
+            .block_on(
+                sqlx::query("UPDATE mobile_pairing_tokens SET consumed_at=$1")
+                    .bind(chrono::Utc::now().to_rfc3339())
+                    .execute(engine.pool()),
+            )
+            .unwrap();
+        assert!(companion.status().unwrap().secure_bridge.unwrap().pairing_url.is_none());
+        companion.regenerate_secure_pairing_token().unwrap();
+        engine.block_on(async {
+            let (_, disabled) = tokio::join!(
+                companion.status_async(),
+                companion.set_secure_bridge_enabled_async(false)
+            );
+            assert!(!disabled.unwrap().enabled);
+        });
+        let disabled = companion.status().unwrap();
+        assert!(!disabled.enabled && !disabled.active);
+        assert!(disabled.secure_bridge.unwrap().pairing_url.is_none());
+        companion.set_secure_bridge_enabled(true).unwrap();
+        companion.shutdown();
+        let closed = companion.status().unwrap();
+        assert!(!closed.enabled && !closed.active);
+        assert!(closed.secure_bridge.unwrap().pairing_url.is_none());
+        assert!(companion.set_secure_bridge_enabled(true).is_err());
+    }
+
+    #[test]
+    fn disabling_does_not_require_the_relay_secret_to_remain_readable() {
+        let engine = dmx_core::Engine::open_in_memory().unwrap();
+        let companion = configured_companion(&engine);
+        companion.regenerate_secure_pairing_token().unwrap();
+        let config = engine.block_on(load_config(engine.pool())).unwrap().unwrap();
+        TEST_SECRETS.lock().unwrap().remove(&config.id);
+        let disabled = companion.set_secure_bridge_enabled(false).unwrap();
+        assert!(!disabled.enabled && !disabled.active);
+        assert!(disabled.secure_bridge.unwrap().pairing_url.is_none());
+        companion.shutdown();
     }
 
     #[test]
@@ -1004,7 +1190,7 @@ mod tests {
         let (pairing, _) = engine
             .block_on(secure::regenerate_pairing_token(engine.pool()))
             .unwrap();
-        let (cookie, csrf) = finalized_session(&engine);
+        let (cookie, mut csrf) = finalized_session(&engine);
         let host = BridgeHost {
             pool: engine.pool().clone(),
             runtime: engine.handle(),
@@ -1053,6 +1239,14 @@ mod tests {
                 assert_eq!(remote_request(&client, &config, &denied).await["status"], 401);
             }
             assert!(events.0.lock().unwrap().is_empty(), "denied mutations must not notify the desktop");
+            for _ in 0..2 {
+                let resumed=request_packet(&config,"POST","/auth/session","{}",session_headers(&cookie,&csrf));
+                let response=remote_request(&client,&config,&resumed).await;
+                assert_eq!(response["status"],200,"refresh restores the finalized session without a passkey ceremony");
+                let body: serde_json::Value=serde_json::from_str(response["body"].as_str().unwrap()).unwrap();
+                assert_eq!(body["passkeyRequired"],false);
+                csrf=body["csrfToken"].as_str().unwrap().into();
+            }
             let created = request_packet(&config, "POST", "/api/accounts", account, session_headers(&cookie, &csrf));
             assert_eq!(remote_request(&client, &config, &created).await["status"], 201);
             let transaction = r#"{"id":"live-relay-transaction","date":"2026-10-02","accountId":"live-relay-account","type":"expense","amount":12.5,"category":"5","description":"Written over public relay","checked":false}"#;
@@ -1081,6 +1275,8 @@ mod tests {
             secure::revoke_passkey(engine.pool(), "relay-mutation-passkey".into()).await.unwrap();
             let denied = request_packet(&config, "POST", "/api/transactions", transaction, session_headers(&cookie, &csrf));
             assert_eq!(remote_request(&client, &config, &denied).await["status"], 401);
+            let revoked_resume=request_packet(&config,"POST","/auth/session","{}",session_headers(&cookie,&csrf));
+            assert_eq!(remote_request(&client,&config,&revoked_resume).await["status"],401);
             assert_eq!(events.0.lock().unwrap().len(), 4);
             }).catch_unwind().await;
             stop.store(true, Ordering::SeqCst);

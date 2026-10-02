@@ -14,9 +14,9 @@ const EXAMPLES = [
 /**
  * Assistant du compagnon mobile.
  *
- * La phrase est envoyée au pont local du Mac : l'application de bureau la fait normaliser par son
+ * La phrase est envoyée au bureau par le relais chiffré : l'application la fait normaliser par son
  * modèle sur l'appareil quand il est disponible, puis le noyau l'interprète et calcule la réponse.
- * Le mobile n'affiche que ce que le Mac renvoie.
+ * Le mobile n'affiche que ce que l'application de bureau renvoie.
  */
 const AssistantBar: React.FC = () => {
   const [text, setText] = useState("");

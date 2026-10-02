@@ -80,7 +80,7 @@ final class UpdateChecker: NSObject {
             if UserDefaults.standard.object(forKey: includePrereleasesKey) != nil {
                 return UserDefaults.standard.bool(forKey: includePrereleasesKey)
             }
-            return true
+            return AppInfo.version.contains("-")
         }
         set {
             UserDefaults.standard.set(newValue, forKey: includePrereleasesKey)
@@ -147,17 +147,10 @@ final class UpdateChecker: NSObject {
 
                 // Essai de décodage sous forme de releases GitHub
                 if let releases = try? JSONDecoder().decode([GitHubRelease].self, from: data) {
-                    let current = AppInfo.version
-                    let isCurrentPrerelease = current.contains("-")
-                    let allowPrerelease = self.includePrereleases || isCurrentPrerelease
-
                     // Trouver la release candidate la plus récente admissible
                     let matching = releases.first { rel in
                         guard !(rel.draft ?? false) else { return false }
-                        if !allowPrerelease {
-                            return !(rel.prerelease ?? false)
-                        }
-                        return true
+                        return self.allowsVersion(rel.tag_name, prerelease: rel.prerelease ?? false)
                     }
 
                     if let latest = matching {
@@ -192,7 +185,7 @@ final class UpdateChecker: NSObject {
 
     private func handle(_ feed: Feed, silent: Bool) {
         let current = AppInfo.version
-        guard AppInfo.isVersion(feed.version, newerThan: current) else {
+        guard allowsVersion(feed.version), AppInfo.isVersion(feed.version, newerThan: current) else {
             if !silent {
                 presentUpToDate(current)
             }
@@ -208,6 +201,11 @@ final class UpdateChecker: NSObject {
             return
         }
         presentUpdate(feed, build: build, current: current, silent: silent)
+    }
+
+    private func allowsVersion(_ version: String, prerelease: Bool = false) -> Bool {
+        let semanticVersion = version.split(separator: "+", maxSplits: 1).first ?? ""
+        return includePrereleases || !(prerelease || semanticVersion.contains("-"))
     }
 
     // MARK: - Alertes et installation

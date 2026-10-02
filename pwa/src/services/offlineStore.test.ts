@@ -9,7 +9,7 @@ const oldIndexedDB = globalThis.indexedDB;
 beforeEach(() => {
     Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: indexedDB });
     Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
-    const scope = `https://fixture-${crypto.randomUUID()}.invalid`;
+    const scope = `https://fixture.invalid/relay/${crypto.randomUUID()}`;
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => scope } });
 });
 afterEach(() => {
@@ -173,7 +173,7 @@ test('malformed legacy JSON is obfuscated losslessly but blocks replay and scope
     await expect(store.listMutations()).rejects.toThrow('illisibles');
     const original = await rawDatabase(name);
     expect(decodeOfflinePayload(original.mutations[0].payload)).toEqual({ body: broken.body });
-    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => 'https://next.invalid' } });
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => 'https://next.invalid/relay/device-next' } });
     await expect(store.migrateScope(previousScope)).rejects.toThrow('illisibles');
     expect(await rawDatabase(name)).toEqual(original);
 });

@@ -18,7 +18,7 @@ import { hasTauriRuntime, isMobileCompanion } from '../utils/runtime';
 
 const SettingsPage: React.FC = () => {
     const { settings, updateTheme, updatePrimaryColor } = useSettings();
-    const { addTransaction, transactions: existingTransactions, unlinkMobileCompanion } = useBank();
+    const { addTransaction, transactions: existingTransactions, lockMobileCompanion, unlinkMobileCompanion } = useBank();
     const { checkUpdate, isChecking, updateAvailable } = useUpdater();
     const isDesktopRuntime = hasTauriRuntime();
     const isMobileMode = isMobileCompanion();
@@ -352,92 +352,61 @@ const SettingsPage: React.FC = () => {
     const secureBridge = mobileStatus?.secureBridge;
     const secureBridgeEnabled = Boolean(secureBridge?.enabled);
     const secureBridgeActive = Boolean(secureBridge?.active);
-    const certificateReady = Boolean(secureBridge?.certificateReady);
     const activePasskeys = secureBridge?.passkeys?.filter(item => !item.revokedAt) ?? [];
     const bridgeDegraded = Boolean(secureBridge?.degraded);
     const provisioningReady = Boolean(secureBridge?.configured);
-    const provisioningPending = !secureBridgeEnabled && !provisioningReady;
-    const provisioningLabel = provisioningReady
-        ? 'Prêt'
-        : provisioningPending
-            ? 'En attente d’activation'
-            : 'En cours ou indisponible';
-    const dnsLabel = secureBridge?.dnsRecordId
-        ? 'Configuré'
-        : secureBridge?.managedCredentialReady
-            ? 'Prêt'
-            : secureBridgeEnabled
-                ? 'En attente'
-                : 'En attente d’activation';
-    const localLabel = mobileStatus?.active
-        ? 'Actif'
-        : secureBridgeEnabled
-            ? 'Démarrage'
-            : 'Inactif';
+    const encryptionReady = Boolean(secureBridge?.managedCredentialReady);
+    const connectionLabel = !secureBridgeEnabled ? 'Désactivée' : secureBridgeActive ? 'Connectée' : 'En cours';
     const companionState = !secureBridgeEnabled
         ? {
             label: 'Désactivé',
-            detail: 'Active le mode pour préparer le pont HTTPS et le QR mobile.',
+            detail: 'Activez le compagnon Internet, puis scannez le QR avec votre téléphone. Aucune configuration réseau n’est nécessaire.',
             className: 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300'
         }
         : secureBridgeActive
             ? {
                 label: 'Prêt à appairer',
-                detail: 'La PWA peut se connecter à l’API locale sécurisée.',
+                detail: 'Votre téléphone peut modifier les données de cet ordinateur en Wi-Fi, 4G ou 5G. DmxMoney doit rester ouvert sur cet ordinateur allumé et connecté à Internet.',
                 className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
             }
-            : certificateReady
-                ? {
-                    label: 'Démarrage local',
-                    detail: 'Le certificat est prêt, le serveur local termine son démarrage.',
-                    className: 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300'
-                }
-                : {
-                    label: 'Préparation HTTPS',
-                    detail: 'DNS et certificat sont préparés automatiquement en arrière-plan.',
-                    className: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
-                };
+            : {
+                label: 'Connexion Internet',
+                detail: 'Connexion au relais chiffré en cours.',
+                className: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+            };
     const pairingButtonLabel = secureBridgeActive
         ? 'Nouveau QR'
         : secureBridgeEnabled
-            ? 'Préparation HTTPS'
+            ? 'Connexion…'
             : 'Activer d’abord';
     const qrEmptyMessage = !secureBridgeEnabled
         ? 'Le QR sera disponible après activation.'
-        : !certificateReady
-            ? 'Certificat HTTPS en cours de génération.'
-            : !secureBridgeActive
-                ? 'Serveur local en démarrage.'
-                : 'Génère un QR pour appairer un mobile.';
+        : secureBridgeActive
+            ? 'Générez un QR pour appairer un mobile.'
+            : 'Connexion Internet en cours.';
     const companionSteps = [
         {
-            label: 'PWA publique',
+            label: 'Compagnon mobile',
             value: secureBridge?.appUrl ? 'Disponible' : 'En attente',
             ready: Boolean(secureBridge?.appUrl),
             icon: Globe2
         },
         {
-            label: 'Provisionnement',
-            value: provisioningLabel,
-            ready: provisioningReady,
-            icon: KeyRound
-        },
-        {
-            label: 'DNS local',
-            value: dnsLabel,
-            ready: Boolean(secureBridge?.dnsRecordId),
-            icon: Wifi
-        },
-        {
-            label: 'Certificat HTTPS',
-            value: certificateReady ? 'Prêt' : secureBridgeEnabled ? 'En génération' : 'Absent',
-            ready: certificateReady,
+            label: 'Chiffrement entre appareils',
+            value: encryptionReady ? 'Prêt' : 'En préparation',
+            ready: encryptionReady,
             icon: ShieldCheck
         },
         {
-            label: 'API locale',
-            value: secureBridge?.apiUrl ? localLabel : 'Non active',
+            label: 'Connexion Internet',
+            value: connectionLabel,
             ready: secureBridgeActive,
+            icon: Wifi
+        },
+        {
+            label: 'Relais sécurisé',
+            value: provisioningReady ? 'Prêt' : 'En préparation',
+            ready: provisioningReady,
             icon: Server
         }
     ];
@@ -526,6 +495,21 @@ const SettingsPage: React.FC = () => {
                             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Cette PWA</h2>
                         </div>
                         <div className="bg-white dark:bg-[#1C1C1E] rounded-2xl border border-black/[0.05] dark:border-white/[0.05] shadow-sm overflow-hidden">
+                            <div className="p-4 border-b border-black/[0.05] dark:border-white/[0.05] flex flex-col gap-3">
+                                <div>
+                                    <h3 className="text-[15px] font-medium text-gray-900 dark:text-white">Verrouiller cette PWA</h3>
+                                    <p className="text-[13px] text-gray-500 mt-0.5 leading-relaxed">
+                                        Masque vos données et demande Face ID, Touch ID ou votre clé d’accès à la prochaine ouverture. Les modifications en attente sont conservées.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => void lockMobileCompanion().catch(error => console.error('Mobile lock failed:', error))}
+                                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gray-100 dark:bg-white/10 text-[13px] font-semibold text-gray-700 dark:text-gray-300"
+                                >
+                                    <Lock className="w-4 h-4" />
+                                    Verrouiller
+                                </button>
+                            </div>
                             <div className="p-4 flex flex-col gap-4">
                                 <div className="flex items-start gap-4">
                                     <div className="p-2 bg-red-50 dark:bg-red-500/10 rounded-lg text-red-600 dark:text-red-300">
@@ -566,7 +550,7 @@ const SettingsPage: React.FC = () => {
                                         </div>
                                         <div className="min-w-0">
                                             <div className="flex flex-wrap items-center gap-2">
-                                                <h3 className="text-[15px] font-semibold text-gray-900 dark:text-white">Accès mobile local + PWA</h3>
+                                                <h3 className="text-[15px] font-semibold text-gray-900 dark:text-white">Accès depuis votre téléphone</h3>
                                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${companionState.className}`}>
                                                     {companionState.label}
                                                 </span>
@@ -580,7 +564,8 @@ const SettingsPage: React.FC = () => {
                                         <input
                                             type="checkbox"
                                             checked={secureBridgeEnabled}
-                                            disabled={isMobileStatusLoading}
+                                            disabled={isMobileStatusLoading || !mobileStatus}
+                                            aria-label="Activer le compagnon Internet"
                                             onChange={(event) => handleToggleSecureBridge(event.target.checked)}
                                             className="h-5 w-5 rounded border-gray-300 text-primary-500 focus:ring-primary-500"
                                         />
@@ -595,16 +580,16 @@ const SettingsPage: React.FC = () => {
                                             PWA mobile
                                         </div>
                                         <p className="mt-1 text-[12px] text-gray-700 dark:text-gray-200 truncate">
-                                            {secureBridge?.appUrl || 'Provisionnement automatique en attente'}
+                                            {secureBridge?.appUrl ? 'Application mobile disponible' : 'En préparation'}
                                         </p>
                                     </div>
                                     <div className="rounded-xl bg-gray-50 dark:bg-black/30 px-3 py-2 min-w-0">
                                         <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-gray-400 tracking-wider">
                                             <Server className="w-3 h-3" />
-                                            API locale sécurisée
+                                            Connexion au bureau
                                         </div>
                                         <p className="mt-1 text-[12px] text-gray-700 dark:text-gray-200 truncate">
-                                            {secureBridge?.apiUrl || 'Non active'}
+                                            {!secureBridgeEnabled ? 'Désactivée' : secureBridgeActive ? 'Accès Internet chiffré' : 'Connexion Internet en cours'}
                                         </p>
                                     </div>
                                 </div>
@@ -634,10 +619,10 @@ const SettingsPage: React.FC = () => {
 
                                     <div className="flex flex-wrap gap-1.5 text-[11px]">
                                         <span className="rounded-full bg-gray-50 dark:bg-black/30 px-2.5 py-1 text-gray-500 dark:text-gray-400">
-                                            Local <strong className="ml-1 font-semibold text-gray-800 dark:text-gray-200">{localLabel}</strong>
+                                            Internet <strong className="ml-1 font-semibold text-gray-800 dark:text-gray-200">{connectionLabel}</strong>
                                         </span>
                                         <span className="rounded-full bg-gray-50 dark:bg-black/30 px-2.5 py-1 text-gray-500 dark:text-gray-400">
-                                            Certificat <strong className="ml-1 font-semibold text-gray-800 dark:text-gray-200">{certificateReady ? 'Prêt' : 'Absent'}</strong>
+                                            Chiffrement <strong className="ml-1 font-semibold text-gray-800 dark:text-gray-200">Entre appareils</strong>
                                         </span>
                                         <span className="rounded-full bg-gray-50 dark:bg-black/30 px-2.5 py-1 text-gray-500 dark:text-gray-400">
                                             Mobiles <strong className="ml-1 font-semibold text-gray-800 dark:text-gray-200">{activePasskeys.length}</strong>
@@ -696,7 +681,7 @@ const SettingsPage: React.FC = () => {
                                         </div>
                                     </div>
                                     <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
-                                        Ouvre la PWA sur mobile, puis appaire le téléphone avec ce QR. Les données apparaissent après cette étape.
+                                        Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. Vos modifications seront envoyées à cet ordinateur par Internet.
                                         Génère un QR par appareil : plusieurs mobiles peuvent rester appairés en même temps.
                                     </p>
                                 </div>

@@ -18,13 +18,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         OnPropertyChanged(nameof(Theme));
         OnPropertyChanged(nameof(AccentColor));
         OnPropertyChanged(nameof(IsDefaultAccent));
-        OnPropertyChanged(nameof(Bridge));
         OnPropertyChanged(nameof(SecureBridge));
-        OnPropertyChanged(nameof(HasLegacyBridge));
-        OnPropertyChanged(nameof(NeedsHostedPwaUpdate));
-        OnPropertyChanged(nameof(CompanionMigrationRequired));
-        OnPropertyChanged(nameof(CompanionMigrationLabel));
-        OnPropertyChanged(nameof(CompanionMigrationDetail));
         OnPropertyChanged(nameof(QrInstructions));
         OnPropertyChanged(nameof(BridgeStateLabel));
         OnPropertyChanged(nameof(BridgeStateDetail));
@@ -61,42 +55,15 @@ public sealed partial class SettingsViewModel : PageViewModel
     [RelayCommand]
     private void UseDefaultAccent() => Store.Apply(new SettingsChange.SetPrimaryColor("default"));
 
-    // --- Pont PWA ---
+    // --- Compagnon Internet ---
 
     public bool BridgeAvailable => Store.BridgeAvailable;
-
-    public CompanionStatus? Bridge => Store.BridgeStatus;
 
     public SecureBridgeInfo? SecureBridge => Store.BridgeStatus?.SecureBridge;
 
     public bool BridgeSwitchOn => SecureBridge?.Enabled ?? false;
 
-    public bool IsRemoteBridge => SecureBridge?.ApiUrl?.Contains("/relay/", StringComparison.Ordinal) == true;
-
-    public bool HasLegacyBridge => !IsRemoteBridge && SecureBridge?.LocalHost is not null;
-
-    public bool NeedsHostedPwaUpdate =>
-        Uri.TryCreate(SecureBridge?.ApiUrl, UriKind.Absolute, out var api)
-        && HasHttpsOrigin(api, "dmxmoney-remote-relay.qm7ws5twn7.workers.dev")
-        && api.AbsolutePath.StartsWith("/relay/", StringComparison.Ordinal)
-        && (!Uri.TryCreate(SecureBridge?.AppUrl, UriKind.Absolute, out var app)
-            || !HasHttpsOrigin(app, "dmxmoney-companion.pages.dev"));
-
-    public bool CompanionMigrationRequired => HasLegacyBridge || NeedsHostedPwaUpdate;
-
-    public string CompanionMigrationLabel => HasLegacyBridge ? "Passer à l’accès Internet" : "Mettre à jour le compagnon";
-
-    public string CompanionMigrationDetail => HasLegacyBridge
-        ? "Votre ancien compagnon utilise le réseau local. L’accès en 4G ou 5G nécessite le compagnon Internet."
-        : "Votre compagnon Internet utilise l’ancienne page. Mettez-le à jour pour ouvrir la PWA Cloudflare Pages.";
-
-    private static bool HasHttpsOrigin(Uri uri, string host) =>
-        uri.Scheme == Uri.UriSchemeHttps && uri.Host.Equals(host, StringComparison.OrdinalIgnoreCase)
-        && uri.Port == 443 && uri.UserInfo.Length == 0;
-
-    public string QrInstructions => !HasLegacyBridge
-        ? "Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. Vos modifications seront envoyées à DmxMoney sur cet ordinateur par Internet. Un QR par appareil."
-        : "Ce QR utilise l’ancien accès local, disponible sur le même réseau que cet ordinateur. Passez à l’accès Internet pour utiliser la 4G ou la 5G.";
+    public string QrInstructions => "Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. Vos modifications seront envoyées à DmxMoney sur cet ordinateur par Internet. Un QR par appareil.";
 
     public IReadOnlyList<PasskeyInfo> Passkeys => SecureBridge is null
         ? []
@@ -104,68 +71,38 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     public string BridgeStateLabel => !BridgeSwitchOn
         ? "Désactivé"
-        : !IsRemoteBridge
-            ? "Accès local hérité"
         : SecureBridge?.Active == true
             ? "Prêt à appairer"
             : "Connexion Internet";
 
     public string BridgeStateDetail => !BridgeSwitchOn
         ? "Activez l’accès Internet pour modifier les données de cet ordinateur depuis votre téléphone, en Wi-Fi, 4G ou 5G, puis scannez le QR."
-        : IsRemoteBridge
-            ? "Les modifications de votre téléphone passent par le relais chiffré jusqu’à cet ordinateur, en Wi-Fi, 4G ou 5G. DmxMoney doit rester ouvert sur cet ordinateur allumé et connecté à Internet."
-            : "Ancien accès local : le téléphone doit être sur le même réseau que cet ordinateur. Cet accès ne fonctionne pas en 4G ou 5G.";
-
-    public string LocalLabel => Bridge?.Active == true ? "Actif" : BridgeSwitchOn ? "Démarrage" : "Inactif";
+        : "Les modifications de votre téléphone passent par le relais chiffré jusqu’à cet ordinateur, en Wi-Fi, 4G ou 5G. DmxMoney doit rester ouvert sur cet ordinateur allumé et connecté à Internet.";
 
     public IReadOnlyList<(string Label, string Value, bool Ready, string Icon)> BridgeSteps
     {
         get
         {
             var bridge = SecureBridge;
-            var enabled = BridgeSwitchOn;
-            if (!HasLegacyBridge)
-            {
-                var connected = bridge?.Active == true;
-                var encryptionReady = bridge?.ManagedCredentialReady == true;
-                return
-                [
-                    ("Compagnon mobile", bridge?.AppUrl is not null ? "Disponible" : "En attente", bridge?.AppUrl is not null, "Globe2"),
-                    ("Chiffrement entre appareils", encryptionReady ? "Prêt" : "En préparation", encryptionReady, "ShieldCheck"),
-                    ("Connexion Internet", connected ? "Connectée" : "Reconnexion en cours", connected, "Wifi"),
-                    ("Relais sécurisé", bridge?.Configured == true ? "Prêt" : "En préparation", bridge?.Configured == true, "Server"),
-                ];
-            }
-            var provisioningReady = bridge?.Configured ?? false;
-            var provisioning = provisioningReady ? "Prêt" : !enabled ? "En attente d’activation" : "En cours ou indisponible";
-            var dns = bridge?.DnsRecordId is not null
-                ? "Configuré"
-                : bridge?.ManagedCredentialReady == true ? "Prêt" : enabled ? "En attente" : "En attente d’activation";
-            var certificateReady = bridge?.CertificateReady ?? false;
+            var connected = BridgeSwitchOn && bridge?.Active == true;
+            var encryptionReady = bridge?.ManagedCredentialReady == true;
             return
             [
-                ("PWA publique", bridge?.AppUrl is not null ? "Disponible" : "En attente", bridge?.AppUrl is not null, "Globe2"),
-                ("Provisionnement", provisioning, provisioningReady, "KeyRound"),
-                ("DNS local", dns, bridge?.DnsRecordId is not null, "Wifi"),
-                ("Certificat HTTPS", certificateReady ? "Prêt" : enabled ? "En génération" : "Absent", certificateReady, "ShieldCheck"),
-                ("API locale", bridge?.ApiUrl is not null ? LocalLabel : "Non active", bridge?.Active ?? false, "Server"),
+                ("Compagnon mobile", bridge?.AppUrl is not null ? "Disponible" : "En attente", bridge?.AppUrl is not null, "Globe2"),
+                ("Chiffrement entre appareils", encryptionReady ? "Prêt" : "En préparation", encryptionReady, "ShieldCheck"),
+                ("Connexion Internet", connected ? "Connectée" : BridgeSwitchOn ? "Reconnexion en cours" : "Désactivée", connected, "Wifi"),
+                ("Relais sécurisé", bridge?.Configured == true ? "Prêt" : "En préparation", bridge?.Configured == true, "Server"),
             ];
         }
     }
 
-    public string PairingButtonLabel => SecureBridge?.Active == true
-        ? "Nouveau QR"
-        : BridgeSwitchOn ? IsRemoteBridge ? "Connexion…" : "Préparation HTTPS" : "Activer d’abord";
+    public string PairingButtonLabel => !BridgeSwitchOn
+        ? "Activer d’abord"
+        : SecureBridge?.Active == true ? "Nouveau QR" : "Connexion…";
 
     public string QrEmptyMessage => !BridgeSwitchOn
         ? "Le QR sera disponible après activation."
-        : IsRemoteBridge
-            ? SecureBridge?.Active == true ? "Générez un QR pour appairer un mobile." : "Connexion Internet en cours."
-        : SecureBridge?.CertificateReady != true
-            ? "Certificat HTTPS en cours de génération."
-            : SecureBridge?.Active != true
-                ? "Serveur local en démarrage."
-                : "Génère un QR pour appairer un mobile.";
+        : SecureBridge?.Active == true ? "Générez un QR pour appairer un mobile." : "Connexion Internet en cours.";
 
     public static string PasskeyMeta(PasskeyInfo passkey)
     {
@@ -178,29 +115,14 @@ public sealed partial class SettingsViewModel : PageViewModel
     }
 
     [RelayCommand]
-    private void SetBridgeEnabled(bool enabled)
+    private async Task SetBridgeEnabledAsync(bool enabled)
     {
         if (BridgeBusy)
         {
             return;
         }
-        if (enabled && CompanionMigrationRequired)
-        {
-            Store.Confirm(
-                HasLegacyBridge ? "Passer à l’accès Internet ?" : "Mettre à jour le compagnon ?",
-                "Synchronisez d’abord les saisies en attente dans l’ancienne PWA. Vos mobiles devront ensuite être appairés avec un nouveau QR ; les anciennes sessions seront révoquées.",
-                () => _ = ApplyBridgeEnabledAsync(true),
-                confirmTitle: HasLegacyBridge ? "Passer à Internet" : "Mettre à jour",
-                destructive: false);
-        }
-        else
-        {
-            _ = ApplyBridgeEnabledAsync(enabled);
-        }
+        await ApplyBridgeEnabledAsync(enabled);
     }
-
-    [RelayCommand]
-    private void MigrateBridge() => SetBridgeEnabled(true);
 
     private async Task ApplyBridgeEnabledAsync(bool enabled)
     {

@@ -243,7 +243,6 @@ const MobileConnectionScreen: React.FC = () => {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const scannerControlsRef = React.useRef<IScannerControls | null>(null);
   const pairingInProgressRef = React.useRef(false);
-  const autoReconnectAttemptedRef = React.useRef(false);
   const visibleConnectionError = isSetupRequiredMobileError(mobileConnectionError) ? null : mobileConnectionError;
   const hasPasskeySetup = hasMobilePasskeySetup();
   const showQrButton = !hasPasskeySetup || !isConnecting;
@@ -260,21 +259,6 @@ const MobileConnectionScreen: React.FC = () => {
   useEffect(() => {
     setHasPairingSetup(hasMobileCompanionSetup());
   }, [mobileConnectionError, mobileConnectionState]);
-
-  useEffect(() => {
-    if (!launchedAsPwa || !hasMobilePasskeySetup()) return;
-    if (autoReconnectAttemptedRef.current) return;
-    if (mobileConnectionState !== 'error') return;
-    if (isConnecting) return;
-
-    autoReconnectAttemptedRef.current = true;
-    setConnectionHint('Session expirée. Reconnexion avec la clé d’accès...');
-    connectMobileCompanion()
-      .catch(() => {
-        // The normal error UI remains available if the user cancels or the bridge is offline.
-      })
-      .finally(() => setConnectionHint(null));
-  }, [connectMobileCompanion, isConnecting, launchedAsPwa, mobileConnectionState]);
 
   const applyPairingAndConnect = React.useCallback(async (value: string) => {
     if (pairingInProgressRef.current) return;
@@ -365,7 +349,6 @@ const MobileConnectionScreen: React.FC = () => {
       setConnectionHint('Ouverture de la clé d’accès...');
       await connectMobileCompanion();
       setHasPairingSetup(hasMobileCompanionSetup());
-      autoReconnectAttemptedRef.current = false;
     } finally {
       setConnectionHint(null);
     }
@@ -396,7 +379,6 @@ const MobileConnectionScreen: React.FC = () => {
       setConnectionHint(null);
       setIsPairingOpen(false);
       setIsManualPairingOpen(false);
-      autoReconnectAttemptedRef.current = false;
     } finally {
       setIsUnlinking(false);
     }
@@ -428,7 +410,7 @@ const MobileConnectionScreen: React.FC = () => {
               ? 'Valide la clé d’accès enregistrée pour rouvrir la session mobile.'
               : hasPairingSetup
               ? 'Valide la clé d’accès pour reprendre la synchronisation.'
-              : 'Scanne le QR affiché dans DmxMoney desktop pour synchroniser cette PWA.'}
+              : 'Scanne le QR affiché dans DmxMoney sur ton ordinateur. La synchronisation fonctionne en Wi-Fi, 4G ou 5G.'}
           </p>
         </div>
 
@@ -603,7 +585,7 @@ const MobileConnectionScreen: React.FC = () => {
                 setPairingUrl(event.target.value);
                 setPairingError(null);
               }}
-              placeholder="https://dmxmoney.develop-max.com/mobile#pairing=...&api=..."
+              placeholder="Collez ici le lien d’appairage copié depuis DmxMoney sur votre ordinateur"
               className="mt-4 min-h-24 w-full resize-none rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-black/20 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
             />
 

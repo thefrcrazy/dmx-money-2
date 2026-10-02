@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Construit le client PWA du compagnon mobile dans pwa/dist.
 #
-# Les apps de bureau embarquent ce dossier : le pont local sert alors *sa* PWA, et le QR
-# d'appairage pointe vers le pont, plus vers la PWA publique déployée sur le Worker.
+# Le déploiement Pages prépare ce dossier sous /mobile/ ; les QR d'appairage utilisent
+# l'adresse commune https://dmxmoney-companion.pages.dev/mobile/.
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 

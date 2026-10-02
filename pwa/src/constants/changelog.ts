@@ -12,6 +12,18 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.1.0-rc.1",
+        date: "2026-10-02",
+        title: "2.1.0 RC1 — Compagnon Internet simplifié",
+        changes: [
+            "Activez le compagnon sur l’ordinateur puis scannez son QR : Pages et le relais sont configurés automatiquement.",
+            "Le téléphone synchronise en Wi-Fi, 4G ou 5G avec le bureau allumé, connecté à Internet et DmxMoney ouvert.",
+            "Serveur local, DNS individuels et étapes de migration retirés des paramètres.",
+            "Session mobile protégée pour reprendre après réouverture ; le verrouillage volontaire reste disponible.",
+            "RC1 reste une pré-version : le canal de mise à jour stable est conservé."
+        ]
+    },
+    {
         version: "2.0.9",
         date: "2026-10-02",
         title: "Compagnon Internet sur Cloudflare Pages",

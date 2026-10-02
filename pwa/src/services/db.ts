@@ -1,6 +1,6 @@
 import { Account, Transaction, Category, ScheduledTransaction, Settings, Budget } from '../types';
 import { offlineStore, OfflineDataKey } from './offlineStore';
-import { clearMobileRelay, getMobileRelayEndpoint, isMobileRelayUnlocked, markMobileRelayAuthenticated, mobileTransportFetch } from './relayTransport';
+import { clearMobileRelay, getMobileRelayEndpoint, getMobileRelaySessionEpoch, getMobileRelaySessionGeneration, invalidateMobileRelaySession, isMobileRelayUnlocked, markMobileRelayAuthenticated, mobileRelaySessionNeedsRenewal, mobileTransportFetch, MobileRelayLockedError, restoreMobileRelaySession } from './relayTransport';
 import {
     clearMobileCompanionLocalState,
     clearMobilePairingToken,
@@ -13,7 +13,6 @@ import {
     isMobileCompanion,
     isStandalonePwa,
     markMobilePasskeyReady,
-    setMobileApiBaseUrl,
     setMobileCsrfToken
 } from '../utils/runtime';
 import { selectNewestVersion } from '../utils/version';
@@ -87,6 +86,11 @@ interface SecureSessionResponse {
     ok: boolean;
     csrfToken: string;
     passkeyRequired?: boolean;
+    expiresAt: string;
+}
+
+class MobileAuthenticationRequiredError extends Error {
+    constructor() { super('Déverrouillez avec votre clé d’accès pour reprendre la synchronisation.'); }
 }
 
 interface WebauthnOptionsResponse<T> {
@@ -230,16 +234,10 @@ export class DatabaseService {
     private invokeFn: Promise<InvokeFn> | null = null;
     private flushPromise: Promise<void> | null = null;
     private sessionPromise: Promise<void> | null = null;
-    private recoveryPromise: Promise<boolean> | null = null;
-    private lastRecoveryAt = 0;
     private mobileOffline = false;
     private mobileRefreshPending = false;
     private readonly requestTimeoutMs = 2500;
     private readonly statusTimeoutMs = 2500;
-    private readonly probeTimeoutMs = 1500;
-    /** The desktop walks up from its preferred port when that port is taken. */
-    private readonly portSweepRange = 6;
-    private readonly recoveryCooldownMs = 30_000;
 
     async init(): Promise<void> {
         await this.getAccounts();
@@ -280,9 +278,8 @@ export class DatabaseService {
         init: RequestInit = {},
         timeoutMs = this.requestTimeoutMs,
         retrySession = true,
-        allowRecovery = true,
     ): Promise<T> {
-        if (path.startsWith('/api/') && !isMobileRelayUnlocked()) await this.ensureSecureMobileSession();
+        if (path.startsWith('/api/') && (!isMobileRelayUnlocked() || mobileRelaySessionNeedsRenewal())) await this.ensureSecureMobileSession();
         const apiBaseUrl = getMobileApiBaseUrl();
         const method = init.method || 'GET';
         if (!apiBaseUrl) {
@@ -294,7 +291,7 @@ export class DatabaseService {
         if (path.startsWith('/api/') && method !== 'GET' && !csrfToken) {
             if (retrySession) {
                 await this.ensureSecureMobileSession();
-                return this.request<T>(path, init, timeoutMs, false, allowRecovery);
+                return this.request<T>(path, init, timeoutMs, false);
             }
             throw new MobileNetworkError('Session mobile à reconnecter.');
         }
@@ -304,6 +301,8 @@ export class DatabaseService {
         if (init.body && !headers.has('Content-Type')) {
             headers.set('Content-Type', 'application/json');
         }
+        const generation = getMobileRelaySessionGeneration();
+        const epoch = getMobileRelaySessionEpoch();
 
         const controller = new AbortController();
         const timeoutId = window.setTimeout(() => controller.abort(), getMobileRelayEndpoint() ? Math.max(timeoutMs, 30000) : timeoutMs);
@@ -319,17 +318,12 @@ export class DatabaseService {
                 signal: controller.signal
             });
             text = await response.text();
+            if (generation !== getMobileRelaySessionGeneration() || epoch !== getMobileRelaySessionEpoch()) throw new MobileRelayLockedError();
         } catch (error) {
             const unreachable = (error instanceof DOMException && error.name === 'AbortError')
                 || error instanceof TypeError;
             if (!unreachable) throw error;
 
-            window.clearTimeout(timeoutId);
-            // The desktop may have come back on another port. Find it again and
-            // replay the request instead of stranding the mobile offline.
-            if (allowRecovery && await this.recoverMobileApiBaseUrl()) {
-                return this.request<T>(path, init, timeoutMs, retrySession, false);
-            }
             throw error instanceof DOMException
                 ? new MobileNetworkError('Connexion à l’ordinateur indisponible ou trop lente.')
                 : new MobileNetworkError((error as TypeError).message);
@@ -349,9 +343,10 @@ export class DatabaseService {
             }
             if (apiBaseUrl && response.status === 401) {
                 setMobileCsrfToken(null);
+                await invalidateMobileRelaySession();
                 if (retrySession && path.startsWith('/api/')) {
                     await this.ensureSecureMobileSession();
-                    return this.request<T>(path, init, timeoutMs, false, allowRecovery);
+                    return this.request<T>(path, init, timeoutMs, false);
                 }
             }
             throw new MobileHttpError(response.status, message);
@@ -362,81 +357,8 @@ export class DatabaseService {
     }
 
     /**
-     * The pairing QR pins the desktop's host *and* port, and the desktop walks up
-     * from its preferred port whenever that port is busy. Rather than asking for a
-     * new QR, probe the neighbouring ports on the same bridge host and adopt the
-     * one that answers, carrying the offline queue over with it.
-     */
-    private async recoverMobileApiBaseUrl(): Promise<boolean> {
-        if (!this.usesHttp()) return false;
-        if (getMobileRelayEndpoint()) return false;
-        if (this.recoveryPromise) return this.recoveryPromise;
-        if (Date.now() - this.lastRecoveryAt < this.recoveryCooldownMs) return false;
-
-        this.recoveryPromise = (async () => {
-            this.lastRecoveryAt = Date.now();
-            const current = getMobileApiBaseUrl();
-            if (!current) return false;
-
-            let url: URL;
-            try {
-                url = new URL(current);
-            } catch {
-                return false;
-            }
-
-            const basePort = Number(url.port);
-            if (!Number.isInteger(basePort)) return false;
-
-            const candidates: number[] = [];
-            for (let offset = 1; offset <= this.portSweepRange; offset += 1) {
-                candidates.push(basePort + offset, basePort - offset);
-            }
-
-            for (const port of candidates) {
-                if (port < 1 || port > 65535) continue;
-                const candidate = `${url.protocol}//${url.hostname}:${port}`;
-                if (await this.probeMobileBridge(candidate)) {
-                    console.info('Mobile bridge found again on', candidate);
-                    setMobileApiBaseUrl(candidate);
-                    setMobileCsrfToken(null);
-                    this.lastRecoveryAt = 0;
-                    return true;
-                }
-            }
-            return false;
-        })().finally(() => {
-            this.recoveryPromise = null;
-        });
-
-        return this.recoveryPromise;
-    }
-
-    private async probeMobileBridge(baseUrl: string): Promise<boolean> {
-        const controller = new AbortController();
-        const timeoutId = window.setTimeout(() => controller.abort(), this.probeTimeoutMs);
-        try {
-            const response = await fetch(new URL('/api/status', baseUrl).toString(), {
-                cache: 'no-store',
-                credentials: 'include',
-                signal: controller.signal,
-            });
-            // A 401 from another process cannot establish the bridge's identity.
-            // Recover only with an authenticated status, since cookies ignore ports.
-            if (!response.ok) return false;
-            const payload = await response.json().catch(() => null);
-            return payload?.ok === true && typeof payload?.dataVersion === 'number';
-        } catch {
-            return false;
-        } finally {
-            window.clearTimeout(timeoutId);
-        }
-    }
-
-    /**
      * Moves the offline cache and the unsent mutations onto the endpoint we are
-     * now talking to, so changes made on the mobile while the desktop was away
-     * are not lost when the bridge comes back at a different address.
+     * now talking to, only when both URLs refer to the same encrypted endpoint.
      */
     private async adoptPendingOfflineWork() {
         const previousUrls = getMobilePreviousApiBaseUrls();
@@ -457,20 +379,32 @@ export class DatabaseService {
         }
     }
 
-    private async ensureSecureMobileSession() {
-        if (!getMobileApiBaseUrl() || (getMobileCsrfToken() && isMobileRelayUnlocked())) return;
+    private async ensureSecureMobileSession(allowPasskey = false) {
+        if (!getMobileApiBaseUrl() || (getMobileCsrfToken() && isMobileRelayUnlocked() && !mobileRelaySessionNeedsRenewal())) return;
         if (this.sessionPromise) return this.sessionPromise;
 
-        if (!isMobileRelayUnlocked()) setMobileCsrfToken(null);
-
-        this.sessionPromise = this.createSecureMobileSession().finally(() => {
+        this.sessionPromise = this.createSecureMobileSession(allowPasskey).finally(() => {
             this.sessionPromise = null;
         });
         return this.sessionPromise;
     }
 
-    private async createSecureMobileSession() {
+    private async createSecureMobileSession(allowPasskey: boolean) {
         const pairingToken = getMobilePairingToken();
+        if (!pairingToken && await restoreMobileRelaySession()) {
+            const generation = getMobileRelaySessionGeneration();
+            const epoch = getMobileRelaySessionEpoch();
+            try {
+                const session = await this.requestSecureAuth<SecureSessionResponse>('/auth/session', { method: 'POST', body: '{}' });
+                await this.acceptMobileSession(session, generation, epoch);
+                return;
+            } catch (error) {
+                if (!(error instanceof MobileHttpError) || ![401, 404].includes(error.status)) throw error;
+                setMobileCsrfToken(null);
+                await invalidateMobileRelaySession();
+            }
+        }
+        if (!allowPasskey) throw new MobileAuthenticationRequiredError();
         if (pairingToken) {
             setMobileCsrfToken(null);
             let pairingStarted = false;
@@ -502,10 +436,24 @@ export class DatabaseService {
         await this.loginWithMobilePasskey();
     }
 
-    async connectMobileCompanion() {
+    async connectMobileCompanion(allowPasskey = true) {
         if (!this.usesHttp()) return;
-        await this.ensureSecureMobileSession();
+        await this.ensureSecureMobileSession(allowPasskey);
         await this.getSyncStatus();
+    }
+
+    async lockMobileCompanion() {
+        if (!this.usesHttp()) return;
+        // Start revocation before clearing the cookie. Local lock remains available offline.
+        const logout = this.requestSecureAuth('/auth/logout', { method: 'POST' }).catch(() => undefined);
+        setMobileCsrfToken(null);
+        await invalidateMobileRelaySession();
+        void logout;
+    }
+
+    isAuthenticationRequired(error: unknown) {
+        return error instanceof MobileAuthenticationRequiredError || error instanceof MobileRelayLockedError
+            || (error instanceof MobileHttpError && error.status === 401);
     }
 
     async unlinkMobileCompanion() {
@@ -542,6 +490,8 @@ export class DatabaseService {
         if (!apiBaseUrl) throw new Error('URL API sécurisée manquante.');
         const headers = new Headers(init.headers);
         if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+        const generation = getMobileRelaySessionGeneration();
+        const epoch = getMobileRelaySessionEpoch();
         const controller = new AbortController();
         const timeoutId = window.setTimeout(() => controller.abort(), getMobileRelayEndpoint() ? 30000 : this.requestTimeoutMs);
         let response: Response;
@@ -555,6 +505,7 @@ export class DatabaseService {
                 signal: controller.signal,
             });
             text = await response.text();
+            if (generation !== getMobileRelaySessionGeneration() || epoch !== getMobileRelaySessionEpoch()) throw new MobileRelayLockedError();
         } catch (error) {
             if (error instanceof DOMException && error.name === 'AbortError') {
                 throw new MobileNetworkError('Connexion sécurisée indisponible ou trop lente.');
@@ -576,12 +527,14 @@ export class DatabaseService {
             } catch {
                 // Keep raw body.
             }
-            throw new Error(message);
+            throw new MobileHttpError(response.status, message);
         }
         return text ? JSON.parse(text) as T : undefined as T;
     }
 
     private async registerMobilePasskey() {
+        const generation = getMobileRelaySessionGeneration();
+        const epoch = getMobileRelaySessionEpoch();
         this.assertPasskeyAvailable();
         const options = await this.requestSecureAuth<WebauthnOptionsResponse<RegistrationChallenge>>('/auth/passkey/register/options', {
             method: 'POST',
@@ -611,13 +564,12 @@ export class DatabaseService {
                 }
             })
         });
-        if (!session.ok || typeof session.csrfToken !== 'string' || !session.csrfToken) throw new Error('Session mobile non finalisée.');
-        setMobileCsrfToken(session.csrfToken);
-        markMobileRelayAuthenticated();
-        markMobilePasskeyReady();
+        await this.acceptMobileSession(session, generation, epoch, true);
     }
 
     private async loginWithMobilePasskey() {
+        const generation = getMobileRelaySessionGeneration();
+        const epoch = getMobileRelaySessionEpoch();
         this.assertPasskeyAvailable();
         const options = await this.requestSecureAuth<WebauthnOptionsResponse<AuthenticationChallenge>>('/auth/passkey/login/options', {
             method: 'POST',
@@ -647,9 +599,17 @@ export class DatabaseService {
                 }
             })
         });
-        if (!session.ok || typeof session.csrfToken !== 'string' || !session.csrfToken) throw new Error('Session mobile non finalisée.');
+        await this.acceptMobileSession(session, generation, epoch, true);
+    }
+
+    private async acceptMobileSession(session: SecureSessionResponse, generation: number, epoch: string, allowUnlock = false) {
+        if (!session.ok || session.passkeyRequired || typeof session.csrfToken !== 'string' || !session.csrfToken
+            || !Number.isFinite(Date.parse(session.expiresAt)) || Date.parse(session.expiresAt) <= Date.now()) {
+            throw new Error('Session mobile non finalisée.');
+        }
+        if (generation !== getMobileRelaySessionGeneration() || epoch !== getMobileRelaySessionEpoch()) throw new MobileRelayLockedError();
+        await markMobileRelayAuthenticated(session.expiresAt, generation, epoch, allowUnlock);
         setMobileCsrfToken(session.csrfToken);
-        markMobileRelayAuthenticated();
         markMobilePasskeyReady();
     }
 

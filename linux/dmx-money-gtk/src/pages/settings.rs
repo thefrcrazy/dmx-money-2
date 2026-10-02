@@ -1,4 +1,4 @@
-//! Paramètres : apparence, pont PWA (QR d'appairage), données, à propos.
+//! Paramètres : apparence, compagnon Internet (QR d'appairage), données, à propos.
 
 use std::rc::Rc;
 
@@ -23,8 +23,6 @@ pub struct Page {
     bridge_switch: gtk::Switch,
     bridge_badge: gtk::Label,
     bridge_detail: gtk::Label,
-    migration_button: gtk::Button,
-    migration_detail: gtk::Label,
     bridge_busy: Rc<std::cell::Cell<bool>>,
     app_url: gtk::Label,
     api_url: gtk::Label,
@@ -75,7 +73,7 @@ impl Page {
         let accent_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         appearance_content.append(&accent_box);
 
-        // --- Pont PWA ---
+        // --- Compagnon Internet ---
         let (bridge_card, bridge_content, _) = widgets::card(None, None);
         let bridge_section = section("Mode compagnon mobile", "Smartphone", &bridge_card);
         content.append(&bridge_section);
@@ -96,16 +94,10 @@ impl Page {
         bridge_labels.append(&bridge_detail);
         bridge_header.append(&bridge_labels);
         let bridge_switch = gtk::Switch::new();
+        bridge_switch.set_tooltip_text(Some("Activer le compagnon Internet"));
         bridge_switch.set_valign(gtk::Align::Center);
         bridge_header.append(&bridge_switch);
         bridge_content.append(&bridge_header);
-        let migration_button = widgets::action_button("Passer à l’accès Internet", Some("Globe2"), true);
-        migration_button.set_halign(gtk::Align::Start);
-        migration_button.set_visible(false);
-        bridge_content.append(&migration_button);
-        let migration_detail = widgets::caption("");
-        migration_detail.set_visible(false);
-        bridge_content.append(&migration_detail);
 
         let urls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         urls.set_homogeneous(true);
@@ -216,11 +208,6 @@ impl Page {
         });
         update_row.append(&check_updates);
         about_content.append(&update_row);
-        about_content.append(&widgets::separator());
-        let prerelease_check = gtk::CheckButton::with_label("Autoriser les versions pré-release (bêta / RC)");
-        prerelease_check.set_active(true);
-        about_content.append(&prerelease_check);
-
         let root = widgets::page_scroll(&content).upcast();
         let page = Self {
             store: store.clone(),
@@ -231,8 +218,6 @@ impl Page {
             bridge_switch: bridge_switch.clone(),
             bridge_badge,
             bridge_detail,
-            migration_button: migration_button.clone(),
-            migration_detail,
             bridge_busy: Rc::new(std::cell::Cell::new(false)),
             app_url,
             api_url,
@@ -291,16 +276,11 @@ impl Page {
             let busy = page.bridge_busy.clone();
             bridge_switch.connect_state_set(move |switch, state| {
                 if switch.is_sensitive() {
-                    request_bridge_enabled(&store, &busy, state);
+                    apply_bridge_enabled(&store, &busy, state);
                     return glib::Propagation::Stop;
                 }
                 glib::Propagation::Proceed
             });
-        }
-        {
-            let store = store.clone();
-            let busy = page.bridge_busy.clone();
-            migration_button.connect_clicked(move |_| request_bridge_enabled(&store, &busy, true));
         }
         {
             let store = store.clone();
@@ -407,7 +387,7 @@ impl Page {
         self.version_label
             .set_text(&format!("Version {}", env!("CARGO_PKG_VERSION")));
 
-        // Pont PWA
+        // Compagnon Internet
         self.bridge_section.set_visible(self.store.bridge_available());
         if !self.store.bridge_available() {
             return;
@@ -416,194 +396,72 @@ impl Page {
         let secure = status.as_ref().and_then(|status| status.secure_bridge.clone());
         let enabled = secure.as_ref().map(|bridge| bridge.enabled).unwrap_or(false);
         let active = secure.as_ref().map(|bridge| bridge.active).unwrap_or(false);
-        let certificate_ready = secure.as_ref().map(|bridge| bridge.certificate_ready).unwrap_or(false);
-        let is_remote = secure
-            .as_ref()
-            .and_then(|bridge| bridge.api_url.as_deref())
-            .is_some_and(|url| url.contains("/relay/"));
-        let has_legacy_bridge = !is_remote && secure.as_ref().is_some_and(|bridge| bridge.local_host.is_some());
-        let needs_pwa_update = secure
-            .as_ref()
-            .is_some_and(|bridge| needs_hosted_pwa_update(bridge.api_url.as_deref(), bridge.app_url.as_deref()));
-
         self.bridge_switch.set_sensitive(false);
         self.bridge_switch.set_active(enabled);
-        self.bridge_switch.set_sensitive(!self.bridge_busy.get());
-        self.migration_button.set_visible(has_legacy_bridge || needs_pwa_update);
-        self.migration_button.set_sensitive(!self.bridge_busy.get());
-        self.migration_detail.set_visible(has_legacy_bridge || needs_pwa_update);
-        self.migration_detail.set_text(if has_legacy_bridge {
-            "Votre ancien compagnon utilise le réseau local. L’accès en 4G ou 5G nécessite le compagnon Internet."
-        } else {
-            "Votre compagnon Internet utilise l’ancienne page. Mettez-le à jour pour ouvrir la PWA Cloudflare Pages."
-        });
-        if let Some(content) = self.migration_button.child().and_downcast::<gtk::Box>() {
-            if let Some(label) = content.last_child().and_downcast::<gtk::Label>() {
-                label.set_text(if has_legacy_bridge {
-                    "Passer à l’accès Internet"
-                } else {
-                    "Mettre à jour le compagnon"
-                });
-            }
-        }
+        self.bridge_switch
+            .set_sensitive(!self.bridge_busy.get() && status.is_some());
 
         let (badge, detail) = if !enabled {
             (
                 "Désactivé",
                 "Activez l’accès Internet pour modifier les données de cet ordinateur depuis votre téléphone, en Wi-Fi, 4G ou 5G, puis scannez le QR.",
             )
-        } else if is_remote {
+        } else {
             (
                 if active { "Prêt à appairer" } else { "Connexion Internet" },
                 "Les modifications de votre téléphone passent par le relais chiffré jusqu’à cet ordinateur, en Wi-Fi, 4G ou 5G. DmxMoney doit rester ouvert sur cet ordinateur allumé et connecté à Internet.",
             )
-        } else {
-            (
-                "Accès local hérité",
-                "Ancien accès local : le téléphone doit être sur le même réseau que cet ordinateur. Cet accès ne fonctionne pas en 4G ou 5G.",
-            )
         };
         self.bridge_badge.set_text(badge);
         self.bridge_detail.set_text(detail);
-        self.qr_instructions.set_text(if !has_legacy_bridge {
-            "Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. Vos modifications seront envoyées à DmxMoney sur cet ordinateur par Internet. Un QR par appareil."
-        } else {
-            "Ce QR utilise l’ancien accès local, disponible sur le même réseau que cet ordinateur. Passez à l’accès Internet pour utiliser la 4G ou la 5G."
-        });
-        self.app_url.set_text(if is_remote {
+        self.qr_instructions.set_text(
+            "Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. Vos modifications seront envoyées à DmxMoney sur cet ordinateur par Internet. Un QR par appareil.",
+        );
+        let app_ready = secure.as_ref().is_some_and(|bridge| bridge.app_url.is_some());
+        self.app_url.set_text(if app_ready {
             "Application mobile disponible"
         } else {
-            secure
-                .as_ref()
-                .and_then(|bridge| bridge.app_url.as_deref())
-                .unwrap_or("En préparation")
+            "En préparation"
         });
-        self.api_url.set_text(if is_remote {
-            if active {
-                "Accès Internet chiffré"
-            } else {
-                "Connexion Internet en cours"
-            }
+        self.api_url.set_text(if !enabled {
+            "Désactivée"
+        } else if active {
+            "Accès Internet chiffré"
         } else {
-            secure
-                .as_ref()
-                .and_then(|bridge| bridge.api_url.as_deref())
-                .unwrap_or("Non active")
+            "Connexion Internet en cours"
         });
 
-        let local_label = if status.as_ref().map(|status| status.active).unwrap_or(false) {
-            "Actif"
-        } else if enabled {
-            "Démarrage"
-        } else {
-            "Inactif"
-        };
         let provisioning_ready = secure.as_ref().map(|bridge| bridge.configured).unwrap_or(false);
-        let dns_ready = secure
-            .as_ref()
-            .and_then(|bridge| bridge.dns_record_id.clone())
-            .is_some();
         let encryption_ready = secure
             .as_ref()
             .map(|bridge| bridge.managed_credential_ready)
             .unwrap_or(false);
-        let steps = if !has_legacy_bridge {
-            vec![
-                (
-                    "Compagnon mobile",
-                    if secure.as_ref().is_some_and(|bridge| bridge.app_url.is_some()) {
-                        "Disponible"
-                    } else {
-                        "En attente"
-                    },
-                    secure.as_ref().is_some_and(|bridge| bridge.app_url.is_some()),
-                    "Globe2",
-                ),
-                (
-                    "Chiffrement entre appareils",
-                    if encryption_ready { "Prêt" } else { "En préparation" },
-                    encryption_ready,
-                    "ShieldCheck",
-                ),
-                (
-                    "Connexion Internet",
-                    if active { "Connectée" } else { "Reconnexion en cours" },
-                    active,
-                    "Wifi",
-                ),
-                (
-                    "Relais sécurisé",
-                    if provisioning_ready { "Prêt" } else { "En préparation" },
-                    provisioning_ready,
-                    "Server",
-                ),
-            ]
-        } else {
-            vec![
-                (
-                    "PWA publique",
-                    if secure.as_ref().and_then(|bridge| bridge.app_url.clone()).is_some() {
-                        "Disponible"
-                    } else {
-                        "En attente"
-                    },
-                    secure.as_ref().and_then(|bridge| bridge.app_url.clone()).is_some(),
-                    "Globe2",
-                ),
-                (
-                    "Provisionnement",
-                    if provisioning_ready {
-                        "Prêt"
-                    } else if !enabled {
-                        "En attente d’activation"
-                    } else {
-                        "En cours ou indisponible"
-                    },
-                    provisioning_ready,
-                    "KeyRound",
-                ),
-                (
-                    "DNS local",
-                    if dns_ready {
-                        "Configuré"
-                    } else if secure
-                        .as_ref()
-                        .map(|bridge| bridge.managed_credential_ready)
-                        .unwrap_or(false)
-                    {
-                        "Prêt"
-                    } else if enabled {
-                        "En attente"
-                    } else {
-                        "En attente d’activation"
-                    },
-                    dns_ready,
-                    "Wifi",
-                ),
-                (
-                    "Certificat HTTPS",
-                    if certificate_ready {
-                        "Prêt"
-                    } else if enabled {
-                        "En génération"
-                    } else {
-                        "Absent"
-                    },
-                    certificate_ready,
-                    "ShieldCheck",
-                ),
-                (
-                    "API locale",
-                    if secure.as_ref().and_then(|bridge| bridge.api_url.clone()).is_some() {
-                        local_label
-                    } else {
-                        "Non active"
-                    },
-                    active,
-                    "Server",
-                ),
-            ]
-        };
+        let steps = [
+            (
+                "Compagnon mobile",
+                if app_ready { "Disponible" } else { "En attente" },
+                app_ready,
+                "Globe2",
+            ),
+            (
+                "Chiffrement entre appareils",
+                if encryption_ready { "Prêt" } else { "En préparation" },
+                encryption_ready,
+                "ShieldCheck",
+            ),
+            (
+                "Connexion Internet",
+                if active { "Connectée" } else { "Reconnexion en cours" },
+                active,
+                "Wifi",
+            ),
+            (
+                "Relais sécurisé",
+                if provisioning_ready { "Prêt" } else { "En préparation" },
+                provisioning_ready,
+                "Server",
+            ),
+        ];
         widgets::clear(&self.steps);
         for (label, value, ready, icon) in steps {
             self.steps.append(&step_row(label, value, ready, icon, enabled));
@@ -615,17 +473,13 @@ impl Page {
 
         // QR d'appairage
         let pairing_url = secure.as_ref().and_then(|bridge| bridge.pairing_url.clone());
-        self.pairing_button.set_sensitive(active);
+        self.pairing_button.set_sensitive(active && !self.bridge_busy.get());
         if let Some(content) = self.pairing_button.child().and_downcast::<gtk::Box>() {
             if let Some(label) = content.last_child().and_downcast::<gtk::Label>() {
                 label.set_text(if active {
                     "Nouveau QR"
                 } else if enabled {
-                    if is_remote {
-                        "Connexion…"
-                    } else {
-                        "Préparation HTTPS"
-                    }
+                    "Connexion…"
                 } else {
                     "Activer d’abord"
                 });
@@ -653,18 +507,10 @@ impl Page {
                 self.qr_empty.set_visible(true);
                 self.qr_empty.set_text(if !enabled {
                     "Le QR sera disponible après activation."
-                } else if is_remote {
-                    if active {
-                        "Générez un QR pour appairer un mobile."
-                    } else {
-                        "Connexion Internet en cours."
-                    }
-                } else if !certificate_ready {
-                    "Certificat HTTPS en cours de génération."
-                } else if !active {
-                    "Serveur local en démarrage."
+                } else if active {
+                    "Générez un QR pour appairer un mobile."
                 } else {
-                    "Génère un QR pour appairer un mobile."
+                    "Connexion Internet en cours."
                 });
             }
         }
@@ -729,52 +575,6 @@ impl Page {
             self.passkeys.append(&row);
         }
     }
-}
-
-fn request_bridge_enabled(store: &Rc<Store>, busy: &Rc<std::cell::Cell<bool>>, enabled: bool) {
-    if busy.get() {
-        return;
-    }
-    let secure = bridge::status().and_then(|status| status.secure_bridge);
-    let legacy = secure.as_ref().is_some_and(|bridge| {
-        bridge.local_host.is_some() && !bridge.api_url.as_deref().is_some_and(|url| url.contains("/relay/"))
-    });
-    let update = secure
-        .as_ref()
-        .is_some_and(|bridge| needs_hosted_pwa_update(bridge.api_url.as_deref(), bridge.app_url.as_deref()));
-    if enabled && (legacy || update) {
-        let store_for_action = store.clone();
-        let busy = busy.clone();
-        store.confirm(
-            if legacy { "Passer à l’accès Internet ?" } else { "Mettre à jour le compagnon ?" },
-            "Synchronisez d’abord les saisies en attente dans l’ancienne PWA. Vos mobiles devront ensuite être appairés avec un nouveau QR ; les anciennes sessions seront révoquées.",
-            if legacy { "Passer à Internet" } else { "Mettre à jour" },
-            move || apply_bridge_enabled(&store_for_action, &busy, true),
-        );
-    } else {
-        apply_bridge_enabled(store, busy, enabled);
-    }
-}
-
-fn needs_hosted_pwa_update(api: Option<&str>, app: Option<&str>) -> bool {
-    let Some(api) = api.and_then(|url| glib::Uri::parse(url, glib::UriFlags::NONE).ok()) else {
-        return false;
-    };
-    if !has_https_origin(&api, "dmxmoney-remote-relay.qm7ws5twn7.workers.dev") || !api.path().starts_with("/relay/") {
-        return false;
-    }
-    !app.and_then(|url| glib::Uri::parse(url, glib::UriFlags::NONE).ok())
-        .is_some_and(|uri| has_https_origin(&uri, "dmxmoney-companion.pages.dev"))
-}
-
-fn has_https_origin(uri: &glib::Uri, host: &str) -> bool {
-    uri.scheme().eq_ignore_ascii_case("https")
-        && uri
-            .host()
-            .as_deref()
-            .is_some_and(|value| value.eq_ignore_ascii_case(host))
-        && matches!(uri.port(), -1 | 443)
-        && uri.userinfo().is_none()
 }
 
 fn apply_bridge_enabled(store: &Rc<Store>, busy: &Rc<std::cell::Cell<bool>>, enabled: bool) {

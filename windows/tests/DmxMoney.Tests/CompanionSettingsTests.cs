@@ -21,7 +21,6 @@ public sealed class CompanionSettingsTests
         store.BridgeStatus = new CompanionStatus(true, true, null, null, null, 1, Remote(true));
         using var settings = new SettingsViewModel(store);
 
-        Assert.True(settings.IsRemoteBridge);
         Assert.Equal("Prêt à appairer", settings.BridgeStateLabel);
         Assert.Equal("Nouveau QR", settings.PairingButtonLabel);
         Assert.Contains("appairer", settings.QrEmptyMessage);
@@ -45,58 +44,50 @@ public sealed class CompanionSettingsTests
     }
 
     [Fact]
-    public void LegacyCompanionRequiresAnExplicitMigrationBeforeRevokingMobileAccess()
+    public void DisabledCompanionOffersOnlyInternetActivation()
     {
         using var store = new EngineStore(DmxEngine.OpenInMemory());
-        var legacy = Remote(true) with
-        {
-            LocalHost = "legacy.example.com",
-            ApiUrl = "https://legacy.example.com:8443",
-            CertificateReady = true,
-        };
-        store.BridgeStatus = new CompanionStatus(true, true, null, null, null, 1, legacy);
+        store.BridgeStatus = new CompanionStatus(true, true, null, null, null, 1, Remote(false) with { Enabled = false });
         using var settings = new SettingsViewModel(store);
 
-        Assert.True(settings.HasLegacyBridge);
-        Assert.Equal("Accès local hérité", settings.BridgeStateLabel);
-        Assert.Contains("ne fonctionne pas en 4G ou 5G", settings.BridgeStateDetail);
-        Assert.Contains("même réseau", settings.QrInstructions);
-        settings.MigrateBridgeCommand.Execute(null);
-        Assert.NotNull(store.Confirmation);
-        Assert.Contains("saisies en attente", store.Confirmation.Message);
-        Assert.Contains("révoquées", store.Confirmation.Message);
-        Assert.False(store.Confirmation.Destructive);
-        Assert.False(settings.BridgeBusy);
-        Assert.Same(legacy, store.BridgeStatus.SecureBridge);
+        Assert.Equal("Désactivé", settings.BridgeStateLabel);
+        Assert.Contains("4G ou 5G", settings.BridgeStateDetail);
+        Assert.Equal("Activer d’abord", settings.PairingButtonLabel);
+        Assert.Equal("Le QR sera disponible après activation.", settings.QrEmptyMessage);
+        var connection = Assert.Single(settings.BridgeSteps, step => step.Label == "Connexion Internet");
+        Assert.False(connection.Ready);
+        Assert.Equal("Désactivée", connection.Value);
     }
 
-    [Theory]
-    [InlineData("https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev/relay/desktop", "https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev/mobile", true)]
-    [InlineData("https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev:443/relay/desktop", "https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev/mobile", true)]
-    [InlineData("https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev/relay/desktop", "https://dmxmoney-companion.pages.dev/", false)]
-    [InlineData("https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev/relay/desktop", "http://dmxmoney-companion.pages.dev/", true)]
-    [InlineData("https://companion.example.com/relay/desktop", "https://companion.example.com/mobile", false)]
-    [InlineData("https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev.other.example/relay/desktop", "https://companion.example.com/mobile", false)]
-    [InlineData("https://user@dmxmoney-remote-relay.qm7ws5twn7.workers.dev/relay/desktop", "https://companion.example.com/mobile", false)]
-    [InlineData("https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev:444/relay/desktop", "https://companion.example.com/mobile", false)]
-    public void OnlyTheOfficialRelayRequiresThePagesMigration(string api, string app, bool required)
+    [Fact]
+    public void NewInstallationHasOneCompanionFlowWithoutEndpointConfiguration()
     {
         using var store = new EngineStore(DmxEngine.OpenInMemory());
-        var remote = Remote(true) with { ApiUrl = api, AppUrl = app };
-        store.BridgeStatus = new CompanionStatus(true, true, null, null, null, 1, remote);
+        store.BridgeStatus = new CompanionStatus(true, false, null, null, null, 0, null);
         using var settings = new SettingsViewModel(store);
 
-        Assert.Equal(required, settings.NeedsHostedPwaUpdate);
-        Assert.Equal(required, settings.CompanionMigrationRequired);
-        if (required)
-        {
-            Assert.Equal("Mettre à jour le compagnon", settings.CompanionMigrationLabel);
-            settings.MigrateBridgeCommand.Execute(null);
-            Assert.NotNull(store.Confirmation);
-            Assert.Equal("Mettre à jour le compagnon ?", store.Confirmation.Title);
-            Assert.Contains("saisies en attente", store.Confirmation.Message);
-            Assert.Same(remote, store.BridgeStatus.SecureBridge);
-            Assert.False(settings.BridgeBusy);
-        }
+        Assert.False(settings.BridgeSwitchOn);
+        Assert.Equal("Désactivé", settings.BridgeStateLabel);
+        Assert.Empty(settings.Passkeys);
+        Assert.Contains("Face ID", settings.QrInstructions);
+        Assert.Contains("Internet", settings.QrInstructions);
+        Assert.All(settings.BridgeSteps, step => Assert.False(step.Ready));
+        Assert.DoesNotContain(settings.BridgeSteps, step => step.Label.Contains("DNS") || step.Label.Contains("Certificat"));
+        Assert.Null(store.Confirmation);
+    }
+
+    [Fact]
+    public async Task DisablingCompanionDoesNotRequireASetupConfirmation()
+    {
+        using var store = new EngineStore(DmxEngine.OpenInMemory());
+        store.BridgeStatus = new CompanionStatus(true, true, null, null, null, 1, Remote(true));
+        using var settings = new SettingsViewModel(store);
+
+        await settings.SetBridgeEnabledCommand.ExecuteAsync(false);
+
+        Assert.Null(store.Confirmation);
+        Assert.False(settings.BridgeBusy);
+        Assert.False(settings.BridgeSwitchOn);
+        Assert.Equal("Désactivé", settings.BridgeStateLabel);
     }
 }

@@ -1,6 +1,11 @@
 # Synchronisation du compagnon mobile
 
-Le Mac/PC héberge la base de référence. La PWA conserve la dernière copie reçue et une
+Le Mac/PC héberge la base de référence. Activer le compagnon dans les paramètres puis
+scanner son QR ouvre la PWA commune sur Cloudflare Pages et permet de créer une passkey.
+Le bureau ouvre une connexion WebSocket sortante au relais Internet. Aucun domaine,
+DNS, certificat local ou port entrant n'est à configurer.
+
+La PWA conserve la dernière copie reçue et une
 file persistante de modifications. Lorsque le bureau est injoignable, les pages utilisent cette copie ;
 les échéances affichées ne deviennent des écritures définitives que lorsque le moteur Rust
 peut les traiter. Les analyses et les soldes utilisent les opérations de cette même copie.
@@ -28,11 +33,8 @@ peut les traiter. Les analyses et les soldes utilisent les opérations de cette 
 - Une réponse de lecture ancienne ne peut pas écraser une nouvelle saisie, même si cette
   saisie a déjà été acquittée pendant que la lecture était en vol.
 
-Les modifications déjà mises en file par une ancienne PWA conservent leur protocole d'origine :
-il n'est pas possible de reconstruire rétroactivement une version de départ absente. Installer
-la nouvelle version sur l'ordinateur puis charger la PWA connectée avant les nouvelles saisies.
-Le pont local historique reste limité au réseau local. Le nouveau relais Internet permet
-de synchroniser en Wi-Fi, 4G ou 5G tant que le bureau est allumé, connecté et DmxMoney ouvert.
+Le relais Internet permet de synchroniser en Wi-Fi, 4G ou 5G tant que le bureau est
+allumé, connecté et DmxMoney ouvert.
 La PWA active vérifie les changements toutes les 2,5 secondes. Une PWA suspendue en
 arrière-plan par le téléphone reprend à sa réouverture ; elle ne peut pas garantir un
 traitement continu en arrière-plan.
@@ -43,13 +45,27 @@ et un remplacement du cache seulement après réception complète. Un changement
 fait recommencer la lecture, au plus deux fois, puis conserve le cache existant.
 
 La clé du relais passe par le fragment du QR et ne va pas au Worker. Les passkeys imposent
-une vérification utilisateur. Le cache financier et les corps des messages hors ligne sont
+une vérification utilisateur (`userVerification=required`) à l'appairage et lorsqu'une
+nouvelle authentification est nécessaire. Le système choisit Face ID, Touch ID ou le
+code de l'appareil ; Safari ne permet pas d'imposer une méthode biométrique particulière.
+La session finalisée est enregistrée chiffrée dans IndexedDB avec une CryptoKey non
+extractable. Au lancement et au retour au premier plan, la PWA la reprend silencieusement
+auprès du bureau. Sa durée est limitée à sept jours d'inactivité et trente jours depuis
+sa création. Une session valide évite de répéter la passkey à chaque réouverture.
+Les appairages inachevés et leur QR restent limités à dix minutes.
+
+Révoquer un appareil ou sa passkey invalide immédiatement ses sessions sur le bureau.
+« Verrouiller » retire la session locale et impose une nouvelle authentification ;
+la clé du relais, les données du cache et la file de modifications restent conservées.
+Le verrouillage du téléphone protège également l'accès à une session encore valide.
+
+Le cache financier et les corps des messages hors ligne sont
 stockés dans des enveloppes JSON UTF-8/base64 versionnées. Les anciennes valeurs sont
 migrées dans une transaction IndexedDB, sans perdre les messages en attente. L’encodage
 masque la lecture directe et ajoute environ 33 % à la taille du JSON UTF-8 ; il reste
 facilement décodable et n’apporte pas de confidentialité. La garde d’interface masque les
-données avant authentification et après 45 minutes, sans chiffrement au repos. Après
-fermeture de la PWA, une connexion au bureau est requise pour déverrouiller.
+données sans session authentifiée ou après verrouillage, sans chiffrer ces fichiers financiers.
+Le chiffrement de la session protège ses identifiants ; il ne chiffre pas le cache financier.
 Un opérateur qui contrôlerait le JavaScript livré pourrait compromettre ce client.
 Voir [les limites et le déploiement du relais](../cloudflare/remote-relay/README.md).
 

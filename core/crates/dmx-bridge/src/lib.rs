@@ -1,9 +1,5 @@
-//! Compagnon mobile DmxMoney : relais Internet chiffré à connexion sortante et passkeys,
-//! avec maintien du serveur HTTPS local et du provisionnement DNS/ACME historiques.
-//!
-//! Port de `src-tauri/src/mobile_companion` et `src-tauri/src/secure_bridge` (1.x). Le contrat
-//! HTTP est inchangé pour que la PWA existante fonctionne sans modification ; les dépendances à
-//! Tauri sont remplacées par [`BridgeHost`].
+//! Compagnon mobile DmxMoney : PWA Cloudflare Pages, relais chiffré sortant et passkeys.
+//! Les requêtes authentifiées sont exécutées par le noyau sur l’ordinateur.
 
 pub mod companion;
 pub mod secure;
@@ -19,7 +15,7 @@ pub use secure::{MobilePasskeyInfo, SecureBridgeStatus};
 pub trait BridgeEvents: Send + Sync + 'static {
     /// Des données ont été modifiées depuis la PWA.
     fn data_changed(&self, data_version: i64);
-    /// L'état du pont a changé (certificat renouvelé, provisionnement terminé…).
+    /// La connexion au relais ou l’appairage mobile a changé.
     fn status_changed(&self);
     /// Reformulation d'une demande de l'assistant par l'hôte (modèle sur l'appareil).
     ///
@@ -45,9 +41,9 @@ pub struct BridgeHost {
     pub pool: DbPool,
     /// Runtime tokio du moteur ; les appels synchrones du pont ne doivent pas venir de ses threads.
     pub runtime: tokio::runtime::Handle,
-    /// Dossier de données de l'application (certificats dans `secure-bridge/<appareil>`).
+    /// Dossier de données de l’application fourni par l’hôte.
     pub data_dir: PathBuf,
-    /// Build de la PWA servi localement ; sans lui, les pages redirigent vers la PWA publique.
+    /// Champ conservé pour les bindings existants ; la PWA est hébergée sur Cloudflare Pages.
     pub assets_dir: Option<PathBuf>,
     pub events: Arc<dyn BridgeEvents>,
 }

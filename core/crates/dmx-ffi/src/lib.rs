@@ -591,10 +591,11 @@ impl DmxEngine {
         cfg!(feature = "bridge")
     }
 
-    /// Démarre le pont si le mode compagnon est actif ; `assets_dir` contient le build de la PWA.
+    /// Démarre le relais Internet si le compagnon est actif ; `assets_dir` est conservé pour les bindings.
     pub fn start_bridge(&self, assets_dir: Option<String>) -> FfiResult<()> {
         #[cfg(feature = "bridge")]
         {
+            let _ = assets_dir;
             let mut slot = self
                 .companion
                 .lock()
@@ -605,7 +606,7 @@ impl DmxEngine {
                     pool: self.engine.pool().clone(),
                     runtime: self.engine.handle(),
                     data_dir: self.engine.data_dir().to_path_buf(),
-                    assets_dir: assets_dir.map(PathBuf::from),
+                    assets_dir: None,
                     events: Arc::new(ListenerEvents(Arc::clone(&self.listener))),
                 });
                 companion.bootstrap().map_err(bridge_error)?;

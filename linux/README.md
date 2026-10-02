@@ -98,7 +98,7 @@ L'AppImage publiée est construite sous Ubuntu 24.04. La CI utilise `appimagetoo
 Les distributions plus anciennes ne sont pas validées ; le Flatpak fournit le runtime GNOME 50.
 Le SDK GNOME 50 sélectionne l'extension Rust stable sur la branche freedesktop 25.08.
 
-Le Flatpak demande : réseau (pont HTTPS local), trousseau
+Le Flatpak demande : réseau (connexion sortante au relais Internet), trousseau
 (`org.freedesktop.secrets`, service « DmxMoney Secure Bridge »), `StatusNotifierWatcher`
 pour l'icône de zone de notification. Les imports et exports passent par le portail de
 fichiers, sans accès disque supplémentaire.
@@ -114,14 +114,12 @@ fichiers, sans accès disque supplémentaire.
 
 ## Compagnon mobile
 
-Le relais distant chiffré est le même que sur macOS et Windows (`dmx-bridge`). Il utilise
-le Worker commun sans configuration DNS personnelle ; l'ordinateur doit rester allumé.
-Le pont local reste disponible. Sa PWA est servie depuis `$PREFIX/share/dmx-money/pwa`
-quand `pwa/dist` a été construit avant l'installation :
+Dans les paramètres, activer le compagnon puis scanner le QR sur le téléphone. Le relais
+chiffré (`dmx-bridge`) utilise le même Worker commun que macOS et Windows, avec une
+connexion WebSocket sortante. La PWA est hébergée sur
+[Cloudflare Pages](https://dmxmoney-companion.pages.dev/mobile/). Aucun DNS personnel,
+certificat local ou port entrant n'est à configurer. Le téléphone fonctionne en Wi-Fi,
+4G ou 5G tant que l'ordinateur est allumé, connecté à Internet et DmxMoney ouvert.
 
-```bash
-cd pwa && bun install && bun run build
-```
-
-Le client du relais distant est servi par le Worker. Les paquets AppImage et Flatpak embarquent
-aussi la PWA locale ; pendant le développement, le pont recherche `pwa/dist` dans les sources.
+Les paquets AppImage et Flatpak n'embarquent pas de PWA. Le client mobile est publié
+séparément avec `scripts/deploy-pwa.sh` ; voir [les garanties de synchronisation](../docs/mobile-sync.md).

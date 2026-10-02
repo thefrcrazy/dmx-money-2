@@ -6,10 +6,9 @@ L'API et le relais WebSocket sont fournis par le Worker séparé
 `https://dmxmoney-remote-relay.qm7ws5twn7.workers.dev`.
 Chaque installation de bureau génère sa propre identité aléatoire. Aucun domaine,
 enregistrement DNS, port entrant ou compte Cloudflare n’est demandé à l’utilisateur.
-L’ancien `managed-bridge` reste séparé pour les installations existantes. Les bureaux
-avec une ancienne identité DNS nécessitent l'action « Passer à l'accès Internet ».
-Les appairages précédents du relais restent valides au démarrage jusqu'à l'action
-« Mettre à jour le compagnon » ; cette migration change l'origine WebAuthn et demande un nouveau QR.
+Dans les paramètres du bureau, activer le compagnon puis scanner le QR sur le téléphone.
+L'adresse Pages et le relais sont configurés automatiquement ; une passkey termine
+l'appairage. Le même accès fonctionne sur le réseau du domicile et sur les réseaux mobiles.
 
 ## Fonctionnement
 
@@ -25,9 +24,19 @@ distinctes pour les requêtes et les réponses. La clé maîtresse ne passe pas 
 Le QR transmet la clé par fragment d’URL, avec un jeton d’appairage valable dix minutes
 et consommable une seule fois. Le fragment est retiré après lecture. Le bureau conserve
 ses secrets dans le trousseau système ; la PWA conserve des CryptoKey non extractables
-dans IndexedDB. Les cookies de session restent en mémoire et passent uniquement dans
-le message chiffré. Les passkeys sont vérifiées par le noyau avec vérification utilisateur
-obligatoire : Face ID, Touch ID ou code selon l’appareil. Le QR doit rester privé.
+dans IndexedDB. La session finalisée y est conservée sous forme chiffrée AES-GCM.
+Ses cookies passent uniquement dans les messages chiffrés, jamais dans les cookies
+HTTP du relais. Au lancement et au retour au premier plan, la PWA reprend cette session
+par `POST /auth/session` sans demander une nouvelle passkey tant qu'elle reste valide.
+Une session expire après sept jours d'inactivité ou trente jours depuis sa création.
+Révoquer l'appareil ou sa passkey sur le bureau invalide toutes ses sessions immédiatement.
+Le bouton « Verrouiller » retire la session et demande une nouvelle authentification,
+en conservant la clé du relais, le cache et les modifications hors ligne.
+
+Les passkeys sont vérifiées par le noyau avec `userVerification=required`. Face ID,
+Touch ID ou le code de l'appareil sont choisis par le système ; l'application ne peut
+pas imposer Face ID à Safari. L'appairage inachevé expire après dix minutes et n'est
+pas persisté comme une session finalisée. Le QR doit rester privé.
 
 Le bureau doit rester allumé, connecté à Internet et DmxMoney ouvert. La PWA active
 vérifie les changements toutes les 2,5 secondes ; les écritures déclenchent aussi le
@@ -46,39 +55,45 @@ sur le téléphone et sont rejouées à la reconnexion.
   en JSON UTF-8/base64, avec migration atomique du stockage existant. Ce format masque
   la lecture directe, mais reste facilement décodable sans clé : il ne protège pas la
   confidentialité des fichiers récupérés. Le base64 ajoute environ 33 % à la taille du
-  JSON UTF-8. La PWA masque les données avant une authentification passkey et après
-  45 minutes ; cette garde ne chiffre pas les fichiers. Après fermeture, la reconnexion au bureau est requise
-  pour déverrouiller. Un onglet déjà déverrouillé peut continuer hors ligne.
+  JSON UTF-8. La PWA masque les données en l'absence de session authentifiée ou après
+  verrouillage ; cette garde ne chiffre pas les fichiers financiers. Le chiffrement
+  de la session ne transforme pas le cache financier en stockage chiffré.
+  Un téléphone déverrouillé peut réutiliser une session encore valide : le verrouillage
+  du système et l'action « Verrouiller » protègent cet accès entre deux usages.
 - SQLite sur le bureau et les sauvegardes `.dmx` restent dans leur format existant,
   sans chiffrement applicatif au repos. La protection du système et du disque s’applique.
-- La migration depuis le pont local change l’origine WebAuthn : les anciens mobiles
-  doivent être réappairés. Les anciennes files hors ligne restent dans leur ancien scope ;
-  les synchroniser avant la migration évite d’y laisser des saisies en attente.
 
 ## Développement et publication
 
+Pour construire et publier la PWA sur le projet Pages commun, depuis la racine :
+
 ```bash
-cd pwa
-bun install --frozen-lockfile
-bun run build
-cd ../cloudflare/remote-relay
+./scripts/deploy-pwa.sh
+```
+
+Le script construit la PWA, prépare `/mobile/` et publie sur la branche `main` du projet
+Pages `dmxmoney-companion`. La session Wrangler ou le jeton Cloudflare de l'éditeur
+doit autoriser ce projet. Aucun accès DNS ni namespace KV n'est utilisé.
+
+Pour vérifier et publier le Worker du relais séparément :
+
+```bash
+./scripts/build-pwa.sh
+cd cloudflare/remote-relay
 bun install --frozen-lockfile
 bun run assets
-bun run pages:assets
 bun run types
 bun run check
 bun run test
 bun run dry-run
 bun run deploy
-bun run pages:deploy
 ```
 
 `bun run assets` copie le build sans les fichiers de routage propres à Pages. Le Worker
 sert les assets sous `/mobile/` et applique ses propres en-têtes de sécurité. La date
 de compatibilité est celle prise en charge par le moteur de tests verrouillé.
 `bun run pages:assets` prépare le dossier statique Pages sous `/mobile/`, avec CSP,
-un 404 explicite et chemins de service worker cohérents. `pages:deploy` publie sur
-le projet Pages `dmxmoney-companion`. Le Worker autorise en CORS uniquement cette
+un 404 explicite et chemins de service worker cohérents. Le Worker autorise en CORS uniquement cette
 origine additionnelle, sur la route de messages chiffrés ; aucun cookie HTTP n'est exposé.
 Un éditeur peut définir `DMXMONEY_REMOTE_RELAY_URL` au **build Rust** pour choisir une
 autre origine HTTPS commune. La PWA prend l’origine du QR ; aucun secret commun

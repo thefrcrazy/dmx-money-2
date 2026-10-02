@@ -74,23 +74,19 @@ public sealed partial class SettingsPage : Page
         BridgeSwitch.IsEnabled = !ViewModel.BridgeBusy;
         BridgeBadge.Text = ViewModel.BridgeStateLabel;
         BridgeDetail.Text = ViewModel.BridgeStateDetail;
-        LegacyBridgeMigration.Visibility = ViewModel.CompanionMigrationRequired ? Visibility.Visible : Visibility.Collapsed;
-        CompanionMigrationDetail.Text = ViewModel.CompanionMigrationDetail;
-        MigrateBridgeButton.Content = ViewModel.CompanionMigrationLabel;
-        MigrateBridgeButton.IsEnabled = !ViewModel.BridgeBusy;
         QrInstructions.Text = ViewModel.QrInstructions;
-        AppUrl.Text = ViewModel.IsRemoteBridge ? "Application mobile disponible" : ViewModel.SecureBridge?.AppUrl ?? "En préparation";
-        ApiUrl.Text = ViewModel.IsRemoteBridge
-            ? ViewModel.SecureBridge?.Active == true ? "Accès Internet chiffré" : "Connexion Internet en cours"
-            : ViewModel.SecureBridge?.ApiUrl ?? "Non active";
+        AppUrl.Text = ViewModel.SecureBridge?.AppUrl is not null ? "Application mobile disponible" : "En préparation";
+        ApiUrl.Text = !ViewModel.BridgeSwitchOn ? "Accès désactivé"
+            : ViewModel.SecureBridge?.Active == true ? "Accès Internet chiffré" : "Connexion Internet en cours";
 
         BridgeSteps.ItemsSource = ViewModel.BridgeSteps.Select(step => new BridgeStepRow(step.Label, step.Value, step.Ready, step.Icon)).ToList();
         BridgeError.Text = ViewModel.SecureBridge?.LastError ?? string.Empty;
         BridgeError.Visibility = string.IsNullOrEmpty(ViewModel.SecureBridge?.LastError) ? Visibility.Collapsed : Visibility.Visible;
 
         PairingLabel.Text = ViewModel.PairingButtonLabel;
-        PairingButton.IsEnabled = ViewModel.SecureBridge?.Active == true && !ViewModel.BridgeBusy;
+        PairingButton.IsEnabled = ViewModel.BridgeSwitchOn && ViewModel.SecureBridge?.Active == true && !ViewModel.BridgeBusy;
         CopyButton.Visibility = ViewModel.SecureBridge?.PairingUrl is null ? Visibility.Collapsed : Visibility.Visible;
+        QrEmpty.Text = ViewModel.QrEmptyMessage;
         UpdateQr(ViewModel.SecureBridge?.PairingUrl);
 
         var passkeys = ViewModel.Passkeys;
@@ -106,20 +102,25 @@ public sealed partial class SettingsPage : Page
 
     private async void UpdateQr(string? url)
     {
-        if (url == shownPairingUrl)
-        {
-            return;
-        }
-        shownPairingUrl = url;
         if (url is null)
         {
+            shownPairingUrl = null;
             QrCode.Source = null;
             QrCode.Visibility = Visibility.Collapsed;
             QrEmpty.Visibility = Visibility.Visible;
             QrEmpty.Text = ViewModel.QrEmptyMessage;
             return;
         }
+        if (url == shownPairingUrl)
+        {
+            return;
+        }
+        shownPairingUrl = url;
         var image = await QrImage.CreateAsync(url);
+        if (url != shownPairingUrl)
+        {
+            return;
+        }
         QrCode.Source = image;
         QrCode.Visibility = image is null ? Visibility.Collapsed : Visibility.Visible;
         QrEmpty.Visibility = image is null ? Visibility.Visible : Visibility.Collapsed;
