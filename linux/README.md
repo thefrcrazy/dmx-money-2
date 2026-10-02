@@ -84,6 +84,8 @@ plateformes.
 
 ```bash
 # Flatpak (build local, dépendances Cargo téléchargées pendant le build)
+flatpak install -y flathub org.gnome.Platform//50 org.gnome.Sdk//50 \
+    org.freedesktop.Sdk.Extension.rust-stable//25.08
 flatpak-builder --user --install --force-clean build linux/flatpak/com.dmxmoney.app.yml
 flatpak run com.dmxmoney.app
 
@@ -93,7 +95,8 @@ flatpak run com.dmxmoney.app
 
 L'AppImage publiée est construite sous Ubuntu 24.04. La CI utilise `appimagetool` sans
 `linuxdeploy` : GTK 4.12+ et libadwaita 1.5+ doivent donc être présents sur la machine.
-Les distributions plus anciennes ne sont pas validées ; le Flatpak fournit le runtime GNOME.
+Les distributions plus anciennes ne sont pas validées ; le Flatpak fournit le runtime GNOME 50.
+Le SDK GNOME 50 sélectionne l'extension Rust stable sur la branche freedesktop 25.08.
 
 Le Flatpak demande : réseau (pont HTTPS local), trousseau
 (`org.freedesktop.secrets`, service « DmxMoney Secure Bridge »), `StatusNotifierWatcher`
