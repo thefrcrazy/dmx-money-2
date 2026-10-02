@@ -74,6 +74,11 @@ public sealed partial class SettingsPage : Page
         BridgeSwitch.IsEnabled = !ViewModel.BridgeBusy;
         BridgeBadge.Text = ViewModel.BridgeStateLabel;
         BridgeDetail.Text = ViewModel.BridgeStateDetail;
+        LegacyBridgeMigration.Visibility = ViewModel.CompanionMigrationRequired ? Visibility.Visible : Visibility.Collapsed;
+        CompanionMigrationDetail.Text = ViewModel.CompanionMigrationDetail;
+        MigrateBridgeButton.Content = ViewModel.CompanionMigrationLabel;
+        MigrateBridgeButton.IsEnabled = !ViewModel.BridgeBusy;
+        QrInstructions.Text = ViewModel.QrInstructions;
         AppUrl.Text = ViewModel.IsRemoteBridge ? "Application mobile disponible" : ViewModel.SecureBridge?.AppUrl ?? "En préparation";
         ApiUrl.Text = ViewModel.IsRemoteBridge
             ? ViewModel.SecureBridge?.Active == true ? "Accès Internet chiffré" : "Connexion Internet en cours"
@@ -150,6 +155,7 @@ public sealed partial class SettingsPage : Page
         if (!syncing && BridgeSwitch.IsOn != ViewModel.BridgeSwitchOn)
         {
             ViewModel.SetBridgeEnabledCommand.Execute(BridgeSwitch.IsOn);
+            UpdateVisuals();
         }
     }
 

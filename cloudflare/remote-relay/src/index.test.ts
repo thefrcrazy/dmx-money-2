@@ -20,6 +20,30 @@ test('discovers protocol and rejects cross-origin enrollment', async () => {
   expect(response.status).toBe(403);
 });
 
+test('Pages CORS accepts only encrypted mobile POSTs and rejects foreign origins', async () => {
+  const url = endpoint();
+  const origin = 'https://dmxmoney-companion.pages.dev';
+  const preflight = (requestOrigin: string, headers = 'authorization,content-type', method = 'POST') => SELF.fetch(`${url}/request`, {
+    method: 'OPTIONS', headers: { origin: requestOrigin, 'access-control-request-method': method, 'access-control-request-headers': headers },
+  });
+  const allowed = await preflight(origin);
+  expect(allowed.status).toBe(204);
+  expect(allowed.headers.get('access-control-allow-origin')).toBe(origin);
+  expect(allowed.headers.get('access-control-allow-credentials')).toBeNull();
+  expect(allowed.headers.get('vary')).toBe('Origin');
+  expect((await preflight('https://attacker.test')).status).toBe(403);
+  expect((await preflight(origin, 'x-unexpected')).status).toBe(403);
+  expect((await preflight(origin, 'authorization', 'DELETE')).status).toBe(403);
+  expect((await SELF.fetch(`${url}/enroll`, { method: 'POST', headers: { origin }, body: '{}' })).status).toBe(403);
+  expect((await enrollment(url)).status).toBe(201);
+  const unauthorized = await SELF.fetch(`${url}/request`, { method: 'POST', headers: { origin, authorization: `Bearer ${token}` }, body: '{}' });
+  expect(unauthorized.status).toBe(401);
+  expect(unauthorized.headers.get('access-control-allow-origin')).toBe(origin);
+  const unavailable = await SELF.fetch(`${url}/request`, { method: 'POST', headers: { origin, authorization: `Bearer ${mobile}` }, body: '{}' });
+  expect(unavailable.status).toBe(503);
+  expect(unavailable.headers.get('access-control-allow-origin')).toBe(origin);
+});
+
 test('enrollment proves possession and cannot replace credentials', async () => {
   const url = endpoint();
   expect((await enrollment(url, mobile)).status).toBe(401);

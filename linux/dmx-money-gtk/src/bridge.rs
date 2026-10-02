@@ -1,4 +1,4 @@
-//! Pont compagnon mobile (PWA) : serveur HTTPS local du noyau, piloté depuis les réglages.
+//! Compagnon mobile : relais Internet et compatibilité avec le pont local hérité.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -29,7 +29,7 @@ impl BridgeEvents for Events {
     }
 }
 
-/// Démarre le pont (il ne sert la PWA que si l'utilisateur a activé le mode compagnon).
+/// Démarre le compagnon selon la configuration déjà activée par l'utilisateur.
 pub fn start(store: &Rc<Store>, assets_dir: Option<PathBuf>) {
     if !store.bridge_available() || COMPANION.with(|slot| slot.borrow().is_some()) {
         return;
@@ -63,13 +63,6 @@ pub fn companion() -> Option<Arc<MobileCompanion>> {
 
 pub fn status() -> Option<MobileCompanionStatus> {
     companion().and_then(|companion| companion.status().ok())
-}
-
-pub fn set_enabled(enabled: bool) -> Result<MobileCompanionStatus, String> {
-    companion()
-        .ok_or_else(|| "Pont non démarré.".to_string())?
-        .set_secure_bridge_enabled(enabled)
-        .map_err(|error| error.to_string())
 }
 
 pub fn regenerate_pairing() -> Result<MobileCompanionStatus, String> {

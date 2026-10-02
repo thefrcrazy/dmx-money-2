@@ -46,10 +46,15 @@ Deux options indépendantes, activables dans Paramètres :
 
 - **iCloud** : synchronisation entre Mac, iPhone et iPad (macOS 14+ / iOS 17+).
 - **Compagnon PWA distant** : le desktop ouvre une connexion sortante au relais commun
-  Cloudflare. Le téléphone fonctionne en Wi-Fi, 4G ou 5G, avec appairage QR, passkey et
+  Cloudflare. La [PWA hébergée sur Cloudflare Pages](https://dmxmoney-companion.pages.dev/mobile/)
+  transmet les modifications au bureau par le Worker et sa connexion WebSocket.
+  Le téléphone fonctionne en Wi-Fi, 4G ou 5G, avec appairage QR, passkey et
   transport chiffré entre appareils. Le PC doit rester allumé et DmxMoney ouvert.
   Aucun DNS n’est à configurer par l’utilisateur. Les installations du pont local
-  existant restent compatibles ; un nouvel appairage est nécessaire pour passer au relais.
+  existant restent disponibles en mode « Accès local hérité » ; sélectionner
+  « Passer à l’accès Internet » après synchronisation des anciennes saisies mobiles.
+  Les appairages du précédent relais nécessitent « Mettre à jour le compagnon » pour
+  changer d'origine vers Pages. Un nouvel appairage est nécessaire dans les deux cas.
 
 Les garanties, le cache hors ligne et les limites de confidentialité sont détaillés dans
 [le fonctionnement du relais](cloudflare/remote-relay/README.md) et [la synchronisation mobile](docs/mobile-sync.md).

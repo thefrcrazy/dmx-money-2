@@ -20,6 +20,12 @@ public sealed partial class SettingsViewModel : PageViewModel
         OnPropertyChanged(nameof(IsDefaultAccent));
         OnPropertyChanged(nameof(Bridge));
         OnPropertyChanged(nameof(SecureBridge));
+        OnPropertyChanged(nameof(HasLegacyBridge));
+        OnPropertyChanged(nameof(NeedsHostedPwaUpdate));
+        OnPropertyChanged(nameof(CompanionMigrationRequired));
+        OnPropertyChanged(nameof(CompanionMigrationLabel));
+        OnPropertyChanged(nameof(CompanionMigrationDetail));
+        OnPropertyChanged(nameof(QrInstructions));
         OnPropertyChanged(nameof(BridgeStateLabel));
         OnPropertyChanged(nameof(BridgeStateDetail));
         OnPropertyChanged(nameof(BridgeSteps));
@@ -67,29 +73,48 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     public bool IsRemoteBridge => SecureBridge?.ApiUrl?.Contains("/relay/", StringComparison.Ordinal) == true;
 
+    public bool HasLegacyBridge => !IsRemoteBridge && SecureBridge?.LocalHost is not null;
+
+    public bool NeedsHostedPwaUpdate =>
+        Uri.TryCreate(SecureBridge?.ApiUrl, UriKind.Absolute, out var api)
+        && HasHttpsOrigin(api, "dmxmoney-remote-relay.qm7ws5twn7.workers.dev")
+        && api.AbsolutePath.StartsWith("/relay/", StringComparison.Ordinal)
+        && (!Uri.TryCreate(SecureBridge?.AppUrl, UriKind.Absolute, out var app)
+            || !HasHttpsOrigin(app, "dmxmoney-companion.pages.dev"));
+
+    public bool CompanionMigrationRequired => HasLegacyBridge || NeedsHostedPwaUpdate;
+
+    public string CompanionMigrationLabel => HasLegacyBridge ? "Passer à l’accès Internet" : "Mettre à jour le compagnon";
+
+    public string CompanionMigrationDetail => HasLegacyBridge
+        ? "Votre ancien compagnon utilise le réseau local. L’accès en 4G ou 5G nécessite le compagnon Internet."
+        : "Votre compagnon Internet utilise l’ancienne page. Mettez-le à jour pour ouvrir la PWA Cloudflare Pages.";
+
+    private static bool HasHttpsOrigin(Uri uri, string host) =>
+        uri.Scheme == Uri.UriSchemeHttps && uri.Host.Equals(host, StringComparison.OrdinalIgnoreCase)
+        && uri.Port == 443 && uri.UserInfo.Length == 0;
+
+    public string QrInstructions => !HasLegacyBridge
+        ? "Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. Vos modifications seront envoyées à DmxMoney sur cet ordinateur par Internet. Un QR par appareil."
+        : "Ce QR utilise l’ancien accès local, disponible sur le même réseau que cet ordinateur. Passez à l’accès Internet pour utiliser la 4G ou la 5G.";
+
     public IReadOnlyList<PasskeyInfo> Passkeys => SecureBridge is null
         ? []
         : [.. SecureBridge.Passkeys.Where(passkey => passkey.RevokedAt is null)];
 
     public string BridgeStateLabel => !BridgeSwitchOn
         ? "Désactivé"
+        : !IsRemoteBridge
+            ? "Accès local hérité"
         : SecureBridge?.Active == true
             ? "Prêt à appairer"
-            : IsRemoteBridge
-                ? "Connexion Internet"
-            : SecureBridge?.CertificateReady == true
-                ? "Démarrage local"
-                : "Préparation HTTPS";
+            : "Connexion Internet";
 
     public string BridgeStateDetail => !BridgeSwitchOn
-        ? "Activez le compagnon, puis appairez votre téléphone avec le QR."
+        ? "Activez l’accès Internet pour modifier les données de cet ordinateur depuis votre téléphone, en Wi-Fi, 4G ou 5G, puis scannez le QR."
         : IsRemoteBridge
-            ? "Accès en Wi-Fi, 4G ou 5G, avec chiffrement entre vos appareils. L’ordinateur doit rester allumé et connecté."
-        : SecureBridge?.Active == true
-            ? "La PWA peut se connecter à l’API locale sécurisée."
-            : SecureBridge?.CertificateReady == true
-                ? "Le certificat est prêt, le serveur local termine son démarrage."
-                : "DNS et certificat sont préparés automatiquement en arrière-plan.";
+            ? "Les modifications de votre téléphone passent par le relais chiffré jusqu’à cet ordinateur, en Wi-Fi, 4G ou 5G. DmxMoney doit rester ouvert sur cet ordinateur allumé et connecté à Internet."
+            : "Ancien accès local : le téléphone doit être sur le même réseau que cet ordinateur. Cet accès ne fonctionne pas en 4G ou 5G.";
 
     public string LocalLabel => Bridge?.Active == true ? "Actif" : BridgeSwitchOn ? "Démarrage" : "Inactif";
 
@@ -99,7 +124,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         {
             var bridge = SecureBridge;
             var enabled = BridgeSwitchOn;
-            if (IsRemoteBridge)
+            if (!HasLegacyBridge)
             {
                 var connected = bridge?.Active == true;
                 var encryptionReady = bridge?.ManagedCredentialReady == true;
@@ -153,7 +178,31 @@ public sealed partial class SettingsViewModel : PageViewModel
     }
 
     [RelayCommand]
-    private async Task SetBridgeEnabledAsync(bool enabled)
+    private void SetBridgeEnabled(bool enabled)
+    {
+        if (BridgeBusy)
+        {
+            return;
+        }
+        if (enabled && CompanionMigrationRequired)
+        {
+            Store.Confirm(
+                HasLegacyBridge ? "Passer à l’accès Internet ?" : "Mettre à jour le compagnon ?",
+                "Synchronisez d’abord les saisies en attente dans l’ancienne PWA. Vos mobiles devront ensuite être appairés avec un nouveau QR ; les anciennes sessions seront révoquées.",
+                () => _ = ApplyBridgeEnabledAsync(true),
+                confirmTitle: HasLegacyBridge ? "Passer à Internet" : "Mettre à jour",
+                destructive: false);
+        }
+        else
+        {
+            _ = ApplyBridgeEnabledAsync(enabled);
+        }
+    }
+
+    [RelayCommand]
+    private void MigrateBridge() => SetBridgeEnabled(true);
+
+    private async Task ApplyBridgeEnabledAsync(bool enabled)
     {
         BridgeBusy = true;
         await Store.PerformAsync(
@@ -166,7 +215,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             },
             message =>
             {
-                Store.ErrorMessage = $"Pont sécurisé indisponible : {message}";
+                Store.ErrorMessage = $"Compagnon Internet indisponible : {message}";
                 BridgeBusy = false;
             });
     }

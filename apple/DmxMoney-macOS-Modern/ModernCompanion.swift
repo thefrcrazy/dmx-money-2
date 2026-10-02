@@ -9,12 +9,29 @@ struct ModernCompanion: View {
 
     private var bridge: SecureBridgeInfo? { store.bridgeStatus?.secureBridge }
     private var isRemote: Bool { bridge?.apiUrl?.contains("/relay/") == true }
+    private var hasLegacyBridge: Bool { !isRemote && bridge?.localHost != nil }
+    private var needsHostedPwaUpdate: Bool {
+        CompanionMigration.needsHostedPwaUpdate(apiUrl: bridge?.apiUrl, appUrl: bridge?.appUrl)
+    }
 
     var body: some View {
         PageBody {
             VStack(alignment: .leading, spacing: 16) {
                 if store.bridgeAvailable {
                     activation
+                    if hasLegacyBridge || needsHostedPwaUpdate {
+                        Card {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(hasLegacyBridge
+                                    ? "Votre ancien compagnon utilise le réseau local. L’accès en 4G ou 5G nécessite le compagnon Internet."
+                                    : "Votre compagnon Internet utilise l’ancienne page. Mettez-le à jour pour ouvrir la PWA Cloudflare Pages.")
+                                    .font(.callout)
+                                Button(hasLegacyBridge ? "Passer à l’accès Internet" : "Mettre à jour le compagnon") { setEnabled(true) }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(isWorking)
+                            }
+                        }
+                    }
                     if bridge?.enabled == true {
                         HStack(alignment: .top, spacing: 16) {
                             steps
@@ -68,16 +85,7 @@ struct ModernCompanion: View {
                 Spacer(minLength: 8)
                 Toggle("", isOn: Binding(
                     get: { bridge?.enabled ?? false },
-                    set: { enabled in
-                        isWorking = true
-                        store.perform({ engine in try engine.setSecureBridgeEnabled(enabled: enabled) }, completion: { status in
-                            store.updateBridgeStatus(status)
-                            isWorking = false
-                        }, failure: { message in
-                            store.errorMessage = "Pont sécurisé indisponible : \(message)"
-                            isWorking = false
-                        })
-                    }
+                    set: setEnabled
                 ))
                 .labelsHidden()
                 .disabled(isWorking)
@@ -87,7 +95,7 @@ struct ModernCompanion: View {
 
     private var stateColor: Color {
         guard let bridge, bridge.enabled else { return .secondary }
-        return bridge.active ? .green : .orange
+        return bridge.active && isRemote ? .green : .orange
     }
 
     private var readyCount: Int {
@@ -97,6 +105,7 @@ struct ModernCompanion: View {
     private var badge: String {
         guard let bridge else { return "Désactivé" }
         if !bridge.enabled { return "Désactivé" }
+        if hasLegacyBridge { return "Accès local hérité" }
         if bridge.active { return "Prêt à appairer" }
         if isRemote { return "Connexion Internet" }
         if bridge.certificateReady { return "Démarrage local" }
@@ -105,15 +114,12 @@ struct ModernCompanion: View {
 
     private var detail: String {
         guard let bridge, bridge.enabled else {
-            return "Activez le compagnon, puis appairez votre téléphone avec le QR."
+            return "Activez l’accès Internet pour modifier les données de ce Mac depuis votre téléphone, en Wi-Fi, 4G ou 5G, puis scannez le QR."
         }
         if isRemote {
-            return "Accès en Wi-Fi, 4G ou 5G, avec chiffrement entre vos appareils. Ce Mac doit rester allumé et connecté."
+            return "Les modifications de votre téléphone passent par le relais chiffré jusqu’à ce Mac, en Wi-Fi, 4G ou 5G. DmxMoney doit rester ouvert sur ce Mac allumé et connecté à Internet."
         }
-        if bridge.active {
-            return "Le client PWA embarqué est servi par ce Mac ; vos mobiles s'y connectent en HTTPS."
-        }
-        return "DNS et certificat sont préparés automatiquement en arrière-plan."
+        return "Ancien accès local : le téléphone doit être sur le même réseau que ce Mac. Cet accès ne fonctionne pas en 4G ou 5G."
     }
 
     // MARK: Étapes
@@ -231,7 +237,9 @@ struct ModernCompanion: View {
                         .overlay {
                             RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator, lineWidth: 0.5)
                         }
-                    Text("Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. En accès Internet, le Wi-Fi, la 4G et la 5G fonctionnent ; ce Mac doit rester allumé et connecté.")
+                    Text(isRemote
+                        ? "Scannez ce QR, puis validez avec Face ID, Touch ID ou le verrouillage du téléphone. Vos modifications seront envoyées à DmxMoney sur ce Mac par Internet."
+                        : "Ce QR utilise l’ancien accès local, disponible sur le même réseau que ce Mac. Passez à l’accès Internet pour utiliser la 4G ou la 5G.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -284,6 +292,31 @@ struct ModernCompanion: View {
             store.showToast("Nouveau QR d'appairage")
         }, failure: { message in
             store.errorMessage = "Appairage impossible : \(message)"
+        })
+    }
+
+    private func setEnabled(_ enabled: Bool) {
+        guard !isWorking else { return }
+        if enabled && (hasLegacyBridge || needsHostedPwaUpdate) {
+            store.confirm(
+                title: hasLegacyBridge ? "Passer à l’accès Internet ?" : "Mettre à jour le compagnon ?",
+                message: "Synchronisez d’abord les saisies en attente dans l’ancienne PWA. Vos mobiles devront ensuite être appairés avec un nouveau QR ; les anciennes sessions seront révoquées.",
+                confirmTitle: hasLegacyBridge ? "Passer à Internet" : "Mettre à jour",
+                destructive: false
+            ) { applyEnabled(true) }
+        } else {
+            applyEnabled(enabled)
+        }
+    }
+
+    private func applyEnabled(_ enabled: Bool) {
+        isWorking = true
+        store.perform({ engine in try engine.setSecureBridgeEnabled(enabled: enabled) }, completion: { status in
+            store.updateBridgeStatus(status)
+            isWorking = false
+        }, failure: { message in
+            store.errorMessage = "Compagnon Internet indisponible : \(message)"
+            isWorking = false
         })
     }
 

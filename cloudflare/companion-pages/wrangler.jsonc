@@ -1,0 +1,6 @@
+{
+  "$schema": "../remote-relay/node_modules/wrangler/config-schema.json",
+  "name": "dmxmoney-companion",
+  "pages_build_output_dir": ".pages",
+  "compatibility_date": "2026-10-02"
+}

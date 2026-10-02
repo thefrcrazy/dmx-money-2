@@ -42,6 +42,7 @@ pwa/dist-ssr/
 # Cloudflare
 cloudflare/**/node_modules/
 cloudflare/remote-relay/.assets/
+cloudflare/companion-pages/.pages/
 cloudflare/managed-bridge/wrangler.local.toml
 .wrangler/
 

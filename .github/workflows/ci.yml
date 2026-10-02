@@ -59,6 +59,7 @@ jobs:
         working-directory: cloudflare/remote-relay
         run: |
           bun run assets
+          bun run pages:assets
           bun run check
           bun run test
           bun run dry-run
