@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef, useDeferredValue } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useDeferredValue } from 'react';
 import { Plus, Search, Trash2, Edit2, CheckCircle2, ArrowRightLeft, Tag, Circle, Check } from 'lucide-react';
 import Button from '../components/ui/Button';
 import { useBank } from '../context/BankContext';
@@ -10,12 +10,12 @@ import MultiSelect from '../components/ui/MultiSelect';
 import { Transaction } from '../types';
 import { ICONS } from '../constants/icons';
 import Table from '../components/ui/Table';
+import MobileTransactionList from '../components/transactions/MobileTransactionList';
 import Input from '../components/ui/Input';
 import { useFinancialMetrics } from '../hooks/useFinancialMetrics';
 import { formatCurrency, formatDate } from '../utils/format';
 
 type TransactionWithBalance = Transaction & { balance: number };
-const MOBILE_BATCH_SIZE = 80;
 
 const normalizeSearchValue = (value: unknown) => String(value ?? '')
     .toLowerCase()
@@ -61,8 +61,6 @@ const Transactions: React.FC = () => {
 
     const [searchTerm, setSearchTerm] = useState('');
     const deferredSearchTerm = useDeferredValue(searchTerm);
-    const [mobileVisibleCount, setMobileVisibleCount] = useState(MOBILE_BATCH_SIZE);
-    const mobileLoadMoreRef = useRef<HTMLDivElement>(null);
     const [filterCategories, setFilterCategories] = useState<string[]>([]);
     const [filterTypes, setFilterTypes] = useState<string[]>([]);
     const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
@@ -241,36 +239,6 @@ const Transactions: React.FC = () => {
         isTransactionBudgeted,
         getTransactionBudgetRemaining
     ]);
-
-    const mobileGroupedTransactions = useMemo(() => {
-        const groups = new Map<string, TransactionWithBalance[]>();
-        displayTransactions.slice(0, mobileVisibleCount).forEach(transaction => {
-            const key = transaction.date;
-            const items = groups.get(key);
-            if (items) items.push(transaction);
-            else groups.set(key, [transaction]);
-        });
-
-        return Array.from(groups.entries()).map(([date, items]) => ({
-            date,
-            label: formatDate(date, 'EEEE d MMM'),
-            items
-        }));
-    }, [displayTransactions, mobileVisibleCount]);
-
-    useEffect(() => {
-        setMobileVisibleCount(MOBILE_BATCH_SIZE);
-    }, [deferredSearchTerm, filterCategories, filterTypes, filterStatuses, filterBudgets, filterAccount]);
-
-    useEffect(() => {
-        const sentinel = mobileLoadMoreRef.current;
-        if (!sentinel || mobileVisibleCount >= displayTransactions.length || !('IntersectionObserver' in window)) return;
-        const observer = new IntersectionObserver(entries => {
-            if (entries.some(entry => entry.isIntersecting)) setMobileVisibleCount(count => count + MOBILE_BATCH_SIZE);
-        }, { root: sentinel.closest('main'), rootMargin: '200px' });
-        observer.observe(sentinel);
-        return () => observer.disconnect();
-    }, [displayTransactions.length, mobileVisibleCount]);
 
     const activeFilterCount = filterCategories.length + filterTypes.length + filterStatuses.length + filterBudgets.length;
     const mobileVisibleNet = useMemo(() => displayTransactions.reduce((sum, transaction) => (
@@ -654,7 +622,7 @@ const Transactions: React.FC = () => {
                             accessor: 'accountId',
                             truncate: true,
                             render: (t) => {
-                                const acc = accounts.find(a => a.id === t.accountId);
+                                const acc = accountMap.get(t.accountId);
                                 return (
                                     <div className="flex items-center gap-2">
                                         <div className="w-1 h-4 rounded-full flex-none" style={{ backgroundColor: acc?.color || '#eee' }} />
@@ -753,77 +721,70 @@ const Transactions: React.FC = () => {
 
             <div className="md:hidden space-y-5 pb-4">
                 {displayTransactions.length > 0 ? (
-                    mobileGroupedTransactions.map(group => (
-                        <section key={group.date}>
-                            <h3 className="px-4 pb-1.5 text-[13px] font-medium text-[var(--color-text-secondary)] first-letter:uppercase">
-                                {group.label}
-                            </h3>
-                            <div className="app-card overflow-hidden">
-                                {group.items.map((transaction, index) => {
-                                    const account = accountMap.get(transaction.accountId);
-                                    const category = getCategoryDetails(transaction.category);
-                                    const budgetRemaining = getTransactionBudgetRemaining(transaction);
-                                    const isIncome = transaction.type === 'income';
-                                    const isSelected = selectedIds.has(transaction.id);
-                                    const details = [
-                                        account?.name || 'Compte',
-                                        category.name,
-                                        budgetRemaining ? `${formatCurrency(budgetRemaining.remaining)} restant` : null,
-                                    ].filter(Boolean).join(' · ');
+                    <MobileTransactionList data={displayTransactions}
+                        resetKey={JSON.stringify([deferredSearchTerm, filterCategories, filterTypes, filterStatuses, filterBudgets, filterAccount])}
+                        renderRow={(transaction, startsDay, endsDay) => {
+                        const account = accountMap.get(transaction.accountId);
+                        const category = getCategoryDetails(transaction.category);
+                        const budgetRemaining = getTransactionBudgetRemaining(transaction);
+                        const isIncome = transaction.type === 'income';
+                        const isSelected = selectedIds.has(transaction.id);
+                        const details = [
+                            account?.name || 'Compte',
+                            category.name,
+                            budgetRemaining ? `${formatCurrency(budgetRemaining.remaining)} restant` : null,
+                        ].filter(Boolean).join(' · ');
 
-                                    return (
-                                        <div key={transaction.id} className={`flex items-center gap-3 pl-4 transition-colors ${isSelected ? 'bg-primary-500/10' : ''}`}>
-                                            {isSelecting && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleToggleSelect(transaction.id)}
-                                                    className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors ${isSelected ? 'border-primary-500 bg-primary-500 text-white' : 'border-[var(--ios-tertiary-label)]'}`}
-                                                    aria-label={`${isSelected ? 'Désélectionner' : 'Sélectionner'} ${transaction.description}`}
-                                                    aria-pressed={isSelected}
-                                                >
-                                                    {isSelected && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
-                                                </button>
-                                            )}
-                                            <span
-                                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-                                                style={{ backgroundColor: `${category.color}1f`, color: category.color }}
-                                            >
-                                                {renderCategoryIcon(category.icon, 'h-[18px] w-[18px]')}
-                                            </span>
-                                            <div className={`flex min-w-0 flex-1 items-center gap-2 py-2.5 pr-2 ${index > 0 ? 'border-t-[0.5px] border-[var(--ios-separator)]' : ''}`}>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => (isSelecting ? handleToggleSelect(transaction.id) : handleOpenModal(transaction))}
-                                                    className="min-w-0 flex-1 text-left active:opacity-60"
-                                                >
-                                                    <span className="block truncate text-[17px] leading-snug text-[var(--ios-label)]">
-                                                        {transaction.description || category.name}
-                                                    </span>
-                                                    <span className="mt-0.5 block truncate text-[13px] text-[var(--color-text-secondary)]">{details}</span>
-                                                </button>
-                                                <span className={`shrink-0 text-[17px] font-semibold tabular-nums ${isIncome ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                                                    {isIncome ? '+' : '-'}{formatCurrency(transaction.amount)}
-                                                </span>
-                                                {!isSelecting && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => toggleTransactionCheck(transaction.id)}
-                                                        className="flex h-9 w-9 shrink-0 items-center justify-center"
-                                                        aria-label={transaction.checked ? 'Dépointer' : 'Pointer'}
-                                                        aria-pressed={transaction.checked}
-                                                    >
-                                                        {transaction.checked
-                                                            ? <CheckCircle2 className="h-[22px] w-[22px] text-emerald-500" />
-                                                            : <Circle className="h-[22px] w-[22px] text-[var(--ios-tertiary-label)]" />}
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
+                        return (
+                            <div data-transaction-id={transaction.id} className={`flex h-full items-center gap-3 pl-4 transition-colors ${startsDay ? 'rounded-t-[var(--card-radius)]' : ''} ${endsDay ? 'rounded-b-[var(--card-radius)]' : ''} ${isSelected ? 'bg-primary-500/10' : 'bg-[var(--ios-card)]'}`}>
+                                {isSelecting && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleToggleSelect(transaction.id)}
+                                        className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors ${isSelected ? 'border-primary-500 bg-primary-500 text-white' : 'border-[var(--ios-tertiary-label)]'}`}
+                                        aria-label={`${isSelected ? 'Désélectionner' : 'Sélectionner'} ${transaction.description}`}
+                                        aria-pressed={isSelected}
+                                    >
+                                        {isSelected && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                                    </button>
+                                )}
+                                <span
+                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+                                    style={{ backgroundColor: `${category.color}1f`, color: category.color }}
+                                >
+                                    {renderCategoryIcon(category.icon, 'h-[18px] w-[18px]')}
+                                </span>
+                                <div className={`flex min-w-0 flex-1 items-center gap-2 py-2.5 pr-2 ${!startsDay ? 'border-t-[0.5px] border-[var(--ios-separator)]' : ''}`}>
+                                    <button
+                                        type="button"
+                                        onClick={() => (isSelecting ? handleToggleSelect(transaction.id) : handleOpenModal(transaction))}
+                                        className="min-w-0 flex-1 text-left active:opacity-60"
+                                    >
+                                        <span className="block truncate text-[17px] leading-snug text-[var(--ios-label)]">
+                                            {transaction.description || category.name}
+                                        </span>
+                                        <span className="mt-0.5 block truncate text-[13px] text-[var(--color-text-secondary)]">{details}</span>
+                                    </button>
+                                    <span className={`shrink-0 text-[17px] font-semibold tabular-nums ${isIncome ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                        {isIncome ? '+' : '-'}{formatCurrency(transaction.amount)}
+                                    </span>
+                                    {!isSelecting && (
+                                        <button
+                                            type="button"
+                                            onClick={() => toggleTransactionCheck(transaction.id)}
+                                            className="flex h-9 w-9 shrink-0 items-center justify-center"
+                                            aria-label={transaction.checked ? 'Dépointer' : 'Pointer'}
+                                            aria-pressed={transaction.checked}
+                                        >
+                                            {transaction.checked
+                                                ? <CheckCircle2 className="h-[22px] w-[22px] text-emerald-500" />
+                                                : <Circle className="h-[22px] w-[22px] text-[var(--ios-tertiary-label)]" />}
+                                        </button>
+                                    )}
+                                </div>
                             </div>
-                        </section>
-                    ))
+                        );
+                    }} />
                 ) : (
                     <div className="app-card px-6 py-10 text-center">
                         <Search className="mx-auto mb-3 h-10 w-10 text-[var(--ios-tertiary-label)]" />
@@ -836,14 +797,6 @@ const Transactions: React.FC = () => {
                     </div>
                 )}
             </div>
-
-            {mobileVisibleCount < displayTransactions.length && (
-                <div ref={mobileLoadMoreRef} className="md:hidden pb-4 text-center">
-                    <Button variant="ghost" onClick={() => setMobileVisibleCount(count => count + MOBILE_BATCH_SIZE)}>
-                        Afficher les opérations suivantes
-                    </Button>
-                </div>
-            )}
 
             <FormPopup
                 isOpen={isModalOpen}

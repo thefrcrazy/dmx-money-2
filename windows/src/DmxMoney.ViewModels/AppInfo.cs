@@ -11,10 +11,10 @@ public static class AppInfo
 
     public static IReadOnlyList<string> ReleaseNotes { get; } =
     [
-        "Compagnon Internet unique : activez-le puis scannez le QR pour appairer votre téléphone.",
-        "La PWA Cloudflare Pages transmet les modifications au bureau par un relais chiffré en Wi-Fi, 4G ou 5G.",
-        "Le serveur local, les certificats DNS et les actions de migration ont été retirés.",
-        "La connexion mobile reprend après réouverture, avec une passkey et un verrouillage volontaire.",
-        "Pré-version 2.1.0 RC1 : les mises à jour stables restent séparées.",
+        "Journal : réutilisation des cellules et limitation des rechargements pendant le défilement.",
+        "Les lectures du statut du compagnon ne recalculent plus inutilement le journal inchangé.",
+        "Les vues dépendantes du jour continuent de s'actualiser après minuit.",
+        "Journal PWA mobile virtualisé, avec conservation de la sélection et de la ligne focalisée.",
+        "Pré-version 2.1.0 RC2 : les mises à jour stables restent séparées.",
     ];
 }

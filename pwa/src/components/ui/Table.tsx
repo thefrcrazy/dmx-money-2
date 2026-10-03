@@ -38,54 +38,6 @@ interface TableProps<T> {
     overscan?: number;
 }
 
-const TruncatedTooltip: React.FC<{ 
-    children: React.ReactNode, 
-    tooltipText: string, 
-    align?: 'left' | 'center' | 'right' 
-}> = ({ children, tooltipText, align }) => {
-    const containerRef = React.useRef<HTMLDivElement>(null);
-    const [isTruncated, setIsTruncated] = React.useState(false);
-
-    const checkTruncation = () => {
-        const element = containerRef.current;
-        if (element) {
-            // On cherche un element avec truncate a l'interieur ou on verifie le container lui-meme
-            const target = element.querySelector('.truncate') || element;
-            setIsTruncated(target.scrollWidth > target.clientWidth);
-        }
-    };
-
-    React.useEffect(() => {
-        checkTruncation();
-        // Petit délai pour laisser le layout se stabiliser
-        const timer = setTimeout(checkTruncation, 100);
-        window.addEventListener('resize', checkTruncation);
-        return () => {
-            window.removeEventListener('resize', checkTruncation);
-            clearTimeout(timer);
-        };
-    }, [tooltipText, children]);
-
-    return (
-        <div className="w-full min-w-0 relative group/tooltip" ref={containerRef}>
-            {isTruncated && (
-                <div className={cn(
-                    "absolute bottom-full mb-2 px-2 py-1 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 text-[11px] rounded pointer-events-none opacity-0 group-hover/tooltip:opacity-100 transition-opacity z-[100] whitespace-nowrap shadow-xl border border-white/10 dark:border-black/10 max-w-[300px] truncate",
-                    align === 'right' ? 'right-0' : align === 'center' ? 'left-1/2 -translate-x-1/2' : 'left-0'
-                )}>
-                    {tooltipText}
-                    <div className={cn(
-                        "absolute top-full -mt-px border-4 border-transparent border-t-neutral-900 dark:border-t-neutral-100",
-                        align === 'right' ? 'right-2' : align === 'center' ? 'left-1/2 -translate-x-1/2' : 'left-2'
-                    )} />
-                </div>
-            )}
-            <div className="w-full min-w-0">
-                {children}
-            </div>
-        </div>
-    );
-};
 
 function Table<T>({
     data,
@@ -106,7 +58,11 @@ function Table<T>({
     const [editingCell, setEditingCell] = React.useState<{ rowId: string | number, accessor: keyof T } | null>(null);
     const [editValue, setEditValue] = React.useState<any>("");
     const scrollRef = React.useRef<HTMLDivElement>(null);
-    const [scrollTop, setScrollTop] = React.useState(0);
+    const headerRef = React.useRef<HTMLDivElement>(null);
+    const frameRef = React.useRef(0);
+    const rowIndexRef = React.useRef(0);
+    const [firstVisibleRow, setFirstVisibleRow] = React.useState(0);
+    const [headerHeight, setHeaderHeight] = React.useState(44);
     const [viewportHeight, setViewportHeight] = React.useState(0);
     
     // Calcul de la grille avec support du min-width + colonne selection
@@ -140,18 +96,39 @@ function Table<T>({
         const element = scrollRef.current;
         if (!element) return;
 
-        const updateViewportHeight = () => setViewportHeight(element.clientHeight);
+        const updateViewportHeight = () => {
+            setViewportHeight(element.clientHeight);
+            setHeaderHeight(headerRef.current?.clientHeight ?? 44);
+        };
         updateViewportHeight();
 
         const resizeObserver = new ResizeObserver(updateViewportHeight);
         resizeObserver.observe(element);
+        if (headerRef.current) resizeObserver.observe(headerRef.current);
 
-        return () => resizeObserver.disconnect();
+        return () => {
+            resizeObserver.disconnect();
+            if (frameRef.current) cancelAnimationFrame(frameRef.current);
+        };
     }, []);
 
-    React.useEffect(() => {
-        setScrollTop(scrollRef.current?.scrollTop || 0);
-    }, [data.length]);
+    const updateVisibleRow = React.useCallback(() => {
+        const next = Math.max(0, Math.floor(((scrollRef.current?.scrollTop ?? 0) - headerHeight) / rowHeight));
+        if (rowIndexRef.current !== next) {
+            rowIndexRef.current = next;
+            setFirstVisibleRow(next);
+        }
+    }, [headerHeight, rowHeight]);
+
+    React.useLayoutEffect(updateVisibleRow, [data.length, updateVisibleRow]);
+
+    const handleScroll = () => {
+        if (!virtualized || frameRef.current) return;
+        frameRef.current = requestAnimationFrame(() => {
+            frameRef.current = 0;
+            updateVisibleRow();
+        });
+    };
 
     const totalHeight = data.length * rowHeight;
     const shouldVirtualize = virtualized && data.length > 0;
@@ -161,11 +138,11 @@ function Table<T>({
         }
 
         const visibleCount = Math.ceil(viewportHeight / rowHeight);
-        const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+        const startIndex = Math.max(0, Math.min(firstVisibleRow - overscan, data.length - visibleCount));
         const endIndex = Math.min(data.length, startIndex + visibleCount + overscan * 2);
 
         return { startIndex, endIndex };
-    }, [data.length, overscan, rowHeight, scrollTop, shouldVirtualize, viewportHeight]);
+    }, [data.length, overscan, rowHeight, firstVisibleRow, shouldVirtualize, viewportHeight]);
 
     const renderRow = (item: T, index: number) => {
         const id = keyExtractor(item);
@@ -242,9 +219,9 @@ function Table<T>({
                                     onClick={(e) => e.stopPropagation()}
                                 />
                             ) : col.truncate && tooltipText ? (
-                                <TruncatedTooltip tooltipText={tooltipText} align={col.align}>
+                                <div className="w-full min-w-0 truncate" title={tooltipText}>
                                     {content}
-                                </TruncatedTooltip>
+                                </div>
                             ) : (
                                 <div className="w-full min-w-0">
                                     {content}
@@ -257,16 +234,23 @@ function Table<T>({
         );
     };
 
+    const editingIndex = React.useMemo(() => editingCell
+        ? data.findIndex(item => keyExtractor(item) === editingCell.rowId) : -1,
+    [data, editingCell, keyExtractor]);
+    const pinnedEdit = shouldVirtualize && editingIndex >= 0
+        && (editingIndex < visibleRange.startIndex || editingIndex >= visibleRange.endIndex);
+
     return (
         <div
             ref={scrollRef}
             data-no-pull-refresh="true"
             className="h-full min-h-0 w-full overflow-auto overscroll-contain bg-transparent scrollbar-thin"
-            onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+            onScroll={handleScroll}
         >
             <div className="min-h-full min-w-[760px] md:min-w-full">
             {/* Header */}
-            <div 
+            <div
+                ref={headerRef}
                 className="grid items-center bg-gray-50 dark:bg-[#121212] border-b border-black/[0.05] dark:border-white/10 sticky top-0 z-20"
                 style={{ gridTemplateColumns }}
             >
@@ -308,6 +292,7 @@ function Table<T>({
                             ? data.slice(visibleRange.startIndex, visibleRange.endIndex).map((item, offset) => renderRow(item, visibleRange.startIndex + offset))
                             : data.map((item, index) => renderRow(item, index))
                         }
+                        {pinnedEdit && renderRow(data[editingIndex], editingIndex)}
                     </div>
                 ) : (
                     <div className="min-h-[260px] flex flex-col items-center justify-center text-gray-400 p-12">

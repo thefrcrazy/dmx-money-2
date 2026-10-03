@@ -12,6 +12,18 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.1.0-rc.2",
+        date: "2026-10-03",
+        title: "2.1.0 RC2 — Défilement du journal",
+        changes: [
+            "Le journal mobile garde une fenêtre de rendu bornée, même après un long défilement ou sur une journée très chargée.",
+            "Les tableaux et cellules sont réutilisés pendant le défilement ; la sélection et la ligne focalisée sont conservées.",
+            "Les journaux natifs réduisent les rechargements et les formats répétés.",
+            "Les lectures du statut du compagnon ne recalculent plus les données inchangées ; les vues restent actualisées au changement de jour.",
+            "RC2 utilise le canal des préversions, séparé des mises à jour stables."
+        ]
+    },
+    {
         version: "2.1.0-rc.1",
         date: "2026-10-02",
         title: "2.1.0 RC1 — Compagnon Internet simplifié",

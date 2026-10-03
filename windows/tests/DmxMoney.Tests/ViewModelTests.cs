@@ -143,6 +143,68 @@ public class ViewModelTests
     }
 
     [Fact]
+    public async Task AsyncStatusReadsKeepJournalRowsAndSelectionWhenDataHasNotChanged()
+    {
+        using var store = NewStore();
+        var account = AddAccount(store);
+        AddTransaction(store, account, 12, "Boulangerie");
+        store.Reload();
+        using var journal = new JournalViewModel(store);
+        var rows = journal.Rows;
+        var selectedId = rows[0].Transaction.Id;
+        journal.SetSelection([selectedId]);
+        var revision = store.Revision;
+        var callbacks = 0;
+        for (var read = 0; read < 16; read++)
+        {
+            await store.PerformAsync(engine => engine.DataVersion(), _ => callbacks++);
+        }
+        Assert.Equal(16, callbacks);
+        Assert.Equal(revision, store.Revision);
+        Assert.Same(rows, journal.Rows);
+        Assert.Equal(selectedId, Assert.Single(journal.Selection));
+
+        // A real write still refreshes the presentation and keeps selection by ID.
+        await store.PerformAsync(engine =>
+        {
+            engine.UpdateTransactionDescription(selectedId, "Pain");
+            return true;
+        });
+        Assert.True(store.Revision > revision);
+        Assert.Equal("Pain", Assert.Single(journal.Rows).Transaction.Description);
+        Assert.Equal(selectedId, Assert.Single(journal.Selection));
+    }
+
+    [Fact]
+    public async Task AsyncNoOpStillRefreshesDateSensitivePagesAfterMidnight()
+    {
+        var today = Today;
+        using var store = new EngineStore(DmxEngine.OpenInMemory(), todayProvider: () => today);
+        var revision = store.Revision;
+        var version = store.DataVersion;
+        today = "2026-09-12";
+        await store.PerformAsync(engine => engine.DataVersion());
+        Assert.Equal(version, store.DataVersion);
+        Assert.Equal(revision + 1, store.Revision);
+        await store.PerformAsync(engine => engine.DataVersion());
+        Assert.Equal(revision + 1, store.Revision);
+    }
+
+    [Fact]
+    public async Task AsyncSettingsWritesStillPublishUpdatedSettings()
+    {
+        using var store = NewStore();
+        var revision = store.Revision;
+        await store.PerformAsync(engine =>
+        {
+            engine.ApplySettingsChange(new SettingsChange.AddCustomGroup("Investissements"));
+            return true;
+        });
+        Assert.Contains("Investissements", store.Settings.CustomGroups);
+        Assert.True(store.Revision > revision);
+    }
+
+    [Fact]
     public void AccountFormRejectsInvalidAmountAndSavesGroup()
     {
         using var store = NewStore();
