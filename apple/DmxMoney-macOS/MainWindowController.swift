@@ -12,6 +12,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private var cancellables = Set<AnyCancellable>()
     private weak var presentedSheet: NSViewController?
     private var presentedRequestId: String?
+    private var presentedGeneration: UInt64?
     private var isShowingError = false
 
     init(store: AppStore, actions: SettingsActions) {
@@ -101,17 +102,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     private func presentForm(_ request: FormRequest?) {
         if let sheet = presentedSheet {
-            if request?.id == presentedRequestId { return }
+            if request?.id == presentedRequestId && store.formGeneration == presentedGeneration { return }
             presentedSheet = nil
             presentedRequestId = nil
+            presentedGeneration = nil
             splitViewController.dismiss(sheet)
         }
         guard let request = request else { return }
         showWindow(nil)
 
+        let generation = store.formGeneration
         let root = StoreRoot(store: store) {
             FormHost(request: request, onClose: { [weak self] in
-                DispatchQueue.main.async { self?.store.form = nil }
+                DispatchQueue.main.async { self?.store.closeForm(generation: generation) }
             })
         }
         let controller = NSHostingController(rootView: root)
@@ -123,6 +126,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             controller.sizingOptions = [.preferredContentSize]
         }
         presentedRequestId = request.id
+        presentedGeneration = generation
         presentedSheet = controller
         splitViewController.presentAsSheet(controller)
     }

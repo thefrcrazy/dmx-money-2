@@ -103,8 +103,12 @@ impl DateButton {
             *value_for_pick.borrow_mut() = text.clone();
             label_for_pick.set_text(&format::day_medium(&text));
         });
-        let popover_for_pick = popover.clone();
-        calendar.connect_day_selected(move |_| popover_for_pick.popdown());
+        let popover_for_pick = popover.downgrade();
+        calendar.connect_day_selected(move |_| {
+            if let Some(popover) = popover_for_pick.upgrade() {
+                popover.popdown();
+            }
+        });
 
         Rc::new(Self { button, value })
     }
@@ -248,9 +252,12 @@ impl Select {
         }
 
         {
-            let select_for_rows = select.clone();
-            let popover = popover.clone();
+            let select_for_rows = Rc::downgrade(&select);
+            let popover = popover.downgrade();
             list.connect_row_activated(move |_, row| {
+                let Some(select_for_rows) = select_for_rows.upgrade() else {
+                    return;
+                };
                 let index = select_for_rows
                     .rows
                     .borrow()
@@ -261,12 +268,17 @@ impl Select {
                     select_for_rows.set_value(if id.is_empty() { None } else { Some(id) });
                     select_for_rows.notify();
                 }
-                popover.popdown();
+                if let Some(popover) = popover.upgrade() {
+                    popover.popdown();
+                }
             });
         }
         {
-            let select_for_search = select.clone();
+            let select_for_search = Rc::downgrade(&select);
             search.connect_search_changed(move |entry| {
+                let Some(select_for_search) = select_for_search.upgrade() else {
+                    return;
+                };
                 let needle = entry.text().to_lowercase();
                 for (row, haystack) in select_for_search.rows.borrow().iter() {
                     row.set_visible(needle.is_empty() || haystack.contains(&needle));
@@ -380,8 +392,11 @@ impl KindPicker {
                 Some(first) => button.set_group(Some(first)),
                 None => first = Some(button.clone()),
             }
-            let picker_for_button = picker.clone();
+            let picker_for_button = Rc::downgrade(&picker);
             button.connect_toggled(move |button| {
+                let Some(picker_for_button) = picker_for_button.upgrade() else {
+                    return;
+                };
                 if button.is_active() && picker_for_button.value.get() != kind {
                     picker_for_button.value.set(kind);
                     let listeners = picker_for_button.listeners.borrow();
@@ -445,9 +460,12 @@ impl ColorGrid {
             button.set_tooltip_text(Some(color));
             grid.attach(&button, index as i32 % columns, index as i32 / columns, 1, 1);
 
-            let picker_for_button = picker.clone();
+            let picker_for_button = Rc::downgrade(&picker);
             let color_for_button = color.to_string();
             button.connect_clicked(move |_| {
+                let Some(picker_for_button) = picker_for_button.upgrade() else {
+                    return;
+                };
                 picker_for_button.set_value(&color_for_button);
                 let listeners = picker_for_button.listeners.borrow();
                 for listener in listeners.iter() {
@@ -519,9 +537,12 @@ impl IconGrid {
             button.add_css_class("flat");
             grid.attach(&button, index as i32 % columns, index as i32 / columns, 1, 1);
 
-            let picker_for_button = picker.clone();
+            let picker_for_button = Rc::downgrade(&picker);
             let name_for_button = name.to_string();
             button.connect_clicked(move |_| {
+                let Some(picker_for_button) = picker_for_button.upgrade() else {
+                    return;
+                };
                 picker_for_button.set_value(&name_for_button);
                 let listeners = picker_for_button.listeners.borrow();
                 for listener in listeners.iter() {

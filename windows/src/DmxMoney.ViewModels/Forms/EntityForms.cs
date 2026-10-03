@@ -122,6 +122,7 @@ public sealed partial class CategoryFormViewModel : FormViewModel
 public sealed partial class TransactionFormViewModel : FormViewModel
 {
     private readonly string? id;
+    private readonly TransactionDraft baseDraft;
 
     [ObservableProperty]
     private TransactionType kind;
@@ -147,6 +148,7 @@ public sealed partial class TransactionFormViewModel : FormViewModel
     public TransactionFormViewModel(EngineStore store, TransactionDraft draft) : base(store)
     {
         id = draft.Id;
+        baseDraft = draft;
         kind = draft.Kind;
         description = draft.Description;
         amountText = AmountInput.Text(draft.Amount);
@@ -199,14 +201,14 @@ public sealed partial class TransactionFormViewModel : FormViewModel
 
     public override bool Submit()
     {
-        var amount = AmountInput.Parse(AmountText);
+        var amount = IsEditing && AmountText == AmountInput.Text(baseDraft.Amount) ? baseDraft.Amount : AmountInput.Parse(AmountText);
         if (amount is null or <= 0)
         {
             Error = "Saisissez un montant valide";
             return false;
         }
         var draft = new TransactionDraft(id, Kind, DayString.FromDate(Date), amount.Value, Description, CategoryId, AccountId, ToAccountId);
-        Error = Store.Attempt(engine => engine.SaveTransaction(draft));
+        Error = Store.Attempt(engine => { if (id is null) engine.SaveTransaction(draft); else engine.SaveTransactionWithBase(draft, baseDraft); });
         if (Error is not null)
         {
             return false;

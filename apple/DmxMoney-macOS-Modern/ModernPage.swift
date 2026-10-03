@@ -5,36 +5,33 @@ import SwiftUI
 /// Modèles des pages, créés une fois ; seule la page visible se recalcule.
 @MainActor
 final class PageModels: ObservableObject {
-    let dashboard: DashboardModel
-    let accounts: AccountsModel
-    let journal: JournalModel
-    let budget: BudgetModel
-    let scheduled: ScheduledModel
-    let analytics: AnalyticsModel
-    let predictions: PredictionsModel
-    /// La page Catégories lit le store directement : sa recherche vit ici.
+    private let store: AppStore
+    private var activeRoute: AppRoute? = .dashboard
+    private var created: [AppRoute: PageModel] = [:]
     @Published var categorySearch = ""
+    var dashboard: DashboardModel { cached(.dashboard) { DashboardModel(store: store, active: activeRoute == .dashboard) } }
+    var accounts: AccountsModel { cached(.accounts) { AccountsModel(store: store, active: activeRoute == .accounts) } }
+    var journal: JournalModel { cached(.transactions) { JournalModel(store: store, active: activeRoute == .transactions) } }
+    var budget: BudgetModel { cached(.budget) { BudgetModel(store: store, active: activeRoute == .budget) } }
+    var scheduled: ScheduledModel { cached(.scheduled) { ScheduledModel(store: store, active: activeRoute == .scheduled) } }
+    var analytics: AnalyticsModel { cached(.analytics) { AnalyticsModel(store: store, active: activeRoute == .analytics) } }
+    var predictions: PredictionsModel { cached(.predictions) { PredictionsModel(store: store, active: activeRoute == .predictions) } }
 
-    init(store: AppStore) {
-        dashboard = DashboardModel(store: store)
-        accounts = AccountsModel(store: store)
-        journal = JournalModel(store: store)
-        budget = BudgetModel(store: store)
-        scheduled = ScheduledModel(store: store)
-        analytics = AnalyticsModel(store: store)
-        predictions = PredictionsModel(store: store)
-        activate(.dashboard)
+    init(store: AppStore) { self.store = store }
+
+    private func cached<T: PageModel>(_ route: AppRoute, make: () -> T) -> T {
+        if let existing = created[route] as? T { return existing }
+        let model = make()
+        model.isActive = route == activeRoute
+        created[route] = model
+        return model
     }
 
     func activate(_ route: AppRoute?) {
-        let all: [(AppRoute, PageModel)] = [
-            (.dashboard, dashboard), (.accounts, accounts), (.transactions, journal), (.budget, budget),
-            (.scheduled, scheduled), (.analytics, analytics), (.predictions, predictions),
-        ]
-        for (candidate, model) in all {
-            model.isActive = candidate == route
-        }
+        activeRoute = route
+        for (candidate, model) in created { model.isActive = candidate == route }
     }
+
 }
 
 /// Contenu de la fenêtre pour la page sélectionnée.

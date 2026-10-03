@@ -1,4 +1,5 @@
 import DmxKit
+import Combine
 import SwiftUI
 
 /// Paramètres dans la fenêtre, comme en 1.x : quatre onglets natifs plutôt qu'une fenêtre
@@ -70,8 +71,10 @@ struct ModernSettings: View {
 private struct GeneralSettings: View {
     @ObservedObject var store: AppStore
     let actions: SettingsActions
+    @State private var cloudRevision = 0
 
     var body: some View {
+        let _ = cloudRevision
         Form {
             Section("Apparence") {
                 Picker(selection: themeBinding) {
@@ -128,10 +131,13 @@ private struct GeneralSettings: View {
                             Label("Synchroniser maintenant", systemImage: "arrow.clockwise")
                         }
                     }
+                    Text("iCloud utilise une base privée protégée par votre compte Apple. Cette protection diffère du chiffrement de bout en bout du compagnon Internet.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
         .formStyle(.grouped)
+        .onReceive(actions.iCloud?.changes ?? Empty<Void, Never>().eraseToAnyPublisher()) { _ in cloudRevision &+= 1 }
     }
 
     private var themeBinding: Binding<Theme> {
@@ -180,7 +186,7 @@ private struct DataSettings: View {
 private struct AboutSettings: View {
     @ObservedObject var store: AppStore
     let actions: SettingsActions
-    @AppStorage("DmxIncludePrereleases") private var includePrereleases = true
+    @AppStorage("DmxIncludePrereleases") private var includePrereleases = AppInfo.version.contains("-")
 
     var body: some View {
         Form {

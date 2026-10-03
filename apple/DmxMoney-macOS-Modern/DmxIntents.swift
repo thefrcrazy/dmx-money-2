@@ -28,13 +28,11 @@ enum DmxAssistant {
     /// interface ne montrait rien, même quand l'opération était bien enregistrée.
     static func notify(_ result: AssistantResult) {
         let center = UNUserNotificationCenter.current()
-        let summary = result.summary
-        let details = result.details.prefix(3).joined(separator: "\n")
         Task {
             guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else { return }
             let content = UNMutableNotificationContent()
             content.title = "DmxMoney"
-            content.body = details.isEmpty ? summary : summary + "\n" + details
+            content.body = result.changed ? "Opération enregistrée. Ouvrez DmxMoney pour consulter le résultat." : "Résultat disponible dans DmxMoney."
             try? await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         }
     }
@@ -176,6 +174,7 @@ struct AddTransactionIntent: AppIntent {
     static let title: LocalizedStringResource = LocalizedStringResource("Ajouter une opération", table: "AppIntents")
     static let description = IntentDescription(LocalizedStringResource("Enregistre une dépense ou un revenu dans DmxMoney.", table: "AppIntents"))
     static let openAppWhenRun = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
     @Parameter(title: LocalizedStringResource("Montant", table: "AppIntents"), controlStyle: .field)
     var amount: Double
@@ -221,6 +220,7 @@ struct TransferMoneyIntent: AppIntent {
     static let title = LocalizedStringResource("Faire un virement", table: "AppIntents")
     static let description = IntentDescription(LocalizedStringResource("Enregistre un virement entre deux comptes dans DmxMoney.", table: "AppIntents"))
     static let openAppWhenRun = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
     @Parameter(title: LocalizedStringResource("Montant", table: "AppIntents"), controlStyle: .field)
     var amount: Double
@@ -250,6 +250,7 @@ struct AccountBalanceIntent: AppIntent {
     static let title: LocalizedStringResource = LocalizedStringResource("Consulter un solde", table: "AppIntents")
     static let description = IntentDescription(LocalizedStringResource("Donne le solde d'un compte, ou le total de vos comptes.", table: "AppIntents"))
     static let openAppWhenRun = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
     @Parameter(title: LocalizedStringResource("Compte", table: "AppIntents"))
     var account: AccountEntity?
@@ -273,6 +274,7 @@ struct BudgetRemainingIntent: AppIntent {
     static let title: LocalizedStringResource = LocalizedStringResource("Budget restant", table: "AppIntents")
     static let description = IntentDescription(LocalizedStringResource("Dit ce qu'il reste à dépenser, pour une catégorie ou pour le mois.", table: "AppIntents"))
     static let openAppWhenRun = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
     @Parameter(title: LocalizedStringResource("Catégorie", table: "AppIntents"))
     var category: CategoryEntity?
@@ -296,6 +298,7 @@ struct UpcomingScheduledIntent: AppIntent {
     static let title: LocalizedStringResource = LocalizedStringResource("Prochaines échéances", table: "AppIntents")
     static let description = IntentDescription(LocalizedStringResource("Liste les échéances à venir.", table: "AppIntents"))
     static let openAppWhenRun = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog & ShowsSnippetView {
@@ -312,6 +315,7 @@ struct MonthSummaryIntent: AppIntent {
     static let title: LocalizedStringResource = LocalizedStringResource("Résumé du mois", table: "AppIntents")
     static let description = IntentDescription(LocalizedStringResource("Revenus, dépenses et écart du mois en cours.", table: "AppIntents"))
     static let openAppWhenRun = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog & ShowsSnippetView {
@@ -328,6 +332,7 @@ struct ProcessDueIntent: AppIntent {
     static let title: LocalizedStringResource = LocalizedStringResource("Traiter les échéances dues", table: "AppIntents")
     static let description = IntentDescription(LocalizedStringResource("Enregistre les échéances arrivées à terme.", table: "AppIntents"))
     static let openAppWhenRun = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog & ShowsSnippetView {
@@ -344,6 +349,7 @@ struct AskDmxMoneyIntent: AppIntent {
     static let title: LocalizedStringResource = LocalizedStringResource("Demander à DmxMoney", table: "AppIntents")
     static let description = IntentDescription(LocalizedStringResource("Pose une question ou dicte une opération en une phrase.", table: "AppIntents"))
     static let openAppWhenRun = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
     @Parameter(title: LocalizedStringResource("Demande", table: "AppIntents"), requestValueDialog: IntentDialog(LocalizedStringResource("Que voulez-vous savoir ?", table: "AppIntents")))
     var text: String

@@ -26,7 +26,10 @@ fn create_v1_database(root: &Path) -> PathBuf {
             .connect()
             .await
             .unwrap();
-        sqlx::raw_sql(&fixture_sql()).execute(&mut connection).await.unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(fixture_sql()))
+            .execute(&mut connection)
+            .await
+            .unwrap();
         connection.close().await.unwrap();
     });
     path

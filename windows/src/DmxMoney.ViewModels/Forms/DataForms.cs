@@ -164,19 +164,35 @@ public sealed partial class RestoreBackupViewModel : FormViewModel
     {
         this.content = content;
         FileName = fileName;
+        PreparationTask = PrepareAsync();
+    }
+
+    private async Task PrepareAsync()
+    {
+        Preparing = true;
         try
         {
-            Summary = store.Engine.InspectBackup(content);
+            var summary = await Task.Run(() => Store.Engine.InspectBackup(content));
+            if (!PreparationLifetime.IsCancellationRequested) Summary = summary;
         }
-        catch (Exception error)
+        catch (Exception exception)
         {
-            Error = $"Le fichier de sauvegarde est corrompu. ({EngineStore.Message(error)})";
+            if (!PreparationLifetime.IsCancellationRequested)
+                Error = $"Le fichier de sauvegarde est corrompu. ({EngineStore.Message(exception)})";
         }
+        finally { Preparing = false; }
     }
 
     public string FileName { get; }
 
-    public BackupSummary? Summary { get; }
+    [ObservableProperty] private BackupSummary? summary;
+    [ObservableProperty] private bool preparing;
+    public Task PreparationTask { get; }
+    public override bool IsBusy => Preparing || Working;
+    public override bool IsSubmitting => Working;
+    partial void OnPreparingChanged(bool value) => OnPropertyChanged(nameof(IsBusy));
+    partial void OnWorkingChanged(bool value) => OnPropertyChanged(nameof(IsBusy));
+    partial void OnSummaryChanged(BackupSummary? value) => OnPropertyChanged(nameof(BackupDate));
 
     /// <summary>Restauration en cours (attendue par les tests).</summary>
     public Task? RestoreTask { get; private set; }
@@ -187,9 +203,13 @@ public sealed partial class RestoreBackupViewModel : FormViewModel
 
     public string ModeDetail => Mode == RestoreMode.Replace
         ? "Toutes les données actuelles seront remplacées par celles de la sauvegarde."
-        : "Les éléments de la sauvegarde sont ajoutés ; les éléments déjà présents sont conservés.";
+        : "Les nouveaux éléments sont ajoutés. Les éléments ayant le même identifiant sont remplacés par ceux de la sauvegarde ; les autres éléments actuels sont conservés.";
 
-    public string? BackupDate => Summary is null ? null : DayFormat.Long(Summary.Timestamp[..10]);
+    public string? BackupDate => FormatBackupDate(Summary?.Timestamp);
+
+    public static string? FormatBackupDate(string? timestamp)
+        => timestamp is { Length: >= 10 } && DateOnly.TryParseExact(timestamp[..10], "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var day)
+            ? DayFormat.Long(day.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)) : null;
 
     partial void OnModeChanged(RestoreMode value)
     {
@@ -197,24 +217,23 @@ public sealed partial class RestoreBackupViewModel : FormViewModel
         OnPropertyChanged(nameof(ModeDetail));
     }
 
-    public override bool Submit()
+    public override bool Submit() => false;
+
+    public override async Task<bool> SubmitAsync()
     {
-        if (Summary is null || Working)
-        {
-            return false;
-        }
+        if (Summary is null || IsBusy) return false;
         Working = true;
-        var payload = content;
+        Error = null;
         var mode = Mode;
-        RestoreTask = Store.PerformAsync(
-            engine => engine.RestoreBackup(payload, mode),
-            _ => Store.ShowToast("Import réussi"),
-            message =>
-            {
-                Error = message;
-                Working = false;
-            });
-        return true;
+        try
+        {
+            RestoreTask = Store.PerformAsync(
+                engine => engine.RestoreBackup(content, mode),
+                _ => Store.ShowToast("Import réussi"), message => Error = message);
+            await RestoreTask;
+            return Error is null;
+        }
+        finally { Working = false; }
     }
 }
 
@@ -233,6 +252,8 @@ public sealed partial class StatementImportViewModel : FormViewModel
     public const string NewCategoryId = "__new__";
 
     private readonly string content;
+    private int preparationGeneration;
+    [ObservableProperty] private bool preparing;
 
     [ObservableProperty]
     private Step currentStep = Step.Columns;
@@ -267,17 +288,32 @@ public sealed partial class StatementImportViewModel : FormViewModel
         FileName = fileName;
         Format = DmxFfiMethods.StatementFormatForFile(fileName) ?? StatementFormat.Csv;
         Mapping = new CsvColumnMapping(0, 1, 3, null);
-        if (Format == StatementFormat.Csv)
-        {
-            separator = DmxFfiMethods.DetectCsvSeparator(content);
-            RefreshPreview();
-        }
-        else
-        {
-            Parse();
-            currentStep = Step.Account;
-        }
+        PreparationTask = InitializeAsync();
     }
+
+    private async Task InitializeAsync()
+    {
+        try
+        {
+            Preparing = true;
+            if (IsCsv)
+            {
+                var detected = await Task.Run(() => DmxFfiMethods.DetectCsvSeparator(content));
+                if (PreparationLifetime.IsCancellationRequested) { Preparing = false; return; }
+                if (Separator != detected) { Separator = detected; await PreparationTask; }
+                else await RefreshPreviewAsync();
+            }
+            else if (await ParseAsync()) CurrentStep = Step.Account;
+        }
+        catch (Exception exception) { if (!PreparationLifetime.IsCancellationRequested) Error = EngineStore.Message(exception); }
+        finally { Preparing = false; }
+    }
+
+    public Task PreparationTask { get; private set; }
+    public override bool IsBusy => Preparing || Importing;
+    public override bool IsSubmitting => Importing;
+    partial void OnPreparingChanged(bool value) => OnPropertyChanged(nameof(IsBusy));
+    partial void OnImportingChanged(bool value) => OnPropertyChanged(nameof(IsBusy));
 
     public string FileName { get; }
 
@@ -413,75 +449,89 @@ public sealed partial class StatementImportViewModel : FormViewModel
         OnPropertyChanged(nameof(ComputedInitialBalance));
     }
 
-    partial void OnSeparatorChanged(string value) => RefreshPreview();
+    partial void OnSeparatorChanged(string value) => PreparationTask = RefreshPreviewAsync();
 
-    partial void OnHasHeaderChanged(bool value) => RefreshPreview();
+    partial void OnHasHeaderChanged(bool value) => PreparationTask = RefreshPreviewAsync();
 
     partial void OnAccountChoiceChanged(string? value) => OnPropertyChanged(nameof(CanContinue));
 
     partial void OnNewAccountNameChanged(string value) => OnPropertyChanged(nameof(CanContinue));
 
-    private void RefreshPreview()
+    private async Task RefreshPreviewAsync()
     {
+        var generation = ++preparationGeneration;
+        var options = new CsvOptions(Separator, HasHeader);
+        Preparing = true;
         try
         {
-            Preview = Store.Engine.PreviewCsv(content, new CsvOptions(Separator, HasHeader));
-            Error = null;
+            var preview = await Task.Run(() => Store.Engine.PreviewCsv(content, options));
+            if (generation == preparationGeneration && !PreparationLifetime.IsCancellationRequested)
+            { Preview = preview; Error = null; }
         }
-        catch (Exception error)
+        catch (Exception exception)
         {
-            Error = EngineStore.Message(error);
+            if (generation == preparationGeneration && !PreparationLifetime.IsCancellationRequested) Error = EngineStore.Message(exception);
         }
+        finally { if (generation == preparationGeneration) Preparing = false; }
     }
 
-    private bool Parse()
+    private async Task<bool> ParseAsync()
     {
+        var generation = ++preparationGeneration;
+        var options = IsCsv ? new CsvOptions(Separator, HasHeader) : null;
+        var mapping = IsCsv ? Mapping : null;
+        var today = Store.Today;
+        Preparing = true;
         try
         {
-            var options = IsCsv ? new CsvOptions(Separator, HasHeader) : null;
-            var mapping = IsCsv ? Mapping : null;
-            Transactions = Store.Engine.ParseStatement(Format, content, options, mapping, Store.Today);
-            if (Transactions.Count == 0)
+            var parsed = await Task.Run(() =>
             {
-                Error = "Aucune transaction n'a été trouvée dans le fichier.";
-                return false;
-            }
-            Sources = DmxFfiMethods.SourceCategories([.. Transactions]);
+                var transactions = Store.Engine.ParseStatement(Format, content, options, mapping, today);
+                var sources = DmxFfiMethods.SourceCategories([.. transactions]);
+                var matches = Store.Engine.SuggestCategoryMapping([.. sources]);
+                return (transactions, sources, matches);
+            });
+            if (generation != preparationGeneration || PreparationLifetime.IsCancellationRequested) return false;
+            if (!parsed.transactions.Any()) { Error = "Aucune transaction n'a été trouvée dans le fichier."; return false; }
+            Transactions = parsed.transactions;
+            Sources = parsed.sources;
             CategoryMapping.Clear();
-            foreach (var match in Store.Engine.SuggestCategoryMapping([.. Sources]))
-            {
-                CategoryMapping[match.Source] = match.CategoryId ?? NewCategoryId;
-            }
+            foreach (var match in parsed.matches) CategoryMapping[match.Source] = match.CategoryId ?? NewCategoryId;
             Error = null;
             OnPropertyChanged(nameof(Transactions));
             OnPropertyChanged(nameof(Sources));
             return true;
         }
-        catch (Exception error)
+        catch (Exception exception)
         {
-            Error = EngineStore.Message(error);
+            if (generation == preparationGeneration && !PreparationLifetime.IsCancellationRequested) Error = EngineStore.Message(exception);
             return false;
         }
+        finally { if (generation == preparationGeneration) Preparing = false; }
     }
 
     /// <summary>Bouton principal : passe à l'étape suivante, ou lance l'import.</summary>
-    public override bool Submit()
+    public override bool Submit() => false;
+
+    public override async Task<bool> SubmitAsync()
     {
+        if (IsBusy) return false;
         if (CurrentStep == Step.Confirm)
         {
-            return StartImport();
+            return await StartImportAsync();
         }
-        Next();
+        await NextAsync();
         return false;
     }
 
     [RelayCommand]
-    private void Next()
+    private async Task NextAsync()
     {
+        if (IsBusy) return;
         switch (CurrentStep)
         {
             case Step.Columns:
-                if (Parse())
+                if (await ParseAsync())
                 {
                     CurrentStep = Step.Account;
                 }
@@ -506,6 +556,7 @@ public sealed partial class StatementImportViewModel : FormViewModel
     [RelayCommand]
     private void Back()
     {
+        if (IsBusy) return;
         Error = null;
         CurrentStep = CurrentStep switch
         {
@@ -516,7 +567,7 @@ public sealed partial class StatementImportViewModel : FormViewModel
         };
     }
 
-    private bool StartImport()
+    private async Task<bool> StartImportAsync()
     {
         if (AccountChoice is null || Importing)
         {
@@ -534,6 +585,7 @@ public sealed partial class StatementImportViewModel : FormViewModel
             .ToArray();
         var request = new StatementImportRequest([.. Transactions], target, matches);
         Importing = true;
+        Error = null;
         ImportTask = Store.PerformAsync(
             engine => engine.ImportStatement(request),
             result =>
@@ -546,7 +598,8 @@ public sealed partial class StatementImportViewModel : FormViewModel
                 Error = message;
                 Importing = false;
             });
-        return true;
+        try { await ImportTask; return Error is null; }
+        finally { Importing = false; }
     }
 }
 

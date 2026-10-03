@@ -1,6 +1,6 @@
-import { applyTransactionUpdate } from '../utils/transactionUpdate';
+import { applyTransactionUpdate, mergeTransactionDisplay } from '../utils/transactionUpdate';
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { Account, Transaction, Category, ScheduledTransaction, BankContextType, AppData, Budget } from '../types';
 import { dbService } from '../services/db';
 import { hasTauriRuntime, isMobileCompanion } from '../utils/runtime';
@@ -620,9 +620,12 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // --- Transactions ---
     const addTransaction = useCallback(async (transaction: Omit<Transaction, 'id'>) => {
         localEditRevision.current += 1;
-        const newTransaction: Transaction = { ...transaction, id: uuidv4() };
+        const id = transaction.bankSource && transaction.bankTransactionId
+            ? uuidv5(JSON.stringify([transaction.accountId, transaction.bankSource, transaction.bankTransactionId]), uuidv5.URL) : uuidv4();
+        const newTransaction: Transaction = { ...transaction, id };
+
         await dbService.addTransaction(newTransaction);
-        setTransactions(prev => [newTransaction, ...prev]);
+        setTransactions(prev => [newTransaction, ...prev.filter(item => item.id !== id)]);
         return newTransaction.id;
     }, []);
 
@@ -646,10 +649,20 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setTransactions(prev => [fromTx, toTx, ...prev]);
     }, []);
 
-    const updateTransaction = useCallback(async (transaction: Transaction) => {
+    const updateTransfer = useCallback(async (from: Transaction, to: Transaction, baseFrom: Transaction, baseTo: Transaction) => {
         localEditRevision.current += 1;
-        await dbService.updateTransaction(transaction);
-        setTransactions(prev => applyTransactionUpdate(prev, transaction));
+        await dbService.updateTransfer(from, to, baseFrom, baseTo);
+        setTransactions(prev => prev.map(item => item.id === from.id ? mergeTransactionDisplay(item, from, baseFrom)
+            : item.id === to.id ? mergeTransactionDisplay(item, to, baseTo) : item));
+    }, []);
+
+    const updateTransaction = useCallback(async (transaction: Transaction, base?: Transaction) => {
+        localEditRevision.current += 1;
+        await dbService.updateTransaction(transaction, base);
+        setTransactions(prev => {
+            const current = prev.find(item => item.id === transaction.id);
+            return applyTransactionUpdate(prev, base && current ? mergeTransactionDisplay(current, transaction, base) : transaction);
+        });
     }, []);
 
     const deleteTransaction = useCallback(async (id: string) => {
@@ -682,7 +695,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // The connected desktop owns recurrence generation and deduplication.
             if (isMobileCompanion()) {
                 const processed = await dbService.processDueScheduled();
-                await loadBankData();
+                if (processed > 0) await loadBankData({ processScheduled: false });
                 return processed;
             }
             const { processedScheduled, newTransactions, hasScheduledChanges } = await processDueScheduledItems(scheduled, transactions);
@@ -794,6 +807,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
         deleteAccount,
         addTransaction,
         addTransfer,
+        updateTransfer,
         updateTransaction,
         deleteTransaction,
         toggleTransactionCheck,
@@ -819,7 +833,7 @@ export const BankProvider: React.FC<{ children: React.ReactNode }> = ({ children
         accounts, transactions, categories, scheduled, budgets, filterAccount, isLoading,
         mobileConnectionState, mobileConnectionError, connectMobileCompanion, lockMobileCompanion, unlinkMobileCompanion,
         addAccount, updateAccount, deleteAccount,
-        addTransaction, addTransfer, updateTransaction, deleteTransaction, toggleTransactionCheck,
+        addTransaction, addTransfer, updateTransfer, updateTransaction, deleteTransaction, toggleTransactionCheck,
         addCategory, updateCategory, deleteCategory,
         addScheduled, updateScheduled, deleteScheduled, processDueScheduledTransactions,
         addBudget, updateBudget, deleteBudget

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using DmxMoney.Interop;
 using DmxMoney.ViewModels;
 using Microsoft.UI.Xaml;
@@ -5,8 +6,32 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace DmxMoney.App;
 
+/// <summary>Observe les résultats asynchrones sans conserver un contrôle fermé.</summary>
+public abstract class StatementWizardControl : ContentControl
+{
+    public static readonly DependencyProperty WizardProperty = DependencyProperty.Register(
+        nameof(Wizard), typeof(object), typeof(StatementWizardControl), new PropertyMetadata(null, (sender, _) => ((StatementWizardControl)sender).Attach()));
+    private StatementImportViewModel? observed;
+    public object? Wizard { get => GetValue(WizardProperty); set => SetValue(WizardProperty, value); }
+    protected StatementWizardControl()
+    {
+        Loaded += (_, _) => Attach();
+        Unloaded += (_, _) => Detach();
+    }
+    private void Detach() { if (observed is not null) observed.PropertyChanged -= OnChanged; observed = null; }
+    private void Attach()
+    {
+        Detach();
+        if (IsLoaded && Wizard is StatementImportViewModel wizard) { observed = wizard; observed.PropertyChanged += OnChanged; }
+        Build();
+    }
+    private void OnChanged(object? sender, PropertyChangedEventArgs args) { if (NeedsRebuild(args.PropertyName)) Build(); }
+    protected abstract bool NeedsRebuild(string? property);
+    protected abstract void Build();
+}
+
 /// <summary>Aperçu du CSV : une liste déroulante de rôle par colonne, puis les premières lignes.</summary>
-public sealed class CsvMappingTable : ContentControl
+public sealed class CsvMappingTable : StatementWizardControl
 {
     private static readonly (string Id, string Label)[] Roles =
     [
@@ -17,16 +42,7 @@ public sealed class CsvMappingTable : ContentControl
         ("category", "Catégorie"),
     ];
 
-    public static readonly DependencyProperty WizardProperty = DependencyProperty.Register(
-        nameof(Wizard), typeof(object), typeof(CsvMappingTable), new PropertyMetadata(null, (sender, _) => ((CsvMappingTable)sender).Build()));
-
     private readonly StackPanel host = new();
-
-    public object? Wizard
-    {
-        get => GetValue(WizardProperty);
-        set => SetValue(WizardProperty, value);
-    }
 
     public CsvMappingTable()
     {
@@ -41,7 +57,9 @@ public sealed class CsvMappingTable : ContentControl
         HorizontalContentAlignment = HorizontalAlignment.Stretch;
     }
 
-    private void Build()
+    protected override bool NeedsRebuild(string? property) => property == nameof(StatementImportViewModel.Preview);
+
+    protected override void Build()
     {
         host.Children.Clear();
         if (Wizard is not StatementImportViewModel wizard || wizard.Preview is not { } preview)
@@ -98,18 +116,9 @@ public sealed class CsvMappingTable : ContentControl
 }
 
 /// <summary>Étape « compte » de l'assistant : comptes existants ou création d'un compte.</summary>
-public sealed class StatementAccountPicker : ContentControl
+public sealed class StatementAccountPicker : StatementWizardControl
 {
-    public static readonly DependencyProperty WizardProperty = DependencyProperty.Register(
-        nameof(Wizard), typeof(object), typeof(StatementAccountPicker), new PropertyMetadata(null, (sender, _) => ((StatementAccountPicker)sender).Build()));
-
     private readonly StackPanel host = new() { Spacing = 8 };
-
-    public object? Wizard
-    {
-        get => GetValue(WizardProperty);
-        set => SetValue(WizardProperty, value);
-    }
 
     public StatementAccountPicker()
     {
@@ -117,7 +126,9 @@ public sealed class StatementAccountPicker : ContentControl
         HorizontalContentAlignment = HorizontalAlignment.Stretch;
     }
 
-    private void Build()
+    protected override bool NeedsRebuild(string? property) => property == nameof(StatementImportViewModel.AccountChoice);
+
+    protected override void Build()
     {
         host.Children.Clear();
         if (Wizard is not StatementImportViewModel wizard)
@@ -156,7 +167,6 @@ public sealed class StatementAccountPicker : ContentControl
         newAccount.Checked += (_, _) =>
         {
             wizard.AccountChoice = StatementImportViewModel.NewAccountId;
-            Build();
         };
         host.Children.Add(newAccount);
 
@@ -206,18 +216,9 @@ public sealed class StatementAccountPicker : ContentControl
 }
 
 /// <summary>Étape « catégories » : chaque libellé du fichier est associé à une catégorie.</summary>
-public sealed class StatementCategoryTable : ContentControl
+public sealed class StatementCategoryTable : StatementWizardControl
 {
-    public static readonly DependencyProperty WizardProperty = DependencyProperty.Register(
-        nameof(Wizard), typeof(object), typeof(StatementCategoryTable), new PropertyMetadata(null, (sender, _) => ((StatementCategoryTable)sender).Build()));
-
     private readonly StackPanel host = new() { Spacing = 8 };
-
-    public object? Wizard
-    {
-        get => GetValue(WizardProperty);
-        set => SetValue(WizardProperty, value);
-    }
 
     public StatementCategoryTable()
     {
@@ -225,7 +226,9 @@ public sealed class StatementCategoryTable : ContentControl
         HorizontalContentAlignment = HorizontalAlignment.Stretch;
     }
 
-    private void Build()
+    protected override bool NeedsRebuild(string? property) => property == nameof(StatementImportViewModel.Sources);
+
+    protected override void Build()
     {
         host.Children.Clear();
         if (Wizard is not StatementImportViewModel wizard)

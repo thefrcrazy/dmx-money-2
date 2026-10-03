@@ -3,12 +3,13 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use adw::prelude::*;
 use dmx_core::backup::RestoreMode;
 use dmx_core::import::{
     detect_csv_separator, initial_balance_from_final, source_categories, CategoryMatch, CsvColumnMapping, CsvOptions,
-    ImportTarget, ParsedStatementTransaction, StatementFormat, StatementImportRequest,
+    CsvPreview, ImportTarget, ParsedStatementTransaction, StatementFormat, StatementImportRequest,
 };
 use dmx_core::models::ACCOUNT_TYPES;
 use dmx_core::settings::SettingsChange;
@@ -71,13 +72,34 @@ pub fn whats_new(store: &Rc<Store>, parent: &impl IsA<gtk::Widget>) {
 // --- Restauration d'une sauvegarde ---
 
 pub fn restore_backup(store: &Rc<Store>, parent: &impl IsA<gtk::Widget>, content: String, file_name: String) {
+    let content = Arc::new(content);
     let shell = FormShell::new("Importer une sauvegarde", Some("Remplacer mes données"), 520);
 
-    let summary = match store.read(|engine| engine.inspect_backup(&content)) {
-        Some(summary) => summary,
-        None => return,
-    };
+    shell.set_busy(true);
+    shell.present(parent);
+    let store = store.clone();
+    gtk::glib::spawn_future_local(async move {
+        let payload = content.clone();
+        match store.work(move |engine| engine.inspect_backup(&payload)).await {
+            Ok(summary) => {
+                shell.set_busy(false);
+                populate_restore_backup(&store, &shell, content, file_name, summary);
+            }
+            Err(message) => {
+                shell.set_busy(false);
+                shell.set_error(Some(&message));
+            }
+        }
+    });
+}
 
+fn populate_restore_backup(
+    store: &Rc<Store>,
+    shell: &Rc<FormShell>,
+    content: Arc<String>,
+    file_name: String,
+    summary: dmx_core::backup::BackupSummary,
+) {
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     header.append(&icons::badge("Database", "#6366f1", 40, false));
     let labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
@@ -86,10 +108,13 @@ pub fn restore_backup(store: &Rc<Store>, parent: &impl IsA<gtk::Widget>, content
     name.add_css_class("heading");
     name.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
     labels.append(&name);
-    labels.append(&widgets::caption(&format!(
-        "Sauvegarde du {}",
-        format::day_long(&summary.timestamp.chars().take(10).collect::<String>())
-    )));
+    let date = format::day_long(&summary.timestamp.chars().take(10).collect::<String>());
+    let caption = if date.is_empty() {
+        "Date de sauvegarde inconnue".to_string()
+    } else {
+        format!("Sauvegarde du {date}")
+    };
+    labels.append(&widgets::caption(&caption));
     header.append(&labels);
     shell.body().append(&header);
 
@@ -153,11 +178,27 @@ pub fn restore_backup(store: &Rc<Store>, parent: &impl IsA<gtk::Widget>, content
         let shell = shell.clone();
         shell.clone().on_submit(move || {
             let mode = *mode.borrow();
-            let error = store.attempt(|engine| engine.restore_backup(&content, mode));
-            shell.finish(&store, error, "Import réussi");
+            if shell.is_busy() {
+                return;
+            }
+            shell.set_error(None);
+            shell.set_busy(true);
+            let store = store.clone();
+            let shell = shell.clone();
+            let content = content.clone();
+            gtk::glib::spawn_future_local(async move {
+                let error = store
+                    .work(move |engine| engine.restore_backup(&content, mode))
+                    .await
+                    .err();
+                shell.set_busy(false);
+                if error.is_none() {
+                    store.reload_if_changed();
+                }
+                shell.finish(&store, error, "Import réussi");
+            });
         });
     }
-    shell.present(parent);
 }
 
 fn set_mode_explanation(label: &gtk::Label, mode: RestoreMode) {
@@ -168,7 +209,7 @@ fn set_mode_explanation(label: &gtk::Label, mode: RestoreMode) {
             label.remove_css_class("dim-label");
         }
         RestoreMode::Merge => {
-            label.set_text("Les éléments de la sauvegarde sont ajoutés ; les éléments déjà présents sont conservés.");
+            label.set_text("Les nouveaux éléments sont ajoutés. Les éléments ayant le même identifiant sont remplacés par ceux de la sauvegarde ; les autres éléments actuels sont conservés.");
             label.remove_css_class("dmx-warning");
             label.add_css_class("dim-label");
         }
@@ -205,13 +246,15 @@ struct Wizard {
     separator: char,
     has_header: bool,
     mapping: CsvColumnMapping,
-    transactions: Vec<ParsedStatementTransaction>,
+    transactions: Arc<Vec<ParsedStatementTransaction>>,
     sources: Vec<String>,
     categories: HashMap<String, Option<String>>,
     account: Option<String>,
     new_name: String,
     new_type: String,
     final_balance: String,
+    preview: Option<CsvPreview>,
+    preview_key: Option<(char, bool)>,
 }
 
 impl Wizard {
@@ -232,6 +275,7 @@ impl Wizard {
 }
 
 pub fn statement_import(store: &Rc<Store>, parent: &impl IsA<gtk::Widget>, content: String, file_name: String) {
+    let content = Arc::new(content);
     let format = StatementFormat::from_file_name(&file_name).unwrap_or_default();
     let title = match format {
         StatementFormat::Csv => "Assistant d'import CSV",
@@ -247,16 +291,18 @@ pub fn statement_import(store: &Rc<Store>, parent: &impl IsA<gtk::Widget>, conte
         } else {
             Step::Account
         },
-        separator: detect_csv_separator(&content),
+        separator: ';',
         has_header: true,
         mapping: CsvColumnMapping::default(),
-        transactions: Vec::new(),
+        transactions: Arc::new(Vec::new()),
         sources: Vec::new(),
         categories: HashMap::new(),
         account: None,
         new_name: String::new(),
         new_type: ACCOUNT_TYPES[0].to_string(),
         final_balance: String::new(),
+        preview: None,
+        preview_key: None,
     }));
 
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -291,12 +337,15 @@ pub fn statement_import(store: &Rc<Store>, parent: &impl IsA<gtk::Widget>, conte
         let steps_host = steps_host.clone();
         let page = page.clone();
         let back = back.clone();
-        let render = render.clone();
+        let render = Rc::downgrade(&render);
         Rc::new(move || {
             // Relance le rendu après un changement d'option (séparateur, en-tête, colonnes).
             let again: Rc<dyn Fn()> = {
                 let render = render.clone();
                 Rc::new(move || {
+                    let Some(render) = render.upgrade() else {
+                        return;
+                    };
                     let callback = render.borrow().clone();
                     if let Some(callback) = callback {
                         callback();
@@ -315,17 +364,20 @@ pub fn statement_import(store: &Rc<Store>, parent: &impl IsA<gtk::Widget>, conte
             } else {
                 "Suivant"
             });
+            shell.release_controls();
             widgets::clear(&page);
 
             match step {
                 Step::Columns => columns_step(&store, &shell, &state, &content, &page, again.clone()),
-                Step::Account => account_step(&store, &state, &page, again.clone()),
-                Step::Categories => categories_step(&store, &state, &page),
+                Step::Account => account_step(&store, &shell, &state, &page, again.clone()),
+                Step::Categories => categories_step(&store, &shell, &state, &page),
                 Step::Confirm => confirm_step(&store, &state, &page),
             }
         })
     };
     *render.borrow_mut() = Some(render_step.clone());
+    let render_for_close = render.clone();
+    shell.on_close(move || *render_for_close.borrow_mut() = None);
 
     {
         let state = state.clone();
@@ -360,15 +412,30 @@ pub fn statement_import(store: &Rc<Store>, parent: &impl IsA<gtk::Widget>, conte
         let content = content.clone();
         let render_step = render_step.clone();
         shell.clone().on_submit(move || {
+            if shell.is_busy() {
+                return;
+            }
             shell.set_error(None);
             let step = state.borrow().step;
             match step {
                 Step::Columns => {
-                    if let Err(message) = parse_statement(&store, &state, &content) {
-                        return shell.set_error(Some(&message));
-                    }
-                    state.borrow_mut().step = Step::Account;
-                    render_step();
+                    shell.set_busy(true);
+                    let store = store.clone();
+                    let shell = shell.clone();
+                    let state = state.clone();
+                    let content = content.clone();
+                    let render_step = render_step.clone();
+                    gtk::glib::spawn_future_local(async move {
+                        let result = parse_statement(&store, &state, content).await;
+                        shell.set_busy(false);
+                        match result {
+                            Ok(()) => {
+                                state.borrow_mut().step = Step::Account;
+                                render_step();
+                            }
+                            Err(message) => shell.set_error(Some(&message)),
+                        }
+                    });
                 }
                 Step::Account => {
                     let choice = state.borrow().account.clone();
@@ -402,36 +469,61 @@ pub fn statement_import(store: &Rc<Store>, parent: &impl IsA<gtk::Widget>, conte
                         Ok(request) => request,
                         Err(message) => return shell.set_error(Some(&message)),
                     };
-                    match store.read(|engine| engine.import_statement(request)) {
-                        Some(result) => {
-                            let duplicates = if result.duplicates > 0 {
-                                format!(" ({} doublons ignorés)", result.duplicates)
-                            } else {
-                                String::new()
-                            };
-                            store.reload();
-                            store.show_toast(&format!("{} transactions importées{duplicates}", result.imported));
-                            shell.close();
+                    shell.set_busy(true);
+                    let store = store.clone();
+                    let shell = shell.clone();
+                    gtk::glib::spawn_future_local(async move {
+                        let result = store
+                            .work(move |engine| {
+                                let (transactions, target, category_mapping) = request;
+                                engine.import_statement(StatementImportRequest {
+                                    transactions: transactions.as_ref().clone(),
+                                    target,
+                                    category_mapping,
+                                })
+                            })
+                            .await;
+                        shell.set_busy(false);
+                        match result {
+                            Ok(result) => {
+                                let duplicates = if result.duplicates > 0 {
+                                    format!(" ({} doublons ignorés)", result.duplicates)
+                                } else {
+                                    String::new()
+                                };
+                                store.reload_if_changed();
+                                store.show_toast(&format!("{} transactions importées{duplicates}", result.imported));
+                                shell.close();
+                            }
+                            Err(message) => shell.set_error(Some(&message)),
                         }
-                        None => shell.close(),
-                    }
+                    });
                 }
             }
         });
     }
 
-    // QIF et OFX n'ont pas d'étape colonnes : le fichier est analysé tout de suite.
-    if format != StatementFormat::Csv {
-        if let Err(message) = parse_statement(store, &state, &content) {
-            shell.set_error(Some(&message));
-        }
-    }
-    render_step();
+    shell.set_busy(true);
     shell.present(parent);
+    let store = store.clone();
+    gtk::glib::spawn_future_local(async move {
+        let scan = content.clone();
+        let separator = gtk::gio::spawn_blocking(move || detect_csv_separator(&scan)).await;
+        if let Ok(separator) = separator {
+            state.borrow_mut().separator = separator;
+        }
+        if format != StatementFormat::Csv {
+            if let Err(message) = parse_statement(&store, &state, content).await {
+                shell.set_error(Some(&message));
+            }
+        }
+        shell.set_busy(false);
+        render_step();
+    });
 }
 
 /// Analyse le fichier et prépare l'association des catégories.
-fn parse_statement(store: &Rc<Store>, state: &Rc<RefCell<Wizard>>, content: &str) -> Result<(), String> {
+async fn parse_statement(store: &Rc<Store>, state: &Rc<RefCell<Wizard>>, content: Arc<String>) -> Result<(), String> {
     let (format, csv, today) = {
         let wizard = state.borrow();
         let csv = (wizard.format == StatementFormat::Csv).then(|| (wizard.csv_options(), wizard.mapping));
@@ -442,28 +534,31 @@ fn parse_statement(store: &Rc<Store>, state: &Rc<RefCell<Wizard>>, content: &str
             return Err("Assignez au moins les colonnes Date et Montant.".to_string());
         }
     }
-    let transactions = store
-        .read(|engine| engine.parse_statement(format, content, csv, today))
-        .ok_or_else(|| "Le fichier n'a pas pu être analysé.".to_string())?;
+    let (transactions, sources, suggestions) = store
+        .work(move |engine| {
+            let transactions = engine.parse_statement(format, &content, csv, today)?;
+            let sources = source_categories(&transactions);
+            let suggestions = engine.suggest_category_mapping(&sources)?;
+            Ok((transactions, sources, suggestions))
+        })
+        .await?;
     if transactions.is_empty() {
         return Err("Aucune transaction n'a été trouvée dans le fichier.".to_string());
     }
-    let sources = source_categories(&transactions);
-    let suggestions = store
-        .read(|engine| engine.suggest_category_mapping(&sources))
-        .unwrap_or_default();
     let mut mapping = HashMap::new();
     for suggestion in suggestions {
         mapping.insert(suggestion.source, suggestion.category_id);
     }
     let mut wizard = state.borrow_mut();
-    wizard.transactions = transactions;
+    wizard.transactions = Arc::new(transactions);
     wizard.sources = sources;
     wizard.categories = mapping;
     Ok(())
 }
 
-fn import_request(state: &Rc<RefCell<Wizard>>) -> Result<StatementImportRequest, String> {
+type PreparedImport = (Arc<Vec<ParsedStatementTransaction>>, ImportTarget, Vec<CategoryMatch>);
+
+fn import_request(state: &Rc<RefCell<Wizard>>) -> Result<PreparedImport, String> {
     let wizard = state.borrow();
     let choice = wizard
         .account
@@ -486,11 +581,7 @@ fn import_request(state: &Rc<RefCell<Wizard>>) -> Result<StatementImportRequest,
             category_id: wizard.categories.get(source).cloned().flatten(),
         })
         .collect();
-    Ok(StatementImportRequest {
-        transactions: wizard.transactions.clone(),
-        target,
-        category_mapping,
-    })
+    Ok((wizard.transactions.clone(), target, category_mapping))
 }
 
 /// Étape 1 : séparateur, en-tête et assignation des colonnes.
@@ -498,7 +589,7 @@ fn columns_step(
     store: &Rc<Store>,
     shell: &Rc<FormShell>,
     state: &Rc<RefCell<Wizard>>,
-    content: &str,
+    content: &Arc<String>,
     page: &gtk::Box,
     again: Rc<dyn Fn()>,
 ) {
@@ -542,11 +633,38 @@ fn columns_step(
     options.append(&header_check);
     page.append(&options);
 
-    let preview = match store.read(|engine| engine.preview_csv(content, state.borrow().csv_options())) {
-        Some(preview) => preview,
-        None => return,
+    let key = {
+        let wizard = state.borrow();
+        (wizard.separator, wizard.has_header)
     };
-    shell.set_error(None);
+    if state.borrow().preview_key != Some(key) {
+        shell.set_busy(true);
+        let store = store.clone();
+        let state = state.clone();
+        let shell = shell.clone();
+        let content = content.clone();
+        let again = again.clone();
+        let options = state.borrow().csv_options();
+        gtk::glib::spawn_future_local(async move {
+            let result = store.work(move |engine| engine.preview_csv(&content, options)).await;
+            shell.set_busy(false);
+            match result {
+                Ok(preview) => {
+                    let mut wizard = state.borrow_mut();
+                    wizard.preview = Some(preview);
+                    wizard.preview_key = Some(key);
+                    drop(wizard);
+                    shell.set_error(None);
+                    again();
+                }
+                Err(message) => shell.set_error(Some(&message)),
+            }
+        });
+        return;
+    }
+    let Some(preview) = state.borrow().preview.clone() else {
+        return;
+    };
 
     let grid = gtk::Grid::new();
     grid.set_column_spacing(6);
@@ -581,6 +699,7 @@ fn columns_step(
             }
             again_for_select();
         });
+        shell.hold(select.clone());
         grid.attach(&select.widget(), column as i32, 0, 1, 1);
     }
     for (row_index, row) in preview.rows.iter().take(8).enumerate() {
@@ -645,7 +764,13 @@ fn assign_role(mapping: CsvColumnMapping, column: u32, role: &str) -> CsvColumnM
 }
 
 /// Étape 2 : compte de destination, existant ou nouveau.
-fn account_step(store: &Rc<Store>, state: &Rc<RefCell<Wizard>>, page: &gtk::Box, again: Rc<dyn Fn()>) {
+fn account_step(
+    store: &Rc<Store>,
+    shell: &Rc<FormShell>,
+    state: &Rc<RefCell<Wizard>>,
+    page: &gtk::Box,
+    again: Rc<dyn Fn()>,
+) {
     page.append(&widgets::section_label("Vers quel compte importer ?"));
     let list = gtk::Box::new(gtk::Orientation::Vertical, 8);
     let selected = state.borrow().account.clone();
@@ -717,6 +842,7 @@ fn account_step(store: &Rc<Store>, state: &Rc<RefCell<Wizard>>, page: &gtk::Box,
             state.borrow_mut().new_type = value.unwrap_or_else(|| ACCOUNT_TYPES[0].to_string());
         });
     }
+    shell.hold(type_select.clone());
     details.append(&field("Type", &type_select.widget()));
     let balance = amount_entry(0.0);
     balance.set_text(&state.borrow().final_balance);
@@ -750,7 +876,7 @@ fn account_step(store: &Rc<Store>, state: &Rc<RefCell<Wizard>>, page: &gtk::Box,
 }
 
 /// Étape 3 : association des catégories du fichier.
-fn categories_step(store: &Rc<Store>, state: &Rc<RefCell<Wizard>>, page: &gtk::Box) {
+fn categories_step(store: &Rc<Store>, shell: &Rc<FormShell>, state: &Rc<RefCell<Wizard>>, page: &gtk::Box) {
     page.append(&widgets::caption(
         "Associez les catégories du fichier à vos catégories existantes.",
     ));
@@ -791,6 +917,7 @@ fn categories_step(store: &Rc<Store>, state: &Rc<RefCell<Wizard>>, page: &gtk::B
                 .categories
                 .insert(source_for_select.clone(), category_id);
         });
+        shell.hold(select.clone());
         row.append(&select.widget());
         list.append(&row);
     }

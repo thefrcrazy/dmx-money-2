@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Politique de préversions et notes de publication
         run: python3 scripts/tests/test-release-policy.py
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -77,7 +77,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libdbus-1-dev \
-                                  desktop-file-utils appstream
+                                  desktop-file-utils appstream xvfb xauth
       - name: Icônes natives à jour (Windows, Apple, Linux)
         run: python3 scripts/gen-native-icons.py --check
       - name: Icône de l'application
@@ -90,6 +90,8 @@ jobs:
           git checkout -- linux/dmx-money-gtk/data/icons
       - name: Clippy
         run: cargo clippy -p dmx-money-gtk --all-targets -- -D warnings
+      - name: Fermeture et libération des contrôles GTK
+        run: xvfb-run -a cargo test -p dmx-money-gtk --features ui-tests --test ui-lifecycle --locked
       - name: Build release
         run: cargo build --release -p dmx-money-gtk
       - name: Installation dans un préfixe de test
@@ -111,7 +113,7 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
       - uses: Swatinem/rust-cache@v2
       - name: Cibles Rust Apple
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim
@@ -150,7 +152,7 @@ jobs:
     runs-on: windows-2025-vs2026
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-dotnet@v4
         with:
@@ -176,6 +178,8 @@ jobs:
           }
       - name: Tests (noyau et modèles de vue)
         run: dotnet test windows/tests/DmxMoney.Tests/DmxMoney.Tests.csproj --configuration Release
+      - name: Réaffectation et annulation des cellules éditables
+        run: dotnet run --project windows/tests/EditableCellHarness/EditableCellHarness.csproj --configuration Release -p:UseSharedCompilation=false
       # Test de démarrage : l'app publiée ouvre chaque page tour à tour puis quitte d'elle-même
       # (DMXMONEY_SELF_TEST). Une page qui plante ferme le processus avec un crash.log, alors affiché
       # (vécu avec les pré-versions 2.0.0 au démarrage et 2.0.1 au changement de page).

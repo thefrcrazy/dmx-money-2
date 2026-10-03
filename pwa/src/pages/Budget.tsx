@@ -92,8 +92,8 @@ const Budget: React.FC = () => {
     });
 
     const now = localToday;
-    const monthStart = startOfMonth(now);
-    const monthEnd = endOfMonth(now);
+    const monthStart = useMemo(() => startOfMonth(now), [now]);
+    const monthEnd = useMemo(() => endOfMonth(now), [now]);
     const daysInMonth = monthEnd.getDate();
     const currentDay = Math.min(now.getDate(), daysInMonth);
     const remainingDays = Math.max(daysInMonth - currentDay + 1, 1);

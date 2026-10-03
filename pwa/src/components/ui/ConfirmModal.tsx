@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useId } from 'react';
 import { TriangleAlert } from 'lucide-react';
 import Button from './Button';
+import DialogSurface from './DialogSurface';
 import FormPopup from './FormPopup';
 import { isMobileCompanion } from '../../utils/runtime';
 
@@ -26,14 +27,9 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
     isDangerous = false
 }) => {
     const mobileMode = isMobileCompanion();
+    const titleId = useId();
 
-    useEffect(() => {
-        const handleEscape = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose();
-        };
-        if (isOpen && !mobileMode) window.addEventListener('keydown', handleEscape);
-        return () => window.removeEventListener('keydown', handleEscape);
-    }, [isOpen, mobileMode, onClose]);
+
 
     const handleConfirm = () => {
         onConfirm();
@@ -84,7 +80,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
     if (!isOpen) return null;
 
     return (
-        <div
+        <DialogSurface onClose={onClose} labelledBy={titleId}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/20 app-modal-overlay"
         >
             <div
@@ -92,7 +88,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="p-6 space-y-6 app-modal-body">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-200 app-confirm-title">{title}</h3>
+                    <h3 id={titleId} className="text-lg font-semibold text-gray-900 dark:text-gray-200 app-confirm-title">{title}</h3>
 
                     <div className="flex items-start gap-4 app-confirm-message-container">
                         {isDangerous && (
@@ -121,7 +117,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
                     </div>
                 </div>
             </div>
-        </div>
+        </DialogSurface>
     );
 };
 

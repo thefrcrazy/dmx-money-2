@@ -63,9 +63,42 @@ if [[ -z "$SIGN_IDENTITY" ]]; then
     echo "    aucune identité Apple Development : signature ad hoc (Siri et Raccourcis ne verront pas l'app)"
     SIGN_IDENTITY="-"
 fi
+# Resolve the effective Xcode entitlement selection instead of always sealing an empty file.
+BUILD_SETTINGS=$(mktemp)
+RESOLVED_ENTITLEMENTS=$(mktemp)
+trap 'rm -f "$BUILD_SETTINGS" "$RESOLVED_ENTITLEMENTS"' EXIT
+xcodebuild -project "$DMX_ROOT/apple/DmxMoney.xcodeproj" -scheme "$SCHEME" \
+    -configuration "$CONFIG" -showBuildSettings -json > "$BUILD_SETTINGS"
+python3 - "$BUILD_SETTINGS" "$DMX_ROOT/apple" "$RESOLVED_ENTITLEMENTS" "$DIST/DmxMoney.app" "$SIGN_IDENTITY" <<'PY_ENTITLEMENTS'
+import json, plistlib, re, sys
+from pathlib import Path
+settings_file, apple_root, output, app, identity = sys.argv[1:]
+settings = json.loads(Path(settings_file).read_text())[0]['buildSettings']
+def expand(value):
+    if isinstance(value, str):
+        return re.sub(r'\$\(([^)]+)\)|\$\{([^}]+)\}', lambda match: settings.get(match.group(1) or match.group(2), ''), value)
+    if isinstance(value, list): return [expand(item) for item in value]
+    if isinstance(value, dict): return {key: expand(item) for key, item in value.items()}
+    return value
+source = Path(apple_root) / expand(settings['CODE_SIGN_ENTITLEMENTS'])
+entitlements = expand(plistlib.loads(source.read_bytes()))
+container = settings.get('DMX_ICLOUD_CONTAINER', '').strip()
+cloud_requested = 'com.apple.developer.icloud-container-identifiers' in entitlements and bool(container)
+if cloud_requested and identity == '-':
+    raise SystemExit('CloudKit exige une identité Apple et les droits du conteneur : signature ad hoc refusée pour cette configuration.')
+if not container:
+    entitlements = {key: value for key, value in entitlements.items() if not key.startswith('com.apple.developer.icloud') and key != 'com.apple.developer.aps-environment'}
+info_path = Path(app) / 'Contents/Info.plist'
+info = plistlib.loads(info_path.read_bytes())
+if not cloud_requested: info['DmxICloudContainer'] = ''
+info_path.write_bytes(plistlib.dumps(info))
+Path(output).write_bytes(plistlib.dumps(entitlements))
+PY_ENTITLEMENTS
+rm -f "$BUILD_SETTINGS"
 codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none \
-    --entitlements "$DMX_ROOT/apple/DmxMoney-macOS/DmxMoney.entitlements" \
+    --entitlements "$RESOLVED_ENTITLEMENTS" \
     "$DIST/DmxMoney.app"
+rm -f "$RESOLVED_ENTITLEMENTS"
 codesign --verify --strict "$DIST/DmxMoney.app"
 echo "    signée : $(codesign -dv "$DIST/DmxMoney.app" 2>&1 | awk -F= '/^TeamIdentifier/ {print "équipe " $2}')"
 

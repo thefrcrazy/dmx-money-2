@@ -85,7 +85,9 @@ L'analyse est déterministe et testée ; aucun montant ne sort d'un modèle.
 
 ## Développement
 
-Prérequis communs : Rust stable (1.88+).
+Prérequis communs : Rust 1.94 ou supérieur (toolchain 1.94.0 fixé dans le dépôt). SQLx 0.9.0 et libsqlite3-sys 0.37.0 sont verrouillés ensemble : cette dernière branche compatible embarque SQLite 3.51.3. Chaque connexion active le mode `DEFENSIVE` ; une version SQLite supérieure attend une version SQLx qui accepte les bindings 0.38.
+
+Les scripts macOS désactivent le stripping Rust des bibliothèques intermédiaires pour éviter le défaut d’alignement Mach-O de Xcode 27 ([suivi Rust](https://github.com/rust-lang/rust/issues/157750)). Pour une commande Cargo lancée directement sur ce SDK, utiliser `CARGO_PROFILE_DEV_STRIP=none` et `CARGO_PROFILE_TEST_STRIP=none` (ou `CARGO_PROFILE_RELEASE_STRIP=none` en release).
 
 ```bash
 cargo test --workspace

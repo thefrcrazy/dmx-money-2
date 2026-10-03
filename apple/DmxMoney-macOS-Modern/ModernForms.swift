@@ -22,6 +22,9 @@ struct ModernFormHost: View {
 
     @ViewBuilder
     private var form: some View {
+        let accounts = store.selectedAccountIds
+        let today = store.today
+        let categoryNames = Dictionary(store.categories.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         switch request {
         case let .account(id):
             draft({ try $0.accountDraft(id: id) }) { AccountForm(draft: $0, onClose: onClose) }
@@ -30,22 +33,22 @@ struct ModernFormHost: View {
         case let .category(id):
             draft({ try $0.categoryDraft(id: id) }) { CategoryForm(draft: $0, onClose: onClose) }
         case let .transaction(id):
-            draft({ try $0.transactionDraft(id: id, accounts: store.selectedAccountIds, today: store.today) }) {
+            draft({ try $0.transactionDraft(id: id, accounts: accounts, today: today) }) {
                 TransactionForm(draft: $0, onClose: onClose)
             }
         case let .budget(id):
-            draft({ try $0.budgetDraft(id: id, accounts: store.selectedAccountIds) }) { BudgetForm(draft: $0, onClose: onClose) }
+            draft({ try $0.budgetDraft(id: id, accounts: accounts) }) { BudgetForm(draft: $0, onClose: onClose) }
         case let .newBudget(categoryId):
             draft({ engine in
-                var draft = try engine.budgetDraft(id: nil, accounts: store.selectedAccountIds)
+                var draft = try engine.budgetDraft(id: nil, accounts: accounts)
                 draft.categoryId = categoryId
-                if draft.name.isEmpty { draft.name = store.category(id: categoryId)?.name ?? "" }
+                if draft.name.isEmpty { draft.name = categoryNames[categoryId] ?? "" }
                 return draft
             }) { BudgetForm(draft: $0, onClose: onClose) }
         case let .scheduled(id):
-            draft({ try $0.scheduledDraft(id: id, today: store.today) }) { ScheduledForm(draft: $0, onClose: onClose) }
+            draft({ try $0.scheduledDraft(id: id, today: today) }) { ScheduledForm(draft: $0, onClose: onClose) }
         case let .fakeTransaction(id):
-            draft({ try $0.fakeTransactionDraft(id: id, accounts: store.selectedAccountIds, today: store.today) }) {
+            draft({ try $0.fakeTransactionDraft(id: id, accounts: accounts, today: today) }) {
                 FakeTransactionForm(draft: $0, onClose: onClose)
             }
         case .budgetSuggestions:
@@ -61,17 +64,13 @@ struct ModernFormHost: View {
         }
     }
 
-    /// Charge un brouillon par le noyau ; une erreur ferme la feuille avec un message.
+    /// Charge un brouillon hors du fil UI et conserve les erreurs dans la feuille.
     @ViewBuilder
     private func draft<T, Content: View>(
-        _ load: (DmxEngine) throws -> T,
-        @ViewBuilder content: (T) -> Content
+        _ load: @escaping (DmxEngine) throws -> T,
+        @ViewBuilder content: @escaping (T) -> Content
     ) -> some View {
-        if let draft = store.peek(load) {
-            content(draft)
-        } else {
-            Color.clear.onAppear(perform: onClose)
-        }
+        DraftLoader(load: load, onClose: onClose, content: content)
     }
 }
 
@@ -82,6 +81,7 @@ struct FormSheet<Content: View>: View {
     let title: String
     let submitTitle: String
     var submitDisabled = false
+    var cancelDisabled = false
     let error: String?
     let onCancel: () -> Void
     let onSubmit: () -> Void
@@ -101,6 +101,7 @@ struct FormSheet<Content: View>: View {
                 Spacer()
                 Button("Annuler", role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
+                    .disabled(cancelDisabled)
                 Button(submitTitle, action: onSubmit)
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
@@ -502,12 +503,14 @@ private struct IconGrid: View {
 private struct TransactionForm: View {
     @EnvironmentObject private var store: AppStore
     @State private var draft: TransactionDraft
+    private let base: TransactionDraft
     @State private var amount: String
     @State private var error: String?
     private let onClose: () -> Void
 
     init(draft: TransactionDraft, onClose: @escaping () -> Void) {
         _draft = State(initialValue: draft)
+        self.base = draft
         _amount = State(initialValue: AmountInput.text(draft.amount))
         self.onClose = onClose
     }
@@ -550,7 +553,11 @@ private struct TransactionForm: View {
         }
         var draft = self.draft
         draft.amount = value
-        error = store.attempt { engine in _ = try engine.saveTransaction(draft: draft) }
+        let base = self.base
+        error = store.attempt { engine in
+            if draft.id != nil { _ = try engine.saveTransactionWithBase(draft: draft, base: base) }
+            else { _ = try engine.saveTransaction(draft: draft) }
+        }
         if error == nil {
             store.showToast(isEditing ? "Transaction mise à jour" : (isTransfer ? "Virement ajouté" : "Transaction ajoutée"))
             onClose()

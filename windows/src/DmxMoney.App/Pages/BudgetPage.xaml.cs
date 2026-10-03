@@ -42,6 +42,9 @@ public sealed partial class BudgetPage : Page
 
     private void UpdateVisuals()
     {
+        syncing = true;
+        CategoryFilter.Update(CategoriesList, ViewModel.CategoryChoices, ViewModel.Categories);
+        syncing = false;
         if (ViewModel.View is not { } view)
         {
             return;

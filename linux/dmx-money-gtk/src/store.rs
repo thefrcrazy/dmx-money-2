@@ -5,6 +5,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use dmx_core::metrics::BalanceSummary;
 use dmx_core::models::{Account, Category};
@@ -135,6 +136,7 @@ pub struct UiHooks {
     pub confirm: Option<Box<dyn Fn(ConfirmRequest)>>,
     pub form: Option<Box<dyn Fn(FormRequest)>>,
     pub route: Option<Box<dyn Fn(Route)>>,
+    pub bridge_status: Option<Box<dyn Fn()>>,
 }
 
 struct State {
@@ -146,13 +148,14 @@ struct State {
 }
 
 pub struct Store {
-    engine: Engine,
+    engine: Arc<Engine>,
     state: RefCell<State>,
     listeners: RefCell<Vec<(u64, Listener)>>,
     next_listener: Cell<u64>,
     hooks: RefCell<UiHooks>,
     bridge_enabled: Cell<bool>,
     last_due_check: Cell<Option<(chrono::NaiveDate, i64)>>,
+    last_reload: Cell<Option<(chrono::NaiveDate, i64)>>,
 }
 
 impl Store {
@@ -170,7 +173,7 @@ impl Store {
             ),
             _ => (EngineConfig::new(Self::data_directory()), true),
         };
-        let engine = Engine::open(config).map_err(|error| error.to_string())?;
+        let engine = Arc::new(Engine::open(config).map_err(|error| error.to_string())?);
         let settings = engine.settings().map_err(|error| error.to_string())?;
         let snapshot = engine.snapshot().map_err(|error| error.to_string())?;
         let store = Rc::new(Self {
@@ -187,6 +190,7 @@ impl Store {
             hooks: RefCell::new(UiHooks::default()),
             bridge_enabled: Cell::new(bridge_enabled),
             last_due_check: Cell::new(None),
+            last_reload: Cell::new(None),
         });
         store.refresh_balances();
         Ok(store)
@@ -200,6 +204,16 @@ impl Store {
 
     pub fn engine(&self) -> &Engine {
         &self.engine
+    }
+
+    pub async fn work<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&Engine) -> dmx_core::CoreResult<T> + Send + 'static,
+    ) -> Result<T, String> {
+        let engine = self.engine.clone();
+        gtk::gio::spawn_blocking(move || work(&engine).map_err(|error| error.to_string()))
+            .await
+            .map_err(|_| "Le traitement a été interrompu.".to_string())?
     }
 
     pub fn today(&self) -> chrono::NaiveDate {
@@ -286,13 +300,35 @@ impl Store {
         }
     }
 
+    /// Release the window/page callback graph when its owning window is closed.
+    pub fn clear_ui_callbacks(&self) {
+        self.listeners.borrow_mut().clear();
+        *self.hooks.borrow_mut() = UiHooks::default();
+    }
+
     pub fn set_hooks(&self, hooks: UiHooks) {
         *self.hooks.borrow_mut() = hooks;
     }
 
     // --- Rechargement et écritures ---
 
+    pub fn refresh_bridge_status(&self) {
+        if let Some(refresh) = &self.hooks.borrow().bridge_status {
+            refresh();
+        }
+    }
+
+    pub fn reload_if_changed(self: &Rc<Self>) {
+        if let Ok(version) = self.engine.data_version() {
+            if self.last_reload.get() == Some((self.today(), version)) {
+                return;
+            }
+        }
+        self.reload();
+    }
+
     pub fn reload(self: &Rc<Self>) {
+        let key = self.engine.data_version().ok().map(|version| (self.today(), version));
         let settings = self.engine.settings();
         let snapshot = self.engine.snapshot();
         if let (Ok(settings), Ok(snapshot)) = (settings, snapshot) {
@@ -302,6 +338,7 @@ impl Store {
             state.categories = snapshot.categories.clone();
             let known: Vec<String> = state.accounts.iter().map(|account| account.id.clone()).collect();
             state.selected.retain(|id| known.contains(id));
+            self.last_reload.set(key);
         }
         self.refresh_balances();
         self.notify();

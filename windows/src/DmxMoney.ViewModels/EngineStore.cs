@@ -262,19 +262,19 @@ public sealed partial class EngineStore : ObservableObject, IDisposable
         try
         {
             var value = await Task.Run(() => work(engine)).ConfigureAwait(false);
-            Dispatch(() =>
+            await DispatchAsync(() =>
             {
                 // Status reads and due-date checks must not replace a large journal
                 // while it is being scrolled. Settings and financial writes share
                 // the core's data version, so actual changes still reload normally.
                 Reload(ifChanged: true);
                 onSuccess?.Invoke(value);
-            });
+            }).ConfigureAwait(false);
         }
         catch (Exception error)
         {
             var message = Message(error);
-            Dispatch(() =>
+            await DispatchAsync(() =>
             {
                 if (onFailure is not null)
                 {
@@ -284,8 +284,19 @@ public sealed partial class EngineStore : ObservableObject, IDisposable
                 {
                     ErrorMessage = message;
                 }
-            });
+            }).ConfigureAwait(false);
         }
+    }
+
+    private Task DispatchAsync(Action action)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Dispatch(() =>
+        {
+            try { action(); completion.SetResult(); }
+            catch (Exception error) { completion.SetException(error); }
+        });
+        return completion.Task;
     }
 
     public void Apply(SettingsChange change) => Run(engine => engine.ApplySettingsChange(change));

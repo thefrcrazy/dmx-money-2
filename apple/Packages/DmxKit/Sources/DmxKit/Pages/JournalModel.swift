@@ -20,7 +20,7 @@ public final class JournalModel: PageModel {
 
     public var search = "" {
         willSet { objectWillChange.send() }
-        didSet { if oldValue != search { filtersChanged() } }
+        didSet { if oldValue != search { setNeedsRefresh(debounce: true) } }
     }
 
     public var categories: [String] = [] {
@@ -61,9 +61,10 @@ public final class JournalModel: PageModel {
     /// Appelé après chaque recalcul (le tableau AppKit recharge ses lignes).
     public var onChange: (() -> Void)?
 
-    public override init(store: AppStore) {
+    public init(store: AppStore, active: Bool = true) {
         super.init(store: store)
-        refresh()
+        isActive = active
+        if active { refresh() } else { setNeedsRefresh() }
     }
 
     public override func refresh() {
@@ -75,16 +76,17 @@ public final class JournalModel: PageModel {
             statuses: statuses.map { $0 == "checked" ? .checked : .unchecked },
             budgetStatuses: budgetStatuses.map { $0 == "budgeted" ? .budgeted : .unbudgeted }
         )
-        view = store.read { engine in try engine.journal(query: query) }
-        rowsRevision &+= 1
-        if !selection.isEmpty {
-            let visible = Set(view?.rows.map { $0.transaction.id } ?? [])
-            let kept = selection.intersection(visible)
-            if kept != selection {
-                selection = kept
+        load({ try $0.journal(query: query) }) { [weak self] view in
+            guard let self else { return }
+            self.view = view
+            self.rowsRevision &+= 1
+            if !self.selection.isEmpty {
+                let visible = Set(view.rows.map { $0.transaction.id })
+                let kept = self.selection.intersection(visible)
+                if kept != self.selection { self.selection = kept }
             }
+            self.onChange?()
         }
-        onChange?()
     }
 
     public var rows: [JournalRow] { view?.rows ?? [] }
@@ -129,18 +131,25 @@ public final class JournalModel: PageModel {
         store.run { engine in _ = try engine.toggleTransactionsChecked(ids: ids) }
     }
 
-    public func updateDescription(_ id: String, _ description: String) {
-        store.run("Transaction mise à jour") { engine in try engine.updateTransactionDescription(id: id, description: description) }
+    public func updateDescription(_ id: String, _ description: String, baseDescription: String? = nil) {
+        let baseline = baseDescription ?? rows.first(where: { $0.transaction.id == id })?.transaction.description
+        guard let baseline else { return }
+        store.run("Transaction mise à jour") { engine in
+            try engine.updateTransactionDescriptionWithBase(id: id, description: description, baseDescription: baseline)
+        }
     }
 
     /// Renvoie `false` si le montant saisi est invalide.
     @discardableResult
-    public func updateAmount(_ id: String, text: String) -> Bool {
+    public func updateAmount(_ id: String, text: String, baseAmount: Double? = nil) -> Bool {
         guard let amount = AmountInput.parse(text), amount > 0 else {
             store.errorMessage = "Saisissez un montant valide"
             return false
         }
-        store.run("Transaction mise à jour") { engine in try engine.updateTransactionAmount(id: id, amount: amount) }
+        guard let baseline = baseAmount ?? rows.first(where: { $0.transaction.id == id })?.transaction.amount else { return false }
+        store.run("Transaction mise à jour") { engine in
+            try engine.updateTransactionAmountWithBase(id: id, amount: amount, baseAmount: baseline)
+        }
         return true
     }
 

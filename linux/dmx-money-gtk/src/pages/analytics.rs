@@ -317,7 +317,7 @@ pub fn attach_calendar(button: &gtk::MenuButton, on_pick: impl Fn(String) + 'sta
     let calendar = gtk::Calendar::new();
     popover.set_child(Some(&calendar));
     button.set_popover(Some(&popover));
-    let popover_for_pick = popover.clone();
+    let popover_for_pick = popover.downgrade();
     calendar.connect_day_selected(move |calendar| {
         let date = calendar.date();
         on_pick(format!(
@@ -326,6 +326,8 @@ pub fn attach_calendar(button: &gtk::MenuButton, on_pick: impl Fn(String) + 'sta
             date.month(),
             date.day_of_month()
         ));
-        popover_for_pick.popdown();
+        if let Some(popover) = popover_for_pick.upgrade() {
+            popover.popdown();
+        }
     });
 }

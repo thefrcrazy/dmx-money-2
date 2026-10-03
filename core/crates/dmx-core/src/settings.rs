@@ -369,6 +369,41 @@ pub fn legacy_desktop_settings_patch(settings: SettingsRecord) -> SettingsPatch 
     }
 }
 
+pub(crate) fn validate_custom_ranges(row: &SqliteRow, values: &SettingsValuesPatch) -> CoreResult<()> {
+    if let Some(value) = &values.prediction_custom_end_date {
+        if let Some(end) = crate::limits::custom_date(value)? {
+            let today = crate::dates::today_local();
+            crate::limits::graph_range(today, end.max(today), 1)?;
+        }
+    }
+    if values.analytics_custom_start_date.is_some() || values.analytics_custom_end_date.is_some() {
+        let today = crate::dates::today_local();
+        let start_value = values
+            .analytics_custom_start_date
+            .clone()
+            .or_else(|| row_opt_string(row, "analyticsCustomStartDate"));
+        let end_value = values
+            .analytics_custom_end_date
+            .clone()
+            .or_else(|| row_opt_string(row, "analyticsCustomEndDate"));
+        let start = start_value
+            .as_deref()
+            .map(crate::limits::custom_date)
+            .transpose()?
+            .flatten()
+            .unwrap_or_else(|| crate::dates::add_months(today, -1));
+        let end = end_value
+            .as_deref()
+            .map(crate::limits::custom_date)
+            .transpose()?
+            .flatten()
+            .unwrap_or(today);
+        crate::limits::graph_range(start, end, 1)?;
+    }
+
+    Ok(())
+}
+
 pub(crate) async fn apply_settings_patch_locked(
     connection: &mut SqliteConnection,
     mut patch: SettingsPatch,
@@ -386,6 +421,8 @@ pub(crate) async fn apply_settings_patch_locked(
         .fetch_one(&mut *connection)
         .await
         .ctx("mise à jour des paramètres")?;
+
+    validate_custom_ranges(&row, &patch.values)?;
 
     let current_revision = row_i64(&row, "settingsRevision").unwrap_or_default();
     let mut field_versions = row_opt_string(&row, "settingsFieldVersions")

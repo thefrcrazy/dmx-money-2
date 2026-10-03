@@ -59,6 +59,8 @@ struct ModernStatementImport: View {
     @State private var finalBalance = ""
     @State private var error: String?
     @State private var isImporting = false
+    @State private var isPreparing = false
+    @State private var readTask: StoreReadTask?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,11 +68,13 @@ struct ModernStatementImport: View {
             Divider()
             stepContent
             Divider()
+            if isPreparing { Text("Analyse du fichier…").font(.caption).foregroundColor(.secondary) }
             footer
         }
         .navigationTitle(title)
         .frame(minWidth: 640, minHeight: 500)
         .onAppear(perform: load)
+        .onDisappear { readTask?.cancel() }
     }
 
     private var title: String {
@@ -366,6 +370,7 @@ struct ModernStatementImport: View {
     }
 
     private var canContinue: Bool {
+        guard !isPreparing else { return false }
         switch step {
         case .columns:
             return mapping.date != nil && mapping.amount != nil
@@ -384,57 +389,69 @@ struct ModernStatementImport: View {
         loaded = true
         format = statementFormatForFile(fileName: fileName) ?? .csv
         if format == .csv {
-            separator = detectCsvSeparator(content: content)
-            refreshPreview()
+            refreshPreview(detectSeparator: true)
             step = .columns
         } else {
             parse()
-            step = .account
         }
     }
 
-    private func refreshPreview() {
-        do {
-            preview = try store.engine.previewCsv(content: content, options: CsvOptions(separator: separator, hasHeader: hasHeader))
+    private func refreshPreview(detectSeparator: Bool = false) {
+        readTask?.cancel()
+        isPreparing = true
+        let content = self.content
+        let options = CsvOptions(separator: separator, hasHeader: hasHeader)
+        readTask = store.fetch({ engine in
+            let separator = detectSeparator ? detectCsvSeparator(content: content) : options.separator
+            let preview = try engine.previewCsv(content: content, options: CsvOptions(separator: separator, hasHeader: options.hasHeader))
+            return (separator, preview)
+        }, completion: { result in
+            separator = result.0
+            preview = result.1
+            isPreparing = false
             error = nil
-        } catch {
-            self.error = AppStore.message(for: error)
-        }
+        }, failure: {
+            isPreparing = false
+            error = $0
+        })
     }
 
-    @discardableResult
-    private func parse() -> Bool {
-        do {
-            let isCsv = format == .csv
-            transactions = try store.engine.parseStatement(
-                format: format,
-                content: content,
-                csvOptions: isCsv ? CsvOptions(separator: separator, hasHeader: hasHeader) : nil,
-                csvMapping: isCsv ? mapping : nil,
-                today: store.today
-            )
-            guard !transactions.isEmpty else {
+    private func parse() {
+        readTask?.cancel()
+        isPreparing = true
+        let format = self.format
+        let content = self.content
+        let options = format == .csv ? CsvOptions(separator: separator, hasHeader: hasHeader) : nil
+        let mapping = format == .csv ? self.mapping : nil
+        let today = store.today
+        readTask = store.fetch({ engine in
+            let parsed = try engine.parseStatement(format: format, content: content, csvOptions: options,
+                                                   csvMapping: mapping, today: today)
+            let sources = sourceCategories(transactions: parsed)
+            let matches = try engine.suggestCategoryMapping(sources: sources)
+            return (parsed, sources, matches)
+        }, completion: { result in
+            let (parsed, names, matches) = result
+            isPreparing = false
+            guard !parsed.isEmpty else {
                 error = "Aucune opération n'a été trouvée dans le fichier."
-                return false
+                return
             }
-            sources = sourceCategories(transactions: transactions)
-            var suggested: [String: String] = [:]
-            for match in (try? store.engine.suggestCategoryMapping(sources: sources)) ?? [] {
-                suggested[match.source] = match.categoryId ?? Self.newCategoryId
-            }
-            categoryMapping = suggested
+            transactions = parsed
+            sources = names
+            categoryMapping = Dictionary(matches.map { ($0.source, $0.categoryId ?? Self.newCategoryId) }, uniquingKeysWith: { first, _ in first })
             error = nil
-            return true
-        } catch {
-            self.error = AppStore.message(for: error)
-            return false
-        }
+            step = .account
+        }, failure: {
+            isPreparing = false
+            error = $0
+        })
     }
 
     private func next() {
         switch step {
         case .columns:
-            if parse() { step = .account }
+            parse()
         case .account:
             if accountChoice == Self.newAccountId,
                !finalBalance.trimmingCharacters(in: .whitespaces).isEmpty,
@@ -475,11 +492,14 @@ struct ModernStatementImport: View {
         }
         let request = StatementImportRequest(transactions: transactions, target: target, categoryMapping: matches)
         isImporting = true
+        let generation = store.beginFormWork()
         store.perform({ engine in try engine.importStatement(request: request) }, completion: { [store] result in
+            store.finishFormWork(generation: generation)
             let duplicates = result.duplicates > 0 ? " (\(result.duplicates) doublons ignorés)" : ""
             store.showToast("\(result.imported) opérations importées\(duplicates)")
             onClose()
         }, failure: { message in
+            store.finishFormWork(generation: generation)
             error = message
             isImporting = false
         })

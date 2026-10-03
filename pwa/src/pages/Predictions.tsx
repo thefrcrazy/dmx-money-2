@@ -1,3 +1,4 @@
+import { chartRangeError, MAX_CHART_DAYS } from '../utils/chartData';
 import { useLocalToday } from '../hooks/useLocalToday';
 import React, { useMemo, useState } from 'react';
 import { useBank } from '../context/BankContext';
@@ -297,10 +298,11 @@ const Predictions: React.FC = () => {
         const millisecondsPerDay = 1000 * 60 * 60 * 24;
         const daysToProject = Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / millisecondsPerDay));
 
-        return { today, startDate, endDate, daysToProject };
-    }, [timeRange, customEndDate, monthStartsOnFirst, localToday]);
+        return { today, startDate, endDate, daysToProject, error: chartRangeError(startDate, endDate, accounts.length) };
+    }, [timeRange, customEndDate, monthStartsOnFirst, localToday, accounts.length]);
 
     const predictionData = useMemo(() => {
+        if (projectionRange.error) return [];
         const data = [];
         // Use integers (cents) for calculations to avoid floating point errors
         const currentBalances: Record<string, number> = {};
@@ -817,6 +819,7 @@ const Predictions: React.FC = () => {
                             type="date"
                             value={customEndDate}
                             min={todayInputValue}
+                            max={format(new Date(new Date(localToday).setDate(localToday.getDate() + MAX_CHART_DAYS - 1)), 'yyyy-MM-dd')}
                             onChange={(e) => setCustomEndDate(e.target.value)}
                             className="bg-transparent border border-gray-200 dark:border-neutral-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-gray-200 focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
                         />
@@ -824,6 +827,7 @@ const Predictions: React.FC = () => {
                 </div>
             </div>
 
+            {projectionRange.error && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:bg-amber-950 dark:text-amber-100">{projectionRange.error}</p>}
             <div className="app-card p-6">
                 <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                     <div>

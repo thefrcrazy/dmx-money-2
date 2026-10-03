@@ -1,6 +1,7 @@
 //! Schéma SQLite. Les tables, colonnes et migrations de DmxMoney 1.x sont reprises à l'identique
 //! (`src-tauri/src/db.rs`) pour ouvrir une base existante sans conversion ; la version 2 ajoute
 //! uniquement les tables de synchronisation.
+//! Dynamic SQL uses only internal whitelisted identifiers; all external values are bound.
 
 use crate::error::{CoreResult, DbContext};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
@@ -13,7 +14,7 @@ pub type DbPool = SqlitePool;
 pub const DATABASE_FILE_NAME: &str = "dmxmoney2025.db";
 
 /// Version du schéma propre à DmxMoney 2 (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// Tables métier suivies par la synchronisation : (entité, table SQL).
 pub const SYNC_ENTITY_TABLES: [(&str, &str); 5] = [
@@ -53,30 +54,120 @@ pub const SYNCED_SETTINGS_COLUMNS: [&str; 24] = [
     "scheduledDueRange",
 ];
 
+/// Restrict the application directory and SQLite sidecars, including upgrades of old installs.
+pub fn protect_data_directory(path: &Path) -> CoreResult<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir_all(path)?;
+    Ok(())
+}
+fn protect_database_files(path: &Path) -> CoreResult<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)
+        {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+        for file in [
+            path.to_path_buf(),
+            std::path::PathBuf::from(format!("{}-wal", path.display())),
+            std::path::PathBuf::from(format!("{}-shm", path.display())),
+        ] {
+            match std::fs::symlink_metadata(&file) {
+                Ok(metadata) if metadata.is_file() => {
+                    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600))?
+                }
+                Ok(_) => {
+                    return Err(crate::error::CoreError::Io(
+                        "La base et ses journaux doivent être des fichiers ordinaires, sans lien symbolique.".into(),
+                    ))
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn enable_defensive_mode(connection: &mut SqliteConnection) -> Result<(), sqlx::Error> {
+    let mut handle = connection.lock_handle().await?;
+    let mut enabled: std::ffi::c_int = 0;
+    // SAFETY: SQLx's lock owns the live handle for this call. DEFENSIVE takes an int and int*;
+    // both driver and direct binding are pinned to the same libsqlite3-sys ABI in Cargo.toml.
+    let result = unsafe {
+        libsqlite3_sys::sqlite3_db_config(
+            handle.as_raw_handle().as_ptr(),
+            libsqlite3_sys::SQLITE_DBCONFIG_DEFENSIVE,
+            1 as std::ffi::c_int,
+            &mut enabled as *mut std::ffi::c_int,
+        )
+    };
+    if result != libsqlite3_sys::SQLITE_OK || enabled != 1 {
+        return Err(sqlx::Error::Protocol(
+            "Impossible d’activer la protection SQLite DEFENSIVE.".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub async fn open_pool(path: &Path) -> CoreResult<DbPool> {
+    protect_database_files(path)?;
     let options = SqliteConnectOptions::new()
         .filename(path)
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .foreign_keys(true)
+        .pragma("trusted_schema", "OFF")
         .busy_timeout(Duration::from_secs(5));
 
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
+        .after_connect(|connection, _| Box::pin(enable_defensive_mode(connection)))
         .connect_with(options)
         .await
         .ctx("ouverture de la base")?;
 
     create_tables(&pool).await?;
+    protect_database_files(path)?;
     Ok(pool)
+}
+
+/// Bounded housekeeping. Old clients have no replay deadline, so their receipts are retained.
+/// No financial row, passkey or pairing secret is removed by this operation.
+pub async fn purge_expired_companion_records(pool: &DbPool) -> CoreResult<()> {
+    let mut tx = pool.begin().await.ctx("nettoyage du compagnon")?;
+    for statement in [
+        "DELETE FROM mobile_auth_challenges WHERE id IN (SELECT id FROM mobile_auth_challenges WHERE julianday(expires_at)<=julianday('now') LIMIT 1000)",
+        "DELETE FROM mobile_pairing_tokens WHERE id IN (SELECT id FROM mobile_pairing_tokens WHERE consumed_at IS NOT NULL OR julianday(expires_at)<=julianday('now') LIMIT 1000)",
+        "DELETE FROM mobile_sessions WHERE id IN (SELECT id FROM mobile_sessions WHERE revoked_at IS NOT NULL OR julianday(expires_at)<=julianday('now') OR julianday(created_at)<=julianday('now','-30 days') LIMIT 1000)",
+        "DELETE FROM mobile_mutation_receipts WHERE id IN (SELECT id FROM mobile_mutation_receipts WHERE replay_until IS NOT NULL AND julianday(replay_until)<julianday('now') LIMIT 1000)",
+    ] { sqlx::query(statement).execute(&mut *tx).await.ctx("nettoyage du compagnon")?; }
+    tx.commit().await.ctx("nettoyage du compagnon")
 }
 
 /// Base en mémoire pour les tests : une seule connexion, jamais recyclée.
 pub async fn open_memory_pool() -> CoreResult<DbPool> {
-    let options = SqliteConnectOptions::new().in_memory(true).foreign_keys(true);
+    let options = SqliteConnectOptions::new()
+        .in_memory(true)
+        .foreign_keys(true)
+        .pragma("trusted_schema", "OFF");
 
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
+        .after_connect(|connection, _| Box::pin(enable_defensive_mode(connection)))
         .idle_timeout(None)
         .max_lifetime(None)
         .connect_with(options)
@@ -186,6 +277,16 @@ const BASE_TABLES: &[&str] = &[
 
 /// Migrations légères 1.x, dans leur ordre d'origine : (table, colonne, instruction).
 const COLUMN_MIGRATIONS: &[(&str, &str, &str)] = &[
+    (
+        "transactions",
+        "bankSource",
+        "ALTER TABLE transactions ADD COLUMN \"bankSource\" TEXT",
+    ),
+    (
+        "transactions",
+        "bankTransactionId",
+        "ALTER TABLE transactions ADD COLUMN \"bankTransactionId\" TEXT",
+    ),
     (
         "settings",
         "displayStyle",
@@ -449,9 +550,15 @@ const COMPANION_TABLES: &[&str] = &[
 ];
 
 const SYNC_TABLES: &[&str] = &[
+    "CREATE TABLE IF NOT EXISTS sync_pending_remote (
+        entity TEXT NOT NULL, record_id TEXT NOT NULL, change_json TEXT NOT NULL,
+        PRIMARY KEY(entity, record_id)
+    )",
     "CREATE TABLE IF NOT EXISTS mobile_mutation_receipts (
         id TEXT PRIMARY KEY,
-        fingerprint TEXT NOT NULL
+        fingerprint TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        replay_until TEXT
     )",
     "CREATE TABLE IF NOT EXISTS sync_control (
         id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -501,9 +608,9 @@ fn outbox_trigger(table: &str, entity: &str, action: &str, columns: Option<&str>
 }
 
 async fn column_exists(connection: &mut SqliteConnection, table: &str, column: &str) -> CoreResult<bool> {
-    let count: i64 = sqlx::query_scalar(&format!(
+    let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT count(*) FROM pragma_table_info('{table}') WHERE name = $1"
-    ))
+    )))
     .bind(column)
     .fetch_one(&mut *connection)
     .await
@@ -515,7 +622,7 @@ pub async fn create_tables(pool: &DbPool) -> CoreResult<()> {
     let mut tx = pool.begin().await.ctx("initialisation de la base")?;
 
     for statement in BASE_TABLES {
-        sqlx::query(statement)
+        sqlx::query(*statement)
             .execute(&mut *tx)
             .await
             .ctx("création des tables")?;
@@ -524,7 +631,7 @@ pub async fn create_tables(pool: &DbPool) -> CoreResult<()> {
     for (table, column, definition) in COLUMN_MIGRATIONS {
         if !column_exists(&mut tx, table, column).await? {
             log::info!("Migrating {table} table: adding {column} column");
-            sqlx::query(definition)
+            sqlx::query(*definition)
                 .execute(&mut *tx)
                 .await
                 .ctx("migration du schéma")?;
@@ -544,11 +651,34 @@ pub async fn create_tables(pool: &DbPool) -> CoreResult<()> {
     .ctx("nettoyage des secrets")?;
 
     for statement in COMPANION_TABLES.iter().chain(SYNC_TABLES) {
-        sqlx::query(statement)
+        sqlx::query(*statement)
             .execute(&mut *tx)
             .await
             .ctx("création des tables de synchronisation")?;
     }
+
+    if !column_exists(&mut tx, "mobile_mutation_receipts", "created_at").await? {
+        sqlx::query("ALTER TABLE mobile_mutation_receipts ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
+            .execute(&mut *tx)
+            .await
+            .ctx("rétention des confirmations mobiles")?;
+        // Pre-upgrade receipts retain a full retention window rather than disappearing immediately.
+        sqlx::query("UPDATE mobile_mutation_receipts SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE created_at = ''")
+            .execute(&mut *tx).await.ctx("rétention des confirmations mobiles")?;
+    }
+    if !column_exists(&mut tx, "mobile_mutation_receipts", "replay_until").await? {
+        sqlx::query("ALTER TABLE mobile_mutation_receipts ADD COLUMN replay_until TEXT")
+            .execute(&mut *tx)
+            .await
+            .ctx("rétention des confirmations mobiles")?;
+    }
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_mobile_receipts_expiry ON mobile_mutation_receipts(replay_until)")
+        .execute(&mut *tx)
+        .await
+        .ctx("rétention des confirmations mobiles")?;
+
+    sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_bank_identity ON transactions(\"accountId\", \"bankSource\", \"bankTransactionId\") WHERE \"bankSource\" IS NOT NULL AND \"bankTransactionId\" IS NOT NULL")
+        .execute(&mut *tx).await.ctx("identité des imports bancaires")?;
 
     for table in [
         "accounts",
@@ -566,7 +696,7 @@ pub async fn create_tables(pool: &DbPool) -> CoreResult<()> {
                     UPDATE sync_state SET version = version + 1 WHERE id = 1;
                  END"
             );
-            sqlx::query(&statement)
+            sqlx::query(sqlx::AssertSqlSafe(statement))
                 .execute(&mut *tx)
                 .await
                 .ctx("création des déclencheurs")?;
@@ -575,7 +705,7 @@ pub async fn create_tables(pool: &DbPool) -> CoreResult<()> {
 
     for (entity, table) in SYNC_ENTITY_TABLES {
         for action in ["INSERT", "UPDATE", "DELETE"] {
-            sqlx::query(&outbox_trigger(table, entity, action, None))
+            sqlx::query(sqlx::AssertSqlSafe(outbox_trigger(table, entity, action, None)))
                 .execute(&mut *tx)
                 .await
                 .ctx("création des déclencheurs de synchronisation")?;
@@ -588,13 +718,15 @@ pub async fn create_tables(pool: &DbPool) -> CoreResult<()> {
         .collect::<Vec<_>>()
         .join(", ");
     for (action, columns) in [("INSERT", None), ("UPDATE", Some(settings_columns.as_str()))] {
-        sqlx::query(&outbox_trigger("settings", "settings", action, columns))
-            .execute(&mut *tx)
-            .await
-            .ctx("création des déclencheurs de synchronisation")?;
+        sqlx::query(sqlx::AssertSqlSafe(outbox_trigger(
+            "settings", "settings", action, columns,
+        )))
+        .execute(&mut *tx)
+        .await
+        .ctx("création des déclencheurs de synchronisation")?;
     }
 
-    sqlx::query(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("PRAGMA user_version = {SCHEMA_VERSION}")))
         .execute(&mut *tx)
         .await
         .ctx("version du schéma")?;

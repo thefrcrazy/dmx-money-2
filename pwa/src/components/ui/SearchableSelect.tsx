@@ -1,3 +1,5 @@
+import { popoverContainer } from './DialogSurface';
+import { dismissPopoverOnEscape } from '../../utils/popoverKeyboard';
 import React, { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, Search, Check, Tag } from "lucide-react";
@@ -34,6 +36,7 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
     const [isOpen, setIsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const wrapperRef = useRef<HTMLDivElement>(null);
+    const triggerRef = useRef<HTMLButtonElement>(null);
     const popupRef = useRef<HTMLDivElement>(null);
     const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({});
 
@@ -110,7 +113,8 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
     };
 
     return (
-        <div className={`space-y-1.5 ${className} app-searchableselect`} ref={wrapperRef}>
+        <div className={`space-y-1.5 ${className} app-searchableselect`} ref={wrapperRef}
+            onKeyDown={event => dismissPopoverOnEscape(event, isOpen, () => setIsOpen(false), triggerRef.current)}>
             {label && (
                 <label className="block text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider ml-1">
                     {label}
@@ -118,7 +122,9 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
             )}
             <div className="relative">
                 <button
+                    ref={triggerRef}
                     type="button"
+                    aria-expanded={isOpen}
                     onClick={() => !disabled && setIsOpen(!isOpen)}
                     disabled={disabled}
                     className={`w-full ${sizes[size]} app-input flex items-center justify-between transition-shadow app-searchableselect-button ${disabled
@@ -181,6 +187,7 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
                                             onChange(option.id);
                                             setIsOpen(false);
                                             setSearchTerm("");
+                                            triggerRef.current?.focus();
                                         }}
                                         className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded-md transition-colors cursor-pointer app-searchableselect-option ${value === option.id
                                             ? "bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300 app-option-selected"
@@ -204,7 +211,7 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
                         </div>
                     </div>
                 </div>,
-                document.body
+                popoverContainer(wrapperRef.current)
             )}
             </div>
         </div>

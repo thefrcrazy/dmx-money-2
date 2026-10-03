@@ -153,6 +153,8 @@ pub struct Transaction {
     pub checked: bool,
     pub is_transfer: bool,
     pub linked_transaction_id: Option<String>,
+    pub bank_source: Option<String>,
+    pub bank_transaction_id: Option<String>,
 }
 
 #[uniffi::remote(Record)]
@@ -763,6 +765,8 @@ pub struct ParsedStatementTransaction {
     pub amount: f64,
     pub description: String,
     pub category: Option<String>,
+    pub bank_source: Option<String>,
+    pub bank_transaction_id: Option<String>,
 }
 
 #[uniffi::remote(Record)]

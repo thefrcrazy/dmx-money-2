@@ -1,5 +1,6 @@
 import { Account, Transaction, Category, ScheduledTransaction, Settings, Budget } from '../types';
 import { offlineStore, OfflineDataKey } from './offlineStore';
+import { mutationKeys } from './mutationDependencies';
 import { clearMobileRelay, getMobileRelayEndpoint, getMobileRelaySessionEpoch, getMobileRelaySessionGeneration, invalidateMobileRelaySession, isMobileRelayUnlocked, markMobileRelayAuthenticated, mobileRelaySessionNeedsRenewal, mobileTransportFetch, MobileRelayLockedError, restoreMobileRelaySession } from './relayTransport';
 import {
     clearMobileCompanionLocalState,
@@ -720,7 +721,7 @@ export class DatabaseService {
 
     private async requestMobileTransactions(): Promise<Transaction[]> {
         type Page = { transactions: Transaction[]; dataVersion: number; nextOffset: number | null };
-        const limit = 2000;
+        let limit = 2000;
         const maxTransactions = 1_000_000;
         for (let attempt = 0; attempt <= 2; attempt += 1) {
             let offset = 0;
@@ -730,7 +731,15 @@ export class DatabaseService {
             try {
                 while (true) {
                     const suffix = version === undefined ? '' : `&version=${version}`;
-                    const page = await this.request<Page>(`/api/transactions/page?offset=${offset}&limit=${limit}${suffix}`);
+                    let page: Page;
+                    try { page = await this.request<Page>(`/api/transactions/page?offset=${offset}&limit=${limit}${suffix}`); }
+                    catch (error) {
+                        if (error instanceof MobileHttpError && error.status === 413 && limit > 1) {
+                            limit = Math.max(1, Math.floor(limit / 2));
+                            continue;
+                        }
+                        throw error;
+                    }
                     if (!page || !Array.isArray(page.transactions) || page.transactions.length > limit
                         || !Number.isSafeInteger(page.dataVersion) || page.dataVersion < 0
                         || (version !== undefined && page.dataVersion !== version)) {
@@ -807,6 +816,7 @@ export class DatabaseService {
     private async commitMobileMutation(path: string, method: string, body?: string, settings?: Settings) {
         if (!isMobileRelayUnlocked()) await this.ensureSecureMobileSession();
         await offlineStore.commitBankMutation(path, method, body, settings);
+        window.dispatchEvent(new CustomEvent('dmxmoney-sync-issues'));
         this.flushPendingMobileMutations().catch(error => {
             if (!this.isMobileNetworkError(error)) console.warn('Mobile offline sync failed:', error);
         });
@@ -819,55 +829,96 @@ export class DatabaseService {
         this.flushPromise = (async () => {
             if (getMobileCsrfToken()) await this.adoptPendingOfflineWork();
             const mutations = await offlineStore.listMutations();
+            const blocked = new Set<string>();
             for (let index = 0; index < mutations.length;) {
                 const mutation = mutations[index];
-                if (mutation.path === '/api/settings' && mutation.method === 'PATCH') {
-                    const ids: string[] = [];
-                    let merged: SettingsMutation | null = null;
-                    let refreshSettings = false;
-
-                    while (index < mutations.length) {
-                        const candidate = mutations[index];
-                        if (candidate.path !== '/api/settings' || candidate.method !== 'PATCH') break;
-                        const parsed = parseQueuedSettingsMutation(candidate.body);
-                        if (!parsed) throw new Error('Modification des paramètres illisible. La file est conservée sur cet appareil.');
-                        merged = merged ? mergeSettingsMutations(merged, parsed) : parsed;
-                        ids.push(candidate.id);
-                        index += 1;
-                    }
-
-                    if (merged && hasSettingsMutationChanges(merged)) {
-                        const mutationToSend = {
-                            ...merged,
-                            baseRevision: merged.baseRevision,
-                        };
-                        await this.request<SettingsPatchResult>('/api/settings', {
-                            method: 'PATCH',
-                            body: JSON.stringify(serializeSettingsMutation(mutationToSend)),
-                        }, this.requestTimeoutMs);
-                        refreshSettings = true;
-                    }
-                    for (const id of ids) await offlineStore.removeMutation(id);
-                    if (refreshSettings) {
-                        window.dispatchEvent(new CustomEvent('dmxmoney-settings-refresh'));
-                    }
+                const affected = mutationKeys(mutation, false);
+                const dependencies = mutationKeys(mutation, true);
+                if (mutation.failure || [...dependencies].some(key => blocked.has(key))) {
+                    affected.forEach(key => blocked.add(key));
+                    index++;
                     continue;
                 }
-
-                await this.request(mutation.path, {
-                    method: mutation.method,
-                    body: mutation.method === 'PATCH' || mutation.method === 'POST'
-                        ? JSON.stringify({ ...JSON.parse(mutation.body || '{}'), _mutationId: mutation.id })
-                        : mutation.body,
-                }, this.requestTimeoutMs);
-                await offlineStore.removeMutation(mutation.id);
-                index += 1;
+                const group = [mutation];
+                let merged: SettingsMutation | null = null;
+                if (mutation.path === '/api/settings' && mutation.method === 'PATCH') {
+                    merged = parseQueuedSettingsMutation(mutation.body);
+                    if (!merged) throw new Error('Modification des paramètres illisible. La file est conservée sur cet appareil.');
+                    while (index + group.length < mutations.length) {
+                        const candidate = mutations[index + group.length];
+                        if (candidate.path !== '/api/settings' || candidate.method !== 'PATCH' || candidate.failure) break;
+                        const parsed = parseQueuedSettingsMutation(candidate.body);
+                        if (!parsed) throw new Error('Modification des paramètres illisible. La file est conservée sur cet appareil.');
+                        merged = mergeSettingsMutations(merged, parsed);
+                        group.push(candidate);
+                    }
+                }
+                index += group.length;
+                try {
+                    if (merged && hasSettingsMutationChanges(merged)) {
+                        const result = await this.request<SettingsPatchResult>('/api/settings', {
+                            method: 'PATCH', body: JSON.stringify(serializeSettingsMutation(merged)),
+                        }, this.requestTimeoutMs);
+                        if (result.conflicts?.length) {
+                            for (const item of group) await offlineStore.setMutationFailure(item.id, {
+                                status: 409, message: 'Certains paramètres ont changé sur un autre appareil. Vos choix restent conservés localement.', conflicts: result.conflicts,
+                            });
+                            affected.forEach(key => blocked.add(key));
+                            continue;
+                        }
+                        window.dispatchEvent(new CustomEvent('dmxmoney-settings-refresh'));
+                    } else if (!merged) {
+                        await this.request(mutation.path, {
+                            method: mutation.method,
+                            body: mutation.method === 'PATCH' || mutation.method === 'POST'
+                                ? JSON.stringify({ ...JSON.parse(mutation.body || '{}'), _mutationId: mutation.id,
+                                    _mutationCreatedAt: new Date(mutation.createdAt ?? Date.now()).toISOString() })
+                                : mutation.body,
+                        }, this.requestTimeoutMs);
+                    }
+                    for (const item of group) await offlineStore.removeMutation(item.id);
+                    this.mobileRefreshPending = true;
+                } catch (error) {
+                    if (!(error instanceof MobileHttpError) || ![400, 404, 409, 413, 422].includes(error.status)) throw error;
+                    for (const item of group) await offlineStore.setMutationFailure(item.id, { status: error.status, message: error.message });
+                    affected.forEach(key => blocked.add(key));
+                }
             }
+            window.dispatchEvent(new CustomEvent('dmxmoney-sync-issues'));
+
         })().finally(() => {
             this.flushPromise = null;
         });
 
         return this.flushPromise;
+    }
+
+    async getSyncIssues() {
+        return (await offlineStore.listMutations()).filter(item => item.failure);
+    }
+
+    async retrySyncIssue(id: string) {
+        await offlineStore.setMutationFailure(id, undefined);
+        await this.flushPendingMobileMutations();
+    }
+
+    /** Explicitly abandon the whole pending chain, only after a successful server read. */
+    async reloadServerAndDiscardPending() {
+        // Serialize against an in-flight acknowledgement before capturing the queue.
+        if (this.flushPromise) await this.flushPromise.catch(() => undefined);
+        const expectedIds = await offlineStore.listMutationIds();
+        const keys: OfflineDataKey[] = ['accounts', 'transactions', 'categories', 'budgets', 'scheduled', 'settings'];
+        const before = await this.request<SyncStatus>('/api/status');
+        const values = await Promise.all(keys.map(key => key === 'transactions' ? this.requestMobileTransactions() : this.request(`/api/${key}`)));
+        const after = await this.request<SyncStatus>('/api/status');
+        if (before.dataVersion !== after.dataVersion) throw new Error('Les données ont changé sur l’ordinateur pendant le rechargement. Réessayez.');
+        values[5] = parseSettings(values[5] as RawSettings);
+        if (!values[5]) throw new Error('Paramètres serveur invalides. Les modifications locales sont conservées.');
+        await offlineStore.replaceWithRemoteSnapshot(Object.fromEntries(keys.map((key, index) => [key, values[index]])) as never, expectedIds);
+        this.mobileRefreshPending = true;
+        window.dispatchEvent(new CustomEvent('dmxmoney-sync-issues'));
+        window.dispatchEvent(new CustomEvent('dmxmoney-settings-refresh'));
+        window.dispatchEvent(new Event('online'));
     }
 
     // Accounts
@@ -931,9 +982,16 @@ export class DatabaseService {
         ]);
     }
 
-    async updateTransaction(transaction: Transaction): Promise<void> {
+    async updateTransfer(fromTransaction: Transaction, toTransaction: Transaction, baseFrom: Transaction, baseTo: Transaction): Promise<void> {
+        if (!this.usesHttp()) throw new Error('La modification atomique des virements nécessite le compagnon Internet.');
+        await this.commitMobileMutation('/api/transfers', 'PATCH', JSON.stringify({
+            fromTransaction, toTransaction, _base: { fromTransaction: baseFrom, toTransaction: baseTo },
+        }));
+    }
+
+    async updateTransaction(transaction: Transaction, base?: Transaction): Promise<void> {
         if (this.usesHttp()) {
-            const body = JSON.stringify(transaction);
+            const body = JSON.stringify({ ...transaction, ...(base ? { _base: base } : {}) });
             await this.commitMobileMutation('/api/transactions', 'PUT', body);
             return;
         }
@@ -1069,16 +1127,17 @@ export class DatabaseService {
                 : await this.invoke<RawSettings | null>('get_settings');
             const parsed = parseSettings(res);
             if (!parsed) return cachedSettings;
+            const localSnapshot = this.usesHttp() ? await offlineStore.getSettingsSnapshot() : null;
+            const latest = localSnapshot ? parseSettings(localSnapshot.settings as RawSettings | null) : null;
+            const current = latest || parsed;
             const merged: Settings = {
-                ...parsed,
+                ...current,
                 lastSeenVersion: selectNewestVersion(
                     cachedSettings?.lastSeenVersion,
-                    parsed.lastSeenVersion
+                    current.lastSeenVersion
                 )
             };
-            const pendingMutations = this.usesHttp()
-                ? await offlineStore.listMutations()
-                : [];
+            const pendingMutations = localSnapshot?.mutations || [];
             const pendingSettingsMutations = pendingMutations
                 .filter(mutation => mutation.path === '/api/settings')
                 .map(mutation => (
@@ -1100,12 +1159,9 @@ export class DatabaseService {
             }, merged);
             if (pendingSettingsMutations.length > 0) {
                 withPendingChanges.settingsRevision = Math.min(
-                    parsed.settingsRevision || 0,
+                    current.settingsRevision || 0,
                     ...pendingSettingsMutations.map(mutation => mutation.baseRevision),
                 );
-            }
-            if (this.usesHttp()) {
-                await offlineStore.setData('settings', withPendingChanges);
             }
             return withPendingChanges;
         } catch {

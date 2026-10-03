@@ -265,6 +265,15 @@ pub fn present(application: &adw::Application, store: Rc<Store>) {
 
     // --- Hooks vers l'interface ---
     let hooks = UiHooks {
+        bridge_status: Some(Box::new({
+            let pages = pages.clone();
+            let route = route.clone();
+            move || {
+                if route.get() == Route::Settings {
+                    pages.refresh(Route::Settings);
+                }
+            }
+        })),
         toast: Some(Box::new({
             let toasts = toasts.clone();
             move |message: &str| toasts.add_toast(adw::Toast::new(message))
@@ -350,6 +359,13 @@ pub fn present(application: &adw::Application, store: Rc<Store>) {
             }
         }
     });
+    let weak_store = Rc::downgrade(&store);
+    window.connect_close_request(move |_| {
+        if let Some(store) = weak_store.upgrade() {
+            store.clear_ui_callbacks();
+        }
+        gtk::glib::Propagation::Proceed
+    });
     start_bridge(&store);
     present_whats_new(&store);
     tray::start(&store, &window);
@@ -375,10 +391,9 @@ fn apply_theme(store: &Rc<Store>) {
         Theme::Dark => adw::ColorScheme::ForceDark,
         Theme::System => adw::ColorScheme::Default,
     });
-    let store_for_theme = store.clone();
-    store.subscribe(move |_| {
+    store.subscribe(move |store| {
         let manager = adw::StyleManager::default();
-        manager.set_color_scheme(match store_for_theme.settings().theme {
+        manager.set_color_scheme(match store.settings().theme {
             Theme::Light => adw::ColorScheme::ForceLight,
             Theme::Dark => adw::ColorScheme::ForceDark,
             Theme::System => adw::ColorScheme::Default,
@@ -386,26 +401,9 @@ fn apply_theme(store: &Rc<Store>) {
     });
 }
 
-/// Démarre le pont PWA (il ne sert la PWA que si l'utilisateur l'a activé).
+/// Starts the outbound encrypted relay; Pages hosts the PWA.
 fn start_bridge(store: &Rc<Store>) {
-    crate::bridge::start(store, pwa_assets_directory());
-}
-
-fn pwa_assets_directory() -> Option<std::path::PathBuf> {
-    let mut candidates = Vec::new();
-    // AppImage et préfixes d'installation personnalisés : les ressources suivent le binaire.
-    if let Ok(executable) = std::env::current_exe() {
-        if let Some(directory) = executable.parent() {
-            candidates.push(directory.join("../share/dmx-money/pwa"));
-        }
-    }
-    candidates.extend([
-        std::path::PathBuf::from("/app/share/dmx-money/pwa"),
-        std::path::PathBuf::from("/usr/share/dmx-money/pwa"),
-        std::path::PathBuf::from("/usr/local/share/dmx-money/pwa"),
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../pwa/dist"),
-    ]);
-    candidates.into_iter().find(|path| path.join("index.html").is_file())
+    crate::bridge::start(store, None);
 }
 
 fn present_whats_new(store: &Rc<Store>) {

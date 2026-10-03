@@ -1,3 +1,4 @@
+import { v5 as uuidv5 } from 'uuid';
 import { describe, expect, test } from 'bun:test';
 import {
     filterDuplicateTransactions,
@@ -94,4 +95,22 @@ describe('importParsers', () => {
         expect(() => parseQifTransactions('!Type:Bank\nPCafe\n^')).toThrow();
         expect(() => parseDelimitedRows('"unfinished;123', ';')).toThrow();
     });
+});
+
+test('OFX FITID identity distinguishes identical purchases and includes the originating bank account', () => {
+    const input = '<OFX><FI><FID>BANK<ORG>ORG</FI><STMTRS><BANKACCTFROM><BANKID>1<ACCTID>A<ACCTTYPE>CHECKING</BANKACCTFROM><STMTTRN><DTPOSTED>20261003<TRNAMT>-10<NAME>Shop<FITID>one</STMTTRN><STMTTRN><DTPOSTED>20261003<TRNAMT>-10<NAME>Shop<FITID>two</STMTTRN></STMTRS><STMTRS><BANKACCTFROM><BANKID>1<ACCTID>B<ACCTTYPE>CHECKING</BANKACCTFROM><STMTTRN><DTPOSTED>20261003<TRNAMT>-10<NAME>Shop<FITID>one</STMTTRN></STMTRS></OFX>';
+    const parsed = parseOfxTransactions(input);
+    expect(parsed.map(item => item.bankTransactionId)).toEqual(['one', 'two', 'one']);
+    expect(parsed[0].bankSource).toBe('ofx:["BANK","ORG","1","","A","CHECKING"]');
+    expect(parsed[2].bankSource).toBe('ofx:["BANK","ORG","1","","B","CHECKING"]');
+    const existing = { ...parsed[0], id: 'old', accountId: 'local', type: 'expense' as const, amount: 10, category: '', checked: true };
+    const incoming = parsed.map(item => ({ ...item, accountId: 'local', type: 'expense' as const, amount: 10, category: '' }));
+    expect(filterDuplicateTransactions(incoming, [existing], 'local').unique.map(item => item.bankTransactionId)).toEqual(['two', 'one']);
+});
+
+
+test('reimport preserves an OFX operation manually moved to another account', () => {
+    const incoming = { date: '2026-10-03', type: 'expense' as const, amount: 10, description: 'Fictif', category: '', accountId: 'original', bankSource: 'ofx:bank', bankTransactionId: 'one' };
+    const existing = { ...incoming, id: uuidv5(JSON.stringify(['original', incoming.bankSource, incoming.bankTransactionId]), uuidv5.URL), accountId: 'moved', amount: 12, checked: true };
+    expect(filterDuplicateTransactions([incoming], [existing], 'original')).toEqual({ unique: [], duplicateCount: 1 });
 });

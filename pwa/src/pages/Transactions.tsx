@@ -1,3 +1,4 @@
+import { format } from 'date-fns';
 import React, { useState, useMemo, useCallback, useEffect, useDeferredValue } from 'react';
 import { Plus, Search, Trash2, Edit2, CheckCircle2, ArrowRightLeft, Tag, Circle, Check } from 'lucide-react';
 import Button from '../components/ui/Button';
@@ -49,6 +50,7 @@ const Transactions: React.FC = () => {
         addTransaction,
         addTransfer,
         updateTransaction,
+        updateTransfer,
         deleteTransaction,
         toggleTransactionCheck,
         processDueScheduledTransactions,
@@ -66,6 +68,7 @@ const Transactions: React.FC = () => {
     const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
     const [filterBudgets, setFilterBudgets] = useState<string[]>([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingLinked, setEditingLinked] = useState<Transaction | null>(null);
     const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [transactionToDelete, setTransactionToDelete] = useState<string | null>(null);
@@ -76,7 +79,7 @@ const Transactions: React.FC = () => {
     const [isGroupDeleteModalOpen, setIsGroupDeleteModalOpen] = useState(false);
 
     const [formData, setFormData] = useState({
-        date: new Date().toISOString().split('T')[0],
+        date: format(new Date(), 'yyyy-MM-dd'),
         description: '',
         amount: '',
         type: 'expense' as any,
@@ -248,6 +251,7 @@ const Transactions: React.FC = () => {
     const handleOpenModal = (transaction?: Transaction) => {
         if (transaction) {
             setEditingTransaction(transaction);
+            setEditingLinked(transactions.find(item => item.id === transaction.linkedTransactionId) ?? null);
             
             let toAccountId = '';
             let type = transaction.type;
@@ -278,8 +282,9 @@ const Transactions: React.FC = () => {
             });
         } else {
             setEditingTransaction(null);
+            setEditingLinked(null);
             setFormData({
-                date: new Date().toISOString().split('T')[0],
+                date: format(new Date(), 'yyyy-MM-dd'),
                 description: '',
                 amount: '',
                 type: 'expense',
@@ -389,22 +394,18 @@ const Transactions: React.FC = () => {
                     accountId: editingTransaction.type === 'income' && isTransfer ? (formData.toAccountId || formData.accountId) : formData.accountId,
                     type: isTransfer ? editingTransaction.type : formData.type as 'income' | 'expense',
                 };
-                await updateTransaction({ ...editingTransaction, ...transactionData });
-                
-                // Mettre à jour la transaction liée si elle existe
+                const updated = { ...editingTransaction, ...transactionData };
                 if (isTransfer && editingTransaction.linkedTransactionId) {
-                    const linkedTx = transactions.find(t => t.id === editingTransaction.linkedTransactionId);
-                    if (linkedTx) {
-                        await updateTransaction({
-                            ...linkedTx,
-                            date: formData.date,
-                            amount,
-                            description: formData.description,
-                            accountId: formData.toAccountId || linkedTx.accountId,
-                        });
-                    }
-                }
-                
+                    if (!editingLinked) throw new Error('La contrepartie du virement est absente. Reconnectez-vous avant de le modifier.');
+                    const linked = { ...editingLinked, date: formData.date, amount, description: formData.description,
+                        accountId: editingTransaction.type === 'income' ? formData.accountId : formData.toAccountId };
+                    const from = editingTransaction.type === 'expense' ? updated : linked;
+                    const to = editingTransaction.type === 'income' ? updated : linked;
+                    const baseFrom = editingTransaction.type === 'expense' ? editingTransaction : editingLinked;
+                    const baseTo = editingTransaction.type === 'income' ? editingTransaction : editingLinked;
+                    await updateTransfer(from, to, baseFrom, baseTo);
+                } else await updateTransaction(updated, editingTransaction);
+
                 showToast("Transaction mise à jour", "success");
             } else {
                 if (isTransfer && formData.toAccountId) {

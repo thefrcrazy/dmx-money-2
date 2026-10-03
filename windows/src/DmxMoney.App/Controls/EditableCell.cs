@@ -23,6 +23,12 @@ public sealed class EditableCell : ContentControl
     private readonly TextBlock label = new() { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBox editor = new() { Visibility = Visibility.Collapsed, BorderThickness = new Thickness(1), Padding = new Thickness(4, 2, 4, 2) };
 
+    private string? editingId;
+    private string? editingField;
+    private string? editingDescription;
+    private double? editingAmount;
+    private string? editingText;
+
     public object? Row
     {
         get => GetValue(RowProperty);
@@ -55,6 +61,7 @@ public sealed class EditableCell : ContentControl
 
     private void Apply()
     {
+        if (editingId is not null && (JournalRow?.Transaction.Id != editingId || Field != editingField)) EndEdit();
         if (JournalRow is not { } row)
         {
             label.Text = string.Empty;
@@ -81,7 +88,12 @@ public sealed class EditableCell : ContentControl
         {
             return;
         }
+        editingId = row.Transaction.Id;
+        editingField = Field;
+        editingDescription = row.Transaction.Description;
+        editingAmount = row.Transaction.Amount;
         editor.Text = Field == "amount" ? AmountInput.Text(row.Transaction.Amount, emptyWhenZero: false) : row.Transaction.Description;
+        editingText = editor.Text;
         editor.Visibility = Visibility.Visible;
         label.Visibility = Visibility.Collapsed;
         editor.SelectAll();
@@ -109,24 +121,36 @@ public sealed class EditableCell : ContentControl
             return;
         }
         var text = editor.Text.Trim();
+        var changed = text != editingText?.Trim();
+        var id = editingId;
+        var field = editingField;
+        var row = JournalRow;
+        var baseDescription = editingDescription;
+        var baseAmount = editingAmount;
+        var valid = row?.Transaction.Id == id && Field == field;
         EndEdit();
-        if (JournalRow is not { } row || App.Shell is null)
+        if (!changed || !valid || id is null || row is null || App.Shell is null)
         {
             return;
         }
         var journal = App.Shell.Journal;
-        if (Field == "amount")
+        if (field == "amount")
         {
-            journal.UpdateAmount(row.Transaction.Id, text);
+            journal.UpdateAmount(id, text, baseAmount);
         }
         else if (text.Length > 0 && text != row.Transaction.Description)
         {
-            journal.UpdateDescription(row.Transaction.Id, text);
+            journal.UpdateDescription(id, text, baseDescription);
         }
     }
 
     private void EndEdit()
     {
+        editingId = null;
+        editingField = null;
+        editingDescription = null;
+        editingAmount = null;
+        editingText = null;
         editor.Visibility = Visibility.Collapsed;
         label.Visibility = Visibility.Visible;
         Apply();

@@ -52,6 +52,8 @@ fn occurrence_transactions(item: &ScheduledTransaction, occurrence: &str) -> Vec
                     checked: false,
                     is_transfer: true,
                     linked_transaction_id: Some(to_id.clone()),
+                    bank_source: None,
+                    bank_transaction_id: None,
                 },
                 Transaction {
                     id: to_id,
@@ -64,6 +66,8 @@ fn occurrence_transactions(item: &ScheduledTransaction, occurrence: &str) -> Vec
                     checked: false,
                     is_transfer: true,
                     linked_transaction_id: Some(from_id),
+                    bank_source: None,
+                    bank_transaction_id: None,
                 },
             ]
         }
@@ -82,6 +86,8 @@ fn occurrence_transactions(item: &ScheduledTransaction, occurrence: &str) -> Vec
             checked: false,
             is_transfer: false,
             linked_transaction_id: None,
+            bank_source: None,
+            bank_transaction_id: None,
         }],
     }
 }
@@ -100,7 +106,9 @@ pub fn plan_due(item: &ScheduledTransaction, today: NaiveDate) -> ScheduledPlan 
     let mut transactions = Vec::new();
     let mut modified = false;
 
-    while next <= today {
+    let mut occurrences = 0;
+    while next <= today && occurrences < 1000 {
+        occurrences += 1;
         modified = true;
         if end.is_some_and(|end| next > end) {
             break;

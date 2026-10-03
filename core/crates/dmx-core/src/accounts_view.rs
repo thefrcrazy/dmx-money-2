@@ -1,7 +1,7 @@
 //! Page Comptes (groupes et ordre personnalisés) et résumé du menu de barre d'état.
 
 use crate::format::js_number;
-use crate::metrics::{account_balances, cents, euros};
+use crate::metrics::{account_balances, euros, wide_cents as cents};
 use crate::models::{Account, UNGROUPED_ACCOUNTS_LABEL};
 use crate::snapshot::Snapshot;
 use crate::text::{search_tokens, SearchText};
@@ -150,7 +150,12 @@ pub fn accounts_view(snapshot: &Snapshot, query: &AccountsQuery) -> AccountsView
 /// Soldes du menu de barre d'état, dans l'ordre de création des comptes.
 pub fn tray_summary(snapshot: &Snapshot) -> TraySummary {
     let balances = account_balances(snapshot);
-    let total = euros(balances.iter().map(|balance| cents(balance.current_balance)).sum());
+    let total = euros(
+        balances
+            .iter()
+            .map(|balance| cents(balance.current_balance))
+            .sum::<i128>(),
+    );
     TraySummary {
         accounts: snapshot
             .accounts

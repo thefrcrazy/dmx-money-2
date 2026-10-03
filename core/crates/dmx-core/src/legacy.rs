@@ -2,6 +2,7 @@
 //!
 //! La base d'origine est ouverte en lecture seule et copiée par `VACUUM INTO`, ce qui inclut
 //! les écritures encore dans le journal WAL si l'ancienne application tourne toujours.
+//! Dynamic SQL uses only internal whitelisted identifiers; all external values are bound.
 
 use crate::db::DATABASE_FILE_NAME;
 use crate::error::{CoreError, CoreResult, DbContext};
@@ -83,12 +84,16 @@ pub async fn inventory(path: &Path) -> CoreResult<DatabaseInventory> {
         .filename(path)
         .read_only(true)
         .foreign_keys(false)
+        .pragma("trusted_schema", "OFF")
         .connect()
         .await
         .ctx("lecture de la base DmxMoney")?;
+    crate::db::enable_defensive_mode(&mut connection)
+        .await
+        .ctx("protection de la base DmxMoney")?;
 
     async fn count(connection: &mut sqlx::SqliteConnection, table: &str) -> u32 {
-        sqlx::query_scalar::<_, i64>(&format!("SELECT count(*) FROM {table}"))
+        sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM {table}")))
             .fetch_one(&mut *connection)
             .await
             .unwrap_or(0) as u32
@@ -142,9 +147,13 @@ pub async fn copy_legacy_database(source: &Path, destination: &Path) -> CoreResu
             .filename(source)
             .read_only(true)
             .foreign_keys(false)
+            .pragma("trusted_schema", "OFF")
             .connect()
             .await
             .ctx("ouverture de la base DmxMoney 1.x")?;
+        crate::db::enable_defensive_mode(&mut connection)
+            .await
+            .ctx("protection de la base DmxMoney 1.x")?;
         sqlx::query("VACUUM INTO $1")
             .bind(destination.to_string_lossy().to_string())
             .execute(&mut connection)

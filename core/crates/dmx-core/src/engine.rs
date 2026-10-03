@@ -103,7 +103,7 @@ fn build_runtime() -> CoreResult<Runtime> {
 
 impl Engine {
     pub fn open(config: EngineConfig) -> CoreResult<Self> {
-        std::fs::create_dir_all(&config.data_dir)?;
+        db::protect_data_directory(&config.data_dir)?;
         let runtime = build_runtime()?;
         let database_path = config.data_dir.join(DATABASE_FILE_NAME);
 
@@ -134,6 +134,7 @@ impl Engine {
         }
 
         let pool = runtime.block_on(db::open_pool(&database_path))?;
+        runtime.block_on(db::purge_expired_companion_records(&pool))?;
         let engine = Self {
             runtime,
             pool,
@@ -252,11 +253,38 @@ impl Engine {
     }
 
     pub fn analytics(&self, query: &AnalyticsQuery, today: NaiveDate) -> CoreResult<AnalyticsView> {
-        Ok(analytics::analytics(&*self.snapshot()?, query, today))
+        let snapshot = self.snapshot()?;
+        let (start, end) = analytics::requested_range(
+            query.range,
+            query.custom_start.as_deref(),
+            query.custom_end.as_deref(),
+            query.month_starts_on_first,
+            today,
+        );
+        let count = snapshot
+            .accounts
+            .iter()
+            .filter(|account| crate::snapshot::is_selected(&query.accounts, &account.id))
+            .count();
+        crate::limits::graph_range(start, end, count + 1)?;
+        Ok(analytics::analytics(&snapshot, query, today))
     }
 
     pub fn predictions(&self, query: &PredictionQuery, today: NaiveDate) -> CoreResult<PredictionView> {
-        Ok(predictions::predictions(&*self.snapshot()?, query, today))
+        let snapshot = self.snapshot()?;
+        let (start, end) = predictions::requested_range(
+            query.range,
+            query.custom_end_date.as_deref(),
+            query.month_starts_on_first,
+            today,
+        );
+        let count = snapshot
+            .accounts
+            .iter()
+            .filter(|account| crate::snapshot::is_selected(&query.accounts, &account.id))
+            .count();
+        crate::limits::graph_range(start, end, count + 1)?;
+        Ok(predictions::predictions(&snapshot, query, today))
     }
 
     pub fn accounts(&self, query: &AccountsQuery) -> CoreResult<AccountsView> {
@@ -464,6 +492,14 @@ impl Engine {
         self.write(ops::save_transaction(&self.pool, draft))
     }
 
+    pub fn save_transaction_with_base(
+        &self,
+        draft: TransactionDraft,
+        base: TransactionDraft,
+    ) -> CoreResult<Vec<String>> {
+        self.write(ops::save_transaction_with_base(&self.pool, draft, base))
+    }
+
     pub fn delete_transactions(&self, ids: &[String]) -> CoreResult<()> {
         self.write(ops::delete_transactions(&self.pool, ids))
     }
@@ -475,6 +511,10 @@ impl Engine {
     pub fn toggle_transactions_checked(&self, ids: &[String]) -> CoreResult<bool> {
         let snapshot = self.snapshot()?;
         self.write(ops::toggle_transactions_checked(&self.pool, &snapshot, ids))
+    }
+
+    pub fn update_transaction_inline_with_base(&self, id: &str, edit: InlineEdit, base: InlineEdit) -> CoreResult<()> {
+        self.write(ops::update_transaction_inline_with_base(&self.pool, id, edit, base))
     }
 
     pub fn update_transaction_inline(&self, id: &str, edit: InlineEdit) -> CoreResult<()> {

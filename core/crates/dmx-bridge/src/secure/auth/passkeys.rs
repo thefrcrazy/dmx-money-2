@@ -6,8 +6,8 @@ pub(super) struct StoredCredential {
     pub(super) passkey: PasskeyCredential,
 }
 
-pub(super) async fn insert_passkey(
-    pool: &DbPool,
+pub(super) async fn insert_passkey<'e>(
+    pool: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
     passkey: &PasskeyCredential,
     device_label: Option<&str>,
 ) -> Result<String, String> {
@@ -80,7 +80,7 @@ pub(super) async fn find_passkey_by_credential_id(
     credential_id: &str,
 ) -> Result<StoredCredential, String> {
     let row = sqlx::query(
-        "SELECT id, public_key FROM mobile_passkeys
+        "SELECT id, public_key, counter FROM mobile_passkeys
          WHERE credential_id = $1 AND revoked_at IS NULL",
     )
     .bind(credential_id)
@@ -93,21 +93,23 @@ pub(super) async fn find_passkey_by_credential_id(
     let public_key = row
         .try_get::<String, _>("public_key")
         .map_err(|error| error.to_string())?;
-    let passkey = serde_json::from_str::<PasskeyCredential>(&public_key)
+    let mut passkey = serde_json::from_str::<PasskeyCredential>(&public_key)
         .map_err(|error| format!("Passkey stockée invalide: {error}"))?;
+    let counter: i64 = row.try_get("counter").map_err(|error| error.to_string())?;
+    passkey.counter = u32::try_from(counter).map_err(|_| "Compteur de passkey stocké invalide.".to_string())?;
     Ok(StoredCredential { id, passkey })
 }
 
-pub(super) async fn update_passkey_usage(
-    pool: &DbPool,
+pub(super) async fn update_passkey_usage<'e>(
+    pool: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
     id: &str,
     counter: i64,
     device_label: Option<&str>,
 ) -> Result<(), String> {
     let now = Utc::now().to_rfc3339();
-    sqlx::query(
+    let result = sqlx::query(
         "UPDATE mobile_passkeys
-         SET counter = $1,
+         SET counter = MAX(counter, $1),
              last_used_at = $2,
              device_label = CASE
                 WHEN $3 IS NOT NULL AND length($3) > 0
@@ -115,7 +117,8 @@ pub(super) async fn update_passkey_usage(
                 THEN $3
                 ELSE device_label
              END
-         WHERE id = $4",
+         WHERE id = $4 AND revoked_at IS NULL
+           AND (($1 = 0 AND counter = 0) OR $1 > counter)",
     )
     .bind(counter)
     .bind(now)
@@ -124,6 +127,9 @@ pub(super) async fn update_passkey_usage(
     .execute(pool)
     .await
     .map_err(|error| map_db_error(error, "mise à jour de passkey mobile"))?;
+    if result.rows_affected() != 1 {
+        return Err("Passkey révoquée ou compteur déjà consommé par une autre authentification.".into());
+    }
     Ok(())
 }
 
@@ -147,4 +153,59 @@ pub(in crate::secure) async fn list_passkeys(pool: &DbPool) -> Result<Vec<Mobile
             revoked_at: row.try_get::<Option<String>, _>("revoked_at").unwrap_or(None),
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn persisted_counter_is_authoritative_and_never_regresses() {
+        let pool = dmx_core::db::open_memory_pool().await.unwrap();
+        let passkey = PasskeyCredential {
+            id: CredentialId(vec![1, 2, 3]),
+            public_key_cose: passkey_auth::CosePublicKey(vec![0xa0]),
+            counter: 0,
+            transports: vec![],
+            aaguid: [0; 16],
+        };
+        let id = insert_passkey(&pool, &passkey, None).await.unwrap();
+        update_passkey_usage(&pool, &id, 5, None).await.unwrap();
+        let loaded = find_passkey_by_credential_id(&pool, &passkey.id.to_b64url())
+            .await
+            .unwrap();
+        assert_eq!(loaded.passkey.counter, 5);
+        assert!(update_passkey_usage(&pool, &id, 1, None).await.is_err());
+        assert_eq!(
+            find_passkey_by_credential_id(&pool, &passkey.id.to_b64url())
+                .await
+                .unwrap()
+                .passkey
+                .counter,
+            5
+        );
+        let mut synced = passkey;
+        synced.id = CredentialId(vec![4]);
+        let id = insert_passkey(&pool, &synced, None).await.unwrap();
+        update_passkey_usage(&pool, &id, 0, None).await.unwrap();
+        assert_eq!(
+            find_passkey_by_credential_id(&pool, &synced.id.to_b64url())
+                .await
+                .unwrap()
+                .passkey
+                .counter,
+            0
+        );
+        let (first, second) = tokio::join!(
+            update_passkey_usage(&pool, &id, 1, None),
+            update_passkey_usage(&pool, &id, 1, None)
+        );
+        assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+        sqlx::query("UPDATE mobile_passkeys SET revoked_at=? WHERE id=?")
+            .bind(Utc::now().to_rfc3339())
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(update_passkey_usage(&pool, &id, 2, None).await.is_err());
+    }
 }

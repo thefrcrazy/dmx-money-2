@@ -1,3 +1,4 @@
+import { RelayRequestQueue } from './relayRequestQueue';
 const RELAY_ENDPOINT_KEY = 'dmxmoney.remoteRelayEndpoint';
 export const MOBILE_RELAY_LOCK_STORAGE_KEY = 'dmxmoney.remoteRelayLocked';
 export const MOBILE_RELAY_SESSION_EPOCH_KEY = 'dmxmoney.remoteRelaySessionEpoch';
@@ -310,7 +311,7 @@ export const clearMobileRelay = async (): Promise<void> => {
     } finally { db.close(); }
 };
 
-export const mobileTransportFetch = async (path: string, apiBaseUrl: string, init: RequestInit): Promise<Response> => {
+const performMobileTransportFetch = async (path: string, apiBaseUrl: string, init: RequestInit): Promise<Response> => {
     const endpoint = getMobileRelayEndpoint();
     if (!endpoint || endpoint !== validateRelayEndpoint(apiBaseUrl)) {
         throw new Error('Compagnon Internet non appairé. Scannez le QR affiché dans DmxMoney sur votre ordinateur.');
@@ -361,4 +362,18 @@ export const mobileTransportFetch = async (path: string, apiBaseUrl: string, ini
         responseHeaders.delete('set-cookie');
     }
     return new Response([204, 205, 304].includes(payload.status) ? null : payload.body, { status: payload.status, headers: responseHeaders });
+};
+
+
+const requestQueue = new RelayRequestQueue(2);
+export const mobileTransportFetch = async (path: string, apiBaseUrl: string, init: RequestInit): Promise<Response> => {
+    const generation = sessionGeneration;
+    const epoch = getMobileRelaySessionEpoch();
+    // An available slot starts synchronously, so logout captures its old cookie
+    // before the caller locks locally. Queued work still checks the session epoch.
+    const release = requestQueue.tryAcquire(init.signal) ?? await requestQueue.acquire(init.signal);
+    try {
+        if (generation !== sessionGeneration || epoch !== getMobileRelaySessionEpoch()) throw new MobileRelayLockedError();
+        return await performMobileTransportFetch(path, apiBaseUrl, init);
+    } finally { release(); }
 };

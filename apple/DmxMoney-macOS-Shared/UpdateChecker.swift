@@ -1,27 +1,12 @@
 import AppKit
+import Security
 import DmxKit
 
-/// Recherche de mise à jour pour la distribution directe (hors App Store).
-///
-/// Le flux est un petit JSON publié à côté des DMG (`DmxUpdateFeedURL`, réglé par
-/// `Config/Signing.local.xcconfig`). Il donne une entrée par architecture, comme le
-/// `latest.json` de DmxMoney 1.x : un Mac Intel sous Catalina ne doit jamais recevoir le
-/// DMG Apple Silicon.
-///
-/// ```json
-/// {
-///   "version": "2.0.1",
-///   "notes": "…",
-///   "platforms": {
-///     "darwin-arm64":  { "url": "https://…-apple-silicon.dmg",  "minimumSystemVersion": "26.0" },
-///     "darwin-x86_64": { "url": "https://…-intel-catalina.dmg", "minimumSystemVersion": "10.15" }
-///   }
-/// }
-/// ```
-///
-/// Aucune dépendance externe : Sparkle 2 n'est distribué qu'en binaire macOS 11+, ce qui
-/// empêcherait l'application de se lancer sous Catalina. Le téléchargement utilise URLSession
-/// et le remplacement conserve une copie de secours jusqu’à la fin de l’installation.
+/// Distribution directe depuis les releases GitHub officielles de DmxMoney V2.
+/// Les versions proposées sont filtrées par architecture, macOS et choix stable/préversion.
+/// Le remplacement automatique exige l'équipe Apple de l'installation ; les builds ad hoc
+/// proposent un téléchargement manuel. L'ancienne app reste disponible jusqu'à confirmation
+/// du lancement de la nouvelle, puis est restaurée si ce lancement échoue.
 final class UpdateChecker: NSObject {
     static let shared = UpdateChecker()
 
@@ -73,7 +58,33 @@ final class UpdateChecker: NSObject {
     private let skippedVersionKey = "DmxSkippedUpdateVersion"
     private let includePrereleasesKey = "DmxIncludePrereleases"
 
-    var isAvailable: Bool { true }
+    var isAvailable: Bool { ProcessInfo.processInfo.environment["DMXMONEY_DATA_DIR"] == nil }
+
+    /// The existing installation supplies the expected publisher, never the feed.
+    private var expectedTeamIdentifier: String? {
+        var code: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(Bundle.main.bundleURL as CFURL, [], &code) == errSecSuccess,
+              let code else { return nil }
+        var information: CFDictionary?
+        guard SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,
+              let team = (information as? [String: Any])?[kSecCodeInfoTeamIdentifier as String] as? String,
+              team.range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil else { return nil }
+        return team
+    }
+
+    static func isTrustedFeed(_ url: URL) -> Bool {
+        guard url.scheme == "https", url.host == "api.github.com", url.user == nil, url.password == nil,
+              url.port == nil || url.port == 443, url.query == nil, url.fragment == nil else { return false }
+        return url.path == "/repos/thefrcrazy/dmx-money-2/releases"
+    }
+
+    static func isTrustedDownload(_ url: URL) -> Bool {
+        guard url.scheme == "https", url.host == "github.com", url.user == nil, url.password == nil,
+              url.port == nil || url.port == 443, url.query == nil, url.fragment == nil else { return false }
+        let components = url.path.split(separator: "/")
+        return components.count == 6 && Array(components.prefix(4)) == ["thefrcrazy", "dmx-money-2", "releases", "download"]
+            && components[4].hasPrefix("v2.") && components[5].hasSuffix(".dmg")
+    }
 
     var includePrereleases: Bool {
         get {
@@ -125,17 +136,23 @@ final class UpdateChecker: NSObject {
     // MARK: - Vérification
 
     private func check(silent: Bool) {
-        guard !isDownloading else { return }
+        guard isAvailable, !isDownloading else { return }
+        guard Self.isTrustedFeed(feedURL) else {
+            if !silent { presentFailure(URLError(.unsupportedURL)) }
+            return
+        }
         var request = URLRequest(url: feedURL)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 15
         request.setValue("DmxMoney-macOS", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
             DispatchQueue.main.async {
-                guard let data = data else {
+                guard let response = response as? HTTPURLResponse,
+                      (200...299).contains(response.statusCode), let url = response.url,
+                      Self.isTrustedFeed(url), let data, data.count <= 2 * 1024 * 1024 else {
                     if !silent { self.presentFailure(error) }
                     return
                 }
@@ -147,32 +164,10 @@ final class UpdateChecker: NSObject {
 
                 // Essai de décodage sous forme de releases GitHub
                 if let releases = try? JSONDecoder().decode([GitHubRelease].self, from: data) {
-                    // Trouver la release candidate la plus récente admissible
-                    let matching = releases.first { rel in
-                        guard !(rel.draft ?? false) else { return false }
-                        return self.allowsVersion(rel.tag_name, prerelease: rel.prerelease ?? false)
-                    }
-
-                    if let latest = matching {
-                        let version = latest.tag_name.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
-                        var platforms: [String: Feed.Build] = [:]
-                        for asset in latest.assets {
-                            if asset.name.hasSuffix("apple-silicon.dmg") {
-                                platforms["darwin-arm64"] = Feed.Build(url: asset.browser_download_url, minimumSystemVersion: "26.0")
-                            } else if asset.name.hasSuffix("intel-catalina.dmg") {
-                                platforms["darwin-x86_64"] = Feed.Build(url: asset.browser_download_url, minimumSystemVersion: "10.15")
-                            }
-                        }
-                        let feed = Feed(
-                            version: version,
-                            notes: latest.body,
-                            platforms: platforms,
-                            url: nil,
-                            minimumSystemVersion: nil
-                        )
+                    if let feed = self.compatibleFeed(releases) {
                         self.handle(feed, silent: silent)
-                        return
-                    }
+                    } else if !silent { self.presentUpToDate(AppInfo.version) }
+                    return
                 }
 
                 if !silent {
@@ -181,6 +176,26 @@ final class UpdateChecker: NSObject {
             }
         }
         .resume()
+    }
+
+    /// Filter architecture and OS before selecting the highest compatible SemVer.
+    private func compatibleFeed(_ releases: [GitHubRelease]) -> Feed? {
+        releases.compactMap { release -> Feed? in
+            guard !(release.draft ?? false), allowsVersion(release.tag_name, prerelease: release.prerelease ?? false) else { return nil }
+            let version = release.tag_name.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
+            var platforms: [String: Feed.Build] = [:]
+            for asset in release.assets where Self.isTrustedDownload(asset.browser_download_url) {
+                if asset.name.hasSuffix("apple-silicon.dmg") {
+                    platforms["darwin-arm64"] = Feed.Build(url: asset.browser_download_url, minimumSystemVersion: "26.0")
+                } else if asset.name.hasSuffix("intel-catalina.dmg") {
+                    platforms["darwin-x86_64"] = Feed.Build(url: asset.browser_download_url, minimumSystemVersion: "10.15")
+                }
+            }
+            let feed = Feed(version: version, notes: release.body, platforms: platforms, url: nil, minimumSystemVersion: nil)
+            guard let build = feed.build,
+                  build.minimumSystemVersion.map({ !AppInfo.isVersion($0, newerThan: AppInfo.systemVersion) }) ?? true else { return nil }
+            return feed
+        }.max { AppInfo.isVersion($1.version, newerThan: $0.version) }
     }
 
     private func handle(_ feed: Feed, silent: Bool) {
@@ -192,7 +207,7 @@ final class UpdateChecker: NSObject {
             return
         }
         // Pas de build pour cette architecture : rien à proposer.
-        guard let build = feed.build else { return }
+        guard let build = feed.build, Self.isTrustedDownload(build.url) else { return }
         if silent, UserDefaults.standard.string(forKey: skippedVersionKey) == feed.version {
             return
         }
@@ -219,7 +234,11 @@ final class UpdateChecker: NSObject {
         }
         alert.informativeText = text
 
-        let isWritable = FileManager.default.isWritableFile(atPath: Bundle.main.bundlePath)
+        if expectedTeamIdentifier == nil {
+            text += "\n\nCette signature ad hoc permet le téléchargement manuel. Le remplacement automatique exige la même équipe Apple que l'installation actuelle."
+            alert.informativeText = text
+        }
+        let isWritable = FileManager.default.isWritableFile(atPath: Bundle.main.bundlePath) && expectedTeamIdentifier != nil
         if isWritable {
             alert.addButton(withTitle: "Mettre à jour et redémarrer")
             alert.addButton(withTitle: "Télécharger manuellement")
@@ -349,47 +368,11 @@ final class UpdateChecker: NSObject {
 
         // Pass paths as arguments: application paths can contain quotes or shell syntax.
         // Stage a complete replacement before moving the installed application aside.
-        let script = """
-        #!/bin/sh
-        set -eu
-        PID="$1"
-        DMG="$2"
-        APP="$3"
-        WORK=""
-        MOUNT_DIR=""
-        BACKUP=""
-        cleanup() {
-            STATUS=$?
-            if [ -n "$MOUNT_DIR" ]; then /usr/bin/hdiutil detach "$MOUNT_DIR" -quiet 2>/dev/null || true; fi
-            if [ -d "$BACKUP" ] && [ ! -e "$APP" ]; then
-                mv "$BACKUP" "$APP"
-            fi
-            if [ -n "$WORK" ]; then rm -rf "$WORK"; fi
-            rm -f "$DMG" "$0"
-            if [ "$STATUS" -ne 0 ]; then
-                /usr/bin/open -n "$APP" || true
-                /usr/bin/osascript -e 'display alert "DmxMoney" message "La mise à jour a échoué. La version précédente a été conservée. Relancez le téléchargement ou installez le DMG manuellement."' || true
-            fi
+        guard let team = expectedTeamIdentifier else {
+            presentFailure(URLError(.cannotLoadFromNetwork))
+            return
         }
-        trap cleanup EXIT
-        WORK=$(/usr/bin/mktemp -d "${APP}.update.XXXXXX")
-        MOUNT_DIR="$WORK/mount"
-        BACKUP="$WORK/previous.app"
-        mkdir "$MOUNT_DIR"
-        /usr/bin/hdiutil attach "$DMG" -nobrowse -mountpoint "$MOUNT_DIR" -quiet
-        SRC_APP="$MOUNT_DIR/DmxMoney.app"
-        test -d "$SRC_APP"
-        test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$SRC_APP/Contents/Info.plist")" = "com.dmxmoney.app"
-        /usr/bin/codesign --verify --deep --strict "$SRC_APP"
-        /usr/bin/ditto "$SRC_APP" "$WORK/replacement.app"
-        while kill -0 "$PID" 2>/dev/null; do sleep 0.1; done
-        mv "$APP" "$BACKUP"
-        if ! mv "$WORK/replacement.app" "$APP"; then
-            mv "$BACKUP" "$APP"
-            exit 1
-        fi
-        /usr/bin/open -n "$APP"
-        """
+        let script = Self.installerScript
 
         let scriptURL = FileManager.default.temporaryDirectory.appendingPathComponent("dmx_restart_\(pid).sh")
         do {
@@ -398,7 +381,7 @@ final class UpdateChecker: NSObject {
 
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/bin/sh")
-            proc.arguments = [scriptURL.path, String(pid), dmgURL.path, bundlePath]
+            proc.arguments = [scriptURL.path, String(pid), dmgURL.path, bundlePath, team]
             try proc.run()
 
             NSApp.terminate(nil)
@@ -410,6 +393,75 @@ final class UpdateChecker: NSObject {
             failAlert.runModal()
         }
     }
+
+    static func reportHealthyLaunch() {
+        let arguments = CommandLine.arguments
+        guard let option = arguments.firstIndex(of: "--dmx-update-ready"), arguments.indices.contains(option + 1) else { return }
+        let marker = URL(fileURLWithPath: arguments[option + 1]).standardizedFileURL
+        let parent = marker.deletingLastPathComponent().path
+        guard marker.lastPathComponent == "launch-ready",
+              parent.hasPrefix(Bundle.main.bundlePath + ".update."),
+              !parent.dropFirst((Bundle.main.bundlePath + ".update.").count).contains("/"),
+              FileManager.default.fileExists(atPath: parent) else { return }
+        try? Data("ready".utf8).write(to: marker, options: .atomic)
+    }
+
+    static let installerScript = """
+    #!/bin/sh
+    set -eu
+    PID="$1"
+    DMG="$2"
+    APP="$3"
+    TEAM="$4"
+    WORK=""
+    MOUNT_DIR=""
+    BACKUP=""
+    COMMITTED=0
+    cleanup() {
+        STATUS=$?
+        trap - EXIT
+        if [ -n "$MOUNT_DIR" ]; then /usr/bin/hdiutil detach "$MOUNT_DIR" -quiet 2>/dev/null || true; fi
+        RESTORED=1
+        if [ "$COMMITTED" -eq 0 ] && [ -d "$BACKUP" ]; then
+            # A failed launch can leave the replacement present. Always restore the backup.
+            if [ -e "$APP" ]; then mv "$APP" "$WORK/failed.app" || RESTORED=0; fi
+            if [ "$RESTORED" -eq 1 ]; then mv "$BACKUP" "$APP" || RESTORED=0; fi
+        fi
+        if [ "$RESTORED" -eq 1 ] && [ -n "$WORK" ]; then rm -rf "$WORK"; fi
+        rm -f "$DMG" "$0"
+        if [ "$STATUS" -ne 0 ]; then
+            /usr/bin/open -n "$APP" || true
+            if [ "$RESTORED" -eq 1 ]; then
+                /usr/bin/osascript -e 'display alert "DmxMoney" message "La mise à jour a échoué. La version précédente a été conservée."' || true
+            else
+                /usr/bin/osascript -e 'display alert "DmxMoney" message "La mise à jour a échoué. La copie de secours est conservée dans le dossier de mise à jour à côté de l’application. Restaurez-la manuellement."' || true
+            fi
+        fi
+        exit "$STATUS"
+    }
+    trap cleanup EXIT
+    WORK=$(/usr/bin/mktemp -d "${APP}.update.XXXXXX")
+    MOUNT_DIR="$WORK/mount"
+    BACKUP="$WORK/previous.app"
+    mkdir "$MOUNT_DIR"
+    /usr/bin/hdiutil attach "$DMG" -nobrowse -mountpoint "$MOUNT_DIR" -quiet
+    SRC_APP="$MOUNT_DIR/DmxMoney.app"
+    test -d "$SRC_APP"
+    test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$SRC_APP/Contents/Info.plist")" = "com.dmxmoney.app"
+    /usr/bin/codesign --verify --deep --strict -R "anchor apple generic and certificate leaf[subject.OU] = \"$TEAM\" and identifier \"com.dmxmoney.app\"" "$SRC_APP"
+    /usr/bin/ditto "$SRC_APP" "$WORK/replacement.app"
+    while kill -0 "$PID" 2>/dev/null; do sleep 0.1; done
+    mv "$APP" "$BACKUP"
+    mv "$WORK/replacement.app" "$APP"
+    /usr/bin/open -n "$APP" --args --dmx-update-ready "$WORK/launch-ready"
+    ATTEMPTS=0
+    while [ ! -f "$WORK/launch-ready" ] && [ "$ATTEMPTS" -lt 60 ]; do
+        sleep 0.25
+        ATTEMPTS=$((ATTEMPTS + 1))
+    done
+    test -f "$WORK/launch-ready"
+    COMMITTED=1
+    """
 
     private func presentUpToDate(_ current: String) {
         let alert = NSAlert()

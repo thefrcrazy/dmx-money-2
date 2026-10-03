@@ -1182,3 +1182,15 @@ button, a, input, [role="button"] { -webkit-app-region: no-drag; }
     transform: translateY(0) !important;
   }
 }
+
+/* Full-viewport dialog surface; showModal owns the top layer and focus boundary. */
+dialog.app-dialog-surface {
+    margin: 0;
+    border: 0;
+    max-width: none;
+    max-height: none;
+    width: 100dvw;
+    height: 100dvh;
+    color: inherit;
+}
+dialog.app-dialog-surface::backdrop { background: transparent; }

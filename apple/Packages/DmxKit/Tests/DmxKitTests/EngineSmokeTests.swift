@@ -110,6 +110,10 @@ final class EngineSmokeTests: XCTestCase {
         store.route = .transactions
         await fulfillment(of: [processed], timeout: 5)
         subscription.cancel()
+        let balances = expectation(description: "Balance calculation completes off the UI thread")
+        let balanceSubscription = store.$balances.sink { value in if value.currentBalance == 975 { balances.fulfill() } }
+        await fulfillment(of: [balances], timeout: 5)
+        balanceSubscription.cancel()
         XCTAssertEqual(store.balances.currentBalance, 975)
         XCTAssertEqual(store.balances.checkedBalance, 1000)
         for route in AppRoute.allCases {
@@ -144,7 +148,8 @@ final class EngineSmokeTests: XCTestCase {
         XCTAssertTrue(store.isSelected(accountId: id))
     }
 
-    func testJournalClearsFiltersWithOneRefreshAndDefersHiddenChanges() throws {
+    @MainActor
+    func testJournalClearsFiltersWithOneRefreshAndDefersHiddenChanges() async throws {
         let store = AppStore(engine: try DmxEngine.openInMemory())
         let journal = JournalModel(store: store)
         journal.search = "test"
@@ -154,7 +159,11 @@ final class EngineSmokeTests: XCTestCase {
         journal.budgetStatuses = ["budgeted"]
         var refreshes = 0
         journal.onChange = { refreshes += 1 }
+        let cleared = expectation(description: "Only latest clear result is delivered")
+        journal.onChange = { refreshes += 1; cleared.fulfill() }
         journal.clearFilters()
+        await fulfillment(of: [cleared], timeout: 3)
+        journal.onChange = { refreshes += 1 }
         XCTAssertEqual(refreshes, 1)
         XCTAssertFalse(journal.hasFilters)
         journal.clearFilters()
@@ -164,7 +173,11 @@ final class EngineSmokeTests: XCTestCase {
         journal.search = "nouvelle recherche"
         journal.types = ["income"]
         XCTAssertEqual(refreshes, 1)
+        let activated = expectation(description: "Hidden page loads once when activated")
+        journal.onChange = { refreshes += 1; activated.fulfill() }
         journal.isActive = true
+        await fulfillment(of: [activated], timeout: 3)
+        journal.onChange = nil
         XCTAssertEqual(refreshes, 2)
         XCTAssertTrue(journal.hasFilters)
     }

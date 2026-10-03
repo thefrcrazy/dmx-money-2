@@ -31,7 +31,7 @@ struct DmxMoneyModernApp: App {
         // Résumé des comptes dans la barre des menus, avec le logo officiel monochrome.
         MenuBarExtra {
             if let store = launcher.store {
-                MenuBarSummary(store: store) { openWindow(id: "main") }
+                MenuBarSummary(store: store, syncNow: { launcher.cloud?.syncNow() }) { openWindow(id: "main") }
             }
         } label: {
             Image("MenuBarIcon")
@@ -75,6 +75,7 @@ final class Launcher: ObservableObject {
     func startPostLaunchTasks() {
         guard let store, !didStartPostLaunch else { return }
         didStartPostLaunch = true
+        UpdateChecker.reportHealthyLaunch()
         // Publie les raccourcis Siri auprès du système à chaque lancement : sans cet appel,
         // l'index des intentions peut rester vide pour une app installée hors de /Applications.
         DmxShortcuts.updateAppShortcutParameters()
@@ -125,6 +126,7 @@ struct DmxCommands: Commands {
         }
         CommandGroup(after: .newItem) {
             Button("Synchroniser") {
+                actions.iCloud?.syncNow()
                 store?.reload()
                 store?.refreshBridgeStatus()
             }
@@ -147,6 +149,7 @@ struct DmxCommands: Commands {
 /// Contenu de l'icône de la barre des menus : soldes, navigation, synchronisation.
 struct MenuBarSummary: View {
     @ObservedObject var store: AppStore
+    let syncNow: () -> Void
     let openMain: () -> Void
 
     var body: some View {
@@ -167,6 +170,7 @@ struct MenuBarSummary: View {
             openMain()
         }
         Button("Synchroniser") {
+            syncNow()
             store.reload()
             store.refreshBridgeStatus()
         }

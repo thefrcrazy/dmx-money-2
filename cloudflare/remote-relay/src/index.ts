@@ -1,8 +1,11 @@
 import { DurableObject } from 'cloudflare:workers';
 import { timingSafeEqual } from 'node:crypto';
+import { BodyReadTimeout, limitedText, RequestBudget, reservedResponse } from './requestBudget';
 
 const MAX_FRAME = 12 * 1024 * 1024;
-const MAX_PENDING = 8;
+// Each tiny request can produce a full 12-Mio reply. Two fixed reservations leave
+// conservative headroom for decoding/validation and runtime buffers; not a heap-size proof.
+const MAX_PENDING = 2;
 const WAIT_MS = 25_000;
 const ID = /^[a-f0-9]{32}$/;
 const HASH = /^[A-Za-z0-9_-]{43}$/;
@@ -16,22 +19,10 @@ function json(value: unknown, status = 200): Response {
   return Response.json(value, { status, headers: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' } });
 }
 
-async function limitedText(request: Request, limit: number): Promise<string | null> {
-  if (!request.body) return '';
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > limit) { await reader.cancel(); return null; }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+function busy(): Response {
+  const response = json({ error: 'relay_busy' }, 503);
+  response.headers.set('retry-after', '1');
+  return response;
 }
 
 function envelope(text: string): Envelope | null {
@@ -63,10 +54,10 @@ function equal(left: string, right: string): boolean {
 export class DeviceRelay extends DurableObject<Env> {
   private enrollment?: Enrollment;
   private readonly pending = new Map<string, Pending>();
+  private readonly budget = new RequestBudget(MAX_PENDING, 2 * MAX_FRAME);
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS rate_window (minute INTEGER PRIMARY KEY, count INTEGER NOT NULL)');
     ctx.blockConcurrencyWhile(async () => {
       this.enrollment = await ctx.storage.get<Enrollment>('enrollment');
     });
@@ -105,9 +96,6 @@ export class DeviceRelay extends DurableObject<Env> {
         if (!equal(hash, this.enrollment.desktopHash)) return json({ error: 'unauthorized' }, 401);
         await this.ctx.blockConcurrencyWhile(async () => {
           await this.ctx.storage.deleteAll();
-          // deleteAll also drops SQLite tables. This object may be enrolled again
-          // without a new constructor, so restore its empty rate-limit schema.
-          this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS rate_window (minute INTEGER PRIMARY KEY, count INTEGER NOT NULL)');
           this.enrollment = undefined;
           for (const id of this.pending.keys()) this.finish(id, json({ error: 'desktop_offline' }, 503));
           for (const socket of this.ctx.getWebSockets('desktop')) socket.close(1000, 'unenrolled');
@@ -124,30 +112,40 @@ export class DeviceRelay extends DurableObject<Env> {
       }
       if (!path.endsWith('/request') || request.method !== 'POST') return json({ error: 'not_found' }, 404);
       if (!equal(hash, this.enrollment.mobileHash)) return json({ error: 'unauthorized' }, 401);
+      // Unknown device IDs never write a schema; only an authenticated mobile does.
+      this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS rate_window (minute INTEGER PRIMARY KEY, count INTEGER NOT NULL)');
       const minute = Math.floor(Date.now() / 60_000);
       this.ctx.storage.sql.exec('DELETE FROM rate_window WHERE minute < ?', minute);
       this.ctx.storage.sql.exec('INSERT INTO rate_window (minute, count) VALUES (?, 1) ON CONFLICT(minute) DO UPDATE SET count=count+1', minute);
       const rate = this.ctx.storage.sql.exec<{count: number}>('SELECT count FROM rate_window WHERE minute=?', minute).one();
-      if (rate.count > 300 || this.pending.size >= MAX_PENDING) return json({ error: 'rate_limited' }, 429);
+      if (rate.count > 300) return json({ error: 'rate_limited' }, 429);
+      if (this.pending.size >= MAX_PENDING) return busy();
       const desktop = this.ctx.getWebSockets('desktop')[0];
       if (!desktop || desktop.readyState !== WebSocket.OPEN) return json({ error: 'desktop_offline' }, 503);
-      const text = await limitedText(request, MAX_FRAME);
-      if (text === null) return json({ error: 'too_large' }, 413);
-      const packet = envelope(text);
-      if (!packet) return json({ error: 'invalid_packet' }, 400);
-      // Recheck after reading the streamed body: multiple requests may have arrived meanwhile.
-      if (this.pending.size >= MAX_PENDING) return json({ error: 'rate_limited' }, 429);
-      if (this.pending.has(packet.id)) return json({ error: 'duplicate_request' }, 409);
-      return await new Promise<Response>(resolve => {
-        const timer = setTimeout(() => {
-          this.pending.delete(packet.id);
-          resolve(json({ error: 'desktop_timeout' }, 504));
-        }, WAIT_MS);
-        this.pending.set(packet.id, { resolve, timer });
-        try { desktop.send(JSON.stringify(packet)); }
-        catch { this.finish(packet.id, json({ error: 'desktop_offline' }, 503)); }
-      });
-    } catch { return json({ error: 'invalid_request' }, 400); }
+      const reservation = this.budget.reserve(MAX_FRAME);
+      if (!reservation) return busy();
+      let transferred = false;
+      try {
+        const text = await limitedText(request, MAX_FRAME);
+        if (text === null) return json({ error: 'too_large' }, 413);
+        const packet = envelope(text);
+        if (!packet) return json({ error: 'invalid_packet' }, 400);
+        // Recheck after reading the streamed body: requests may have arrived meanwhile.
+        if (this.pending.size >= MAX_PENDING) return busy();
+        if (this.pending.has(packet.id)) return json({ error: 'duplicate_request' }, 409);
+        const response = await new Promise<Response>(resolve => {
+          const timer = setTimeout(() => this.finish(packet.id, json({ error: 'desktop_timeout' }, 504)), WAIT_MS);
+          this.pending.set(packet.id, { resolve, timer });
+          try { desktop.send(JSON.stringify(packet)); }
+          catch { this.finish(packet.id, json({ error: 'desktop_offline' }, 503)); }
+        });
+        const output = reservedResponse(response, reservation);
+        transferred = true;
+        return output;
+      } finally { if (!transferred) reservation.release(); }
+    } catch (error) { return error instanceof BodyReadTimeout
+      ? json({ error: 'body_timeout' }, 408)
+      : json({ error: 'invalid_request' }, 400); }
   }
 
   webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
@@ -156,7 +154,12 @@ export class DeviceRelay extends DurableObject<Env> {
       socket.close(1009, 'frame too large'); return;
     }
     const packet = envelope(message);
-    if (packet) this.finish(packet.id, json(packet));
+    if (packet && this.pending.has(packet.id)) {
+      // Forward the validated encrypted text directly, without another large JSON stringify.
+      this.finish(packet.id, new Response(message, { headers: {
+        'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
+      } }));
+    }
   }
 
   webSocketClose(socket: WebSocket): void {
@@ -202,16 +205,32 @@ export default {
           'access-control-max-age': '600', 'vary': 'Origin', 'cache-control': 'no-store',
         } });
       }
+      const browserResponse = (response: Response) => {
+        if (!pagesOrigin) return response;
+        const headers = new Headers(response.headers);
+        headers.set('access-control-allow-origin', env.COMPANION_ORIGIN);
+        headers.set('vary', 'Origin');
+        return new Response(response.body, { status: response.status, headers });
+      };
+      const expectedMethod = route[2] === 'connect' ? request.method === 'GET'
+        : route[2] === 'request' ? request.method === 'POST'
+        : request.method === 'POST' || request.method === 'DELETE';
+      if (!expectedMethod) return browserResponse(json({ error: 'method_not_allowed' }, 405));
+      // Limit all device IDs before constructing a Durable Object. Rate bindings
+      // share counters within each Cloudflare location, not a global exact quota.
+      const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
+      const [clientLimit, serviceLimit] = await Promise.all([
+        env.REQUEST_LIMIT.limit({ key: ip }), env.SERVICE_LIMIT.limit({ key: 'all-relays' }),
+      ]);
+      if (!clientLimit.success || !serviceLimit.success) return browserResponse(json({ error: 'rate_limited' }, 429));
+      if (route[2] !== 'enroll' && !/^Bearer [A-Za-z0-9_-]{43}$/.test(request.headers.get('authorization') ?? '')) {
+        return browserResponse(json({ error: 'unauthorized' }, 401));
+      }
       if (route[2] === 'enroll') {
         const result = await env.ENROLLMENT_LIMIT.limit({ key: request.headers.get('cf-connecting-ip') ?? 'unknown' });
         if (!result.success) return json({ error: 'rate_limited' }, 429);
       }
-      const response = await env.RELAYS.getByName(route[1]).fetch(request);
-      if (!pagesOrigin) return response;
-      const headers = new Headers(response.headers);
-      headers.set('access-control-allow-origin', env.COMPANION_ORIGIN);
-      headers.set('vary', 'Origin');
-      return new Response(response.body, { status: response.status, headers });
+      return browserResponse(await env.RELAYS.getByName(route[1]).fetch(request));
     }
     if (url.pathname.startsWith('/relay/')) return json({ error: 'not_found' }, 404);
     if (url.pathname === '/' || url.pathname === '/mobile') return Response.redirect(`${url.origin}/mobile/`, 302);

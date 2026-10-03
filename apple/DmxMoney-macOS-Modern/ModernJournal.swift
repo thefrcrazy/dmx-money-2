@@ -14,6 +14,9 @@ struct ModernJournal: View {
             filters
             Divider()
             table
+                .overlay {
+                    if model.isLoading && model.view == nil { ProgressView("Chargement du journal…") }
+                }
         }
         .onAppear(perform: updateRows)
         .onChange(of: model.rowsRevision) { _, _ in updateRows() }
@@ -120,7 +123,7 @@ struct ModernJournal: View {
 
             TableColumn("Description", value: \.transaction.description) { row in
                 InlineTextCell(value: row.transaction.description, prompt: "Description") { text in
-                    model.updateDescription(row.transaction.id, text)
+                    model.updateDescription(row.transaction.id, text, baseDescription: row.transaction.description)
                 }
             }
             .width(min: 140, ideal: 260)
@@ -134,7 +137,7 @@ struct ModernJournal: View {
                 ) { text in
                     // Le signe vient du type d'opération : on n'envoie que la valeur absolue.
                     let value = AmountInput.parse(text).map { AmountInput.text(abs($0)) } ?? text
-                    model.updateAmount(row.transaction.id, text: value)
+                    model.updateAmount(row.transaction.id, text: value, baseAmount: row.transaction.amount)
                 }
             }
             .width(min: 90, ideal: 110)
@@ -258,6 +261,9 @@ struct InlineTextCell: View {
     let commit: (String) -> Void
 
     @State private var draft: String
+    @State private var baseline: String
+    @State private var submitted: String?
+    @EnvironmentObject private var store: AppStore
     @FocusState private var isFocused: Bool
 
     init(
@@ -273,6 +279,7 @@ struct InlineTextCell: View {
         self.color = color
         self.commit = commit
         _draft = State(initialValue: value)
+        _baseline = State(initialValue: value)
     }
 
     var body: some View {
@@ -284,17 +291,24 @@ struct InlineTextCell: View {
             .focused($isFocused)
             .onSubmit(send)
             .onChange(of: isFocused) { _, focused in
-                if !focused { send() }
+                if focused { baseline = value; submitted = nil }
+                else { send() }
             }
             // La valeur du noyau reprend la main quand elle change ailleurs.
             .onChange(of: value) { _, new in
-                if !isFocused { draft = new }
+                if !isFocused { draft = new; baseline = new; submitted = nil }
             }
     }
 
     private func send() {
         let trimmed = draft.trimmingCharacters(in: .whitespaces)
-        guard trimmed != value.trimmingCharacters(in: .whitespaces) else { return }
+        guard trimmed != value.trimmingCharacters(in: .whitespaces), submitted != draft else { return }
+        guard value == baseline else {
+            draft = value; baseline = value
+            store.errorMessage = "Cette valeur a changé pendant la saisie. Vérifiez-la avant de recommencer."
+            return
+        }
+        submitted = draft
         commit(draft)
     }
 }
