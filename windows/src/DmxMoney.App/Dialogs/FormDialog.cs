@@ -16,7 +16,7 @@ public sealed class FormDialog : ContentDialog
 
     private readonly FormViewModel model;
     private bool submitting;
-    private readonly ContentPresenter presenter;
+    private readonly ContentControl presenter;
     private readonly ProgressRing progress = new() { Width = 20, Height = 20 };
     private readonly TextBlock error = new()
     {
@@ -36,11 +36,12 @@ public sealed class FormDialog : ContentDialog
         CloseButtonText = model.ShowsSubmit ? "Annuler" : "Fermer";
         DefaultButton = model.ShowsSubmit ? ContentDialogButton.Primary : ContentDialogButton.Close;
 
-        presenter = new ContentPresenter
+        presenter = new ContentControl
         {
             Content = model,
             ContentTemplate = TemplateFor(model),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            IsTabStop = false,
         };
         var stack = new StackPanel();
         stack.Children.Add(presenter);

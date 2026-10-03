@@ -5,6 +5,7 @@ namespace Microsoft.UI.Xaml
     public enum TextTrimming { CharacterEllipsis }
     public enum Visibility { Visible, Collapsed }
     public enum FocusState { Programmatic }
+    public enum TextWrapping { Wrap }
     public readonly record struct Thickness(double A, double B = 0, double C = 0, double D = 0);
     public sealed class DependencyProperty(string name, PropertyMetadata metadata)
     {
@@ -28,13 +29,22 @@ namespace Microsoft.UI.Xaml
         public VerticalAlignment VerticalAlignment { get; set; }
         public HorizontalAlignment HorizontalAlignment { get; set; }
         public Visibility Visibility { get; set; }
+        public double Width { get; set; }
+        public double Height { get; set; }
+        public Thickness Margin { get; set; }
         public event EventHandler<Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs>? DoubleTapped;
     }
 }
 namespace Microsoft.UI.Xaml.Controls
 {
     public enum TextAlignment { Right }
-    public class ContentControl : Microsoft.UI.Xaml.FrameworkElement { public object? Content { get; set; } public Microsoft.UI.Xaml.HorizontalAlignment HorizontalContentAlignment { get; set; } }
+    public class Control : Microsoft.UI.Xaml.FrameworkElement
+    {
+        public bool IsEnabled { get; set; } = true;
+        public bool IsTabStop { get; set; } = true;
+        public Microsoft.UI.Xaml.HorizontalAlignment HorizontalContentAlignment { get; set; }
+    }
+    public class ContentControl : Control { public object? Content { get; set; } public Microsoft.UI.Xaml.DataTemplate? ContentTemplate { get; set; } }
     public class Grid : Microsoft.UI.Xaml.FrameworkElement { public List<object> Children { get; } = new(); }
     public class TextBlock : Microsoft.UI.Xaml.FrameworkElement
     {
@@ -42,6 +52,8 @@ namespace Microsoft.UI.Xaml.Controls
         public object? Foreground { get; set; }
         public object? FontWeight { get; set; }
         public Microsoft.UI.Xaml.TextTrimming TextTrimming { get; set; }
+        public Microsoft.UI.Xaml.TextWrapping TextWrapping { get; set; }
+        public double FontSize { get; set; }
     }
     public class TextBox : Microsoft.UI.Xaml.FrameworkElement
     {

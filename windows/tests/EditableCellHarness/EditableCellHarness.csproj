@@ -3,5 +3,8 @@
     <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
-  <ItemGroup><Compile Include="../../src/DmxMoney.App/Controls/EditableCell.cs" Link="EditableCell.cs" /></ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../src/DmxMoney.App/Controls/EditableCell.cs" Link="EditableCell.cs" />
+    <Compile Include="../../src/DmxMoney.App/Dialogs/FormDialog.cs" Link="FormDialog.cs" />
+  </ItemGroup>
 </Project>

@@ -72,9 +72,9 @@ public sealed class WindowsPlatformServices : IPlatformServices
     public async Task<(string Content, string FileName)?> PickImportFileAsync()
     {
         var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
-        foreach (var extension in new[] { ".dmx", ".json", ".csv", ".qif", ".ofx", ".txt" })
+        foreach (var supportedExtension in new[] { ".dmx", ".json", ".csv", ".qif", ".ofx", ".txt" })
         {
-            picker.FileTypeFilter.Add(extension);
+            picker.FileTypeFilter.Add(supportedExtension);
         }
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(window));
         var file = await picker.PickSingleFileAsync();

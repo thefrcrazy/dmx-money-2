@@ -47,3 +47,4 @@ var changedField = new EditableCell { Field = "description", Row = Row("A") };
 Call(changedField, "BeginEdit"); Editor(changedField).Text = "12"; changedField.Field = "amount"; Call(changedField, "Commit");
 Require(App.Shell.Journal.Writes.Count == 0, "Changing the field committed an old draft"); cases++;
 Console.WriteLine($"EditableCell: {cases} guard/cancellation/baseline cases passed against the real class.");
+await FormDialogCases.Run();

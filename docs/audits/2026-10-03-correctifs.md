@@ -90,7 +90,7 @@ Sources : `windows/src`, `windows/tests`, `linux/dmx-money-gtk/src`, `linux/dmx-
 - Rust noyau/bridge/FFI : **166 tests réussis**, un smoke réseau ignoré ; format et Clippy all-targets `-D warnings` réussis.
 - PWA : **119 tests réussis**, 572 assertions ; TypeScript, ESLint et build de production réussis.
 - Worker : **16 tests réussis** sous Miniflare, dont délai réel de 25 s ; typage réussi.
-- .NET : **73 tests réussis** avec la FFI host fraîche ; 11 scénarios EditableCell séparés.
+- .NET : **73 tests réussis** avec la FFI host fraîche ; 11 scénarios EditableCell et assertions du vrai FormDialog sur le traitement asynchrone séparés.
 - Apple : **30 XCTest réussis**, build moderne ARM/ad hoc vérifié ; AppKit typé sur ARM et tests du script updater/entitlements réussis.
 - GTK : quatre tests unitaires, 20 cycles de libération de contrôles réels ; vérification host du tray ksni 0.3.6.
 - Interface Mac pilotée avec `DMXMONEY_DATA_DIR` et bundle fictif distinct : édition concurrente, recherche, budget, échéancier, analyses. iCloud, compagnon et updater désactivés dans ce dossier. À la fermeture, l’outil a repris la fenêtre installée ; le pilotage a été arrêté sans modification de cette fenêtre.
