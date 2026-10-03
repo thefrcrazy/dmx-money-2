@@ -1,4 +1,3 @@
-using System.Text;
 using DmxMoney.ViewModels;
 using Microsoft.UI.Xaml;
 using Velopack;
@@ -21,7 +20,6 @@ public sealed class WindowsPlatformServices : IPlatformServices
     public WindowsPlatformServices(Window window)
     {
         this.window = window;
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
     }
 
     public bool UpdateAvailable => pending is not null;
@@ -74,9 +72,9 @@ public sealed class WindowsPlatformServices : IPlatformServices
     public async Task<(string Content, string FileName)?> PickImportFileAsync()
     {
         var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
-        foreach (var extension in new[] { ".dmx", ".json", ".csv", ".qif", ".ofx", ".txt" })
+        foreach (var supportedExtension in new[] { ".dmx", ".json", ".csv", ".qif", ".ofx", ".txt" })
         {
-            picker.FileTypeFilter.Add(extension);
+            picker.FileTypeFilter.Add(supportedExtension);
         }
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(window));
         var file = await picker.PickSingleFileAsync();
@@ -84,28 +82,16 @@ public sealed class WindowsPlatformServices : IPlatformServices
         {
             return null;
         }
+        var extension = Path.GetExtension(file.Name).ToLowerInvariant();
+        var maxMiB = extension is ".dmx" or ".json" ? 64 : 16;
+        var maxBytes = (long)maxMiB * 1024 * 1024;
+        if ((await file.GetBasicPropertiesAsync()).Size > (ulong)maxBytes) throw new IOException($"Le fichier dépasse la limite de {maxMiB} Mio.");
         await using var stream = await file.OpenStreamForReadAsync();
-        using var memory = new MemoryStream();
-        await stream.CopyToAsync(memory);
-        return (DecodeText(memory.ToArray()), file.Name);
+        return (await ImportText.ReadBoundedAsync(stream, maxMiB), file.Name);
     }
 
     /// <summary>Les relevés bancaires sont souvent encodés en Windows-1252.</summary>
-    public static string DecodeText(byte[] bytes)
-    {
-        foreach (var encoding in new[] { new UTF8Encoding(false, true), (Encoding)Encoding.GetEncoding(1252), Encoding.Latin1 })
-        {
-            try
-            {
-                var text = encoding.GetString(bytes);
-                return text.StartsWith('﻿') ? text[1..] : text;
-            }
-            catch (DecoderFallbackException)
-            {
-            }
-        }
-        return string.Empty;
-    }
+    public static string DecodeText(byte[] bytes) => ImportText.Decode(bytes);
 
     public void CopyToClipboard(string text)
     {

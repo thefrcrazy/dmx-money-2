@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useId } from 'react';
 import { CheckCircle, AlertCircle, ChevronDown, ChevronUp, Info } from 'lucide-react';
 import Button from './Button';
+import DialogSurface from './DialogSurface';
 
 interface AlertModalProps {
     isOpen: boolean;
@@ -21,10 +22,12 @@ const AlertModal: React.FC<AlertModalProps> = ({
 }) => {
     const [showDetails, setShowDetails] = useState(false);
 
+    const titleId = useId();
+
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200 app-modal-overlay">
+        <DialogSurface onClose={onClose} labelledBy={titleId} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200 app-modal-overlay">
             <div className="app-card w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 app-modal-content app-alert-modal">
                 <div className="p-6 app-modal-body">
                     <div className="text-center">
@@ -39,7 +42,7 @@ const AlertModal: React.FC<AlertModalProps> = ({
                             )}
                         </div>
 
-                        <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2 app-alert-title">
+                        <h3 id={titleId} className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2 app-alert-title">
                             {title}
                         </h3>
 
@@ -90,7 +93,7 @@ const AlertModal: React.FC<AlertModalProps> = ({
                     </Button>
                 </div>
             </div>
-        </div>
+        </DialogSurface>
     );
 };
 

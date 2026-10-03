@@ -200,16 +200,20 @@ public sealed partial class SettingsViewModel : PageViewModel
     [RelayCommand]
     private async Task ImportDataAsync()
     {
-        var picked = await Store.Platform.PickImportFileAsync();
-        if (picked is null)
+        try
         {
-            return;
+            var picked = await Store.Platform.PickImportFileAsync();
+            if (picked is null)
+            {
+                return;
+            }
+            var (content, fileName) = picked.Value;
+            var extension = Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant();
+            Store.Present(extension is "dmx" or "json"
+                ? new FormRequest.RestoreBackup(content, fileName)
+                : new FormRequest.StatementImport(content, fileName));
         }
-        var (content, fileName) = picked.Value;
-        var extension = Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant();
-        Store.Present(extension is "dmx" or "json"
-            ? new FormRequest.RestoreBackup(content, fileName)
-            : new FormRequest.StatementImport(content, fileName));
+        catch (Exception error) { Store.ErrorMessage = EngineStore.Message(error); }
     }
 
     // --- À propos ---

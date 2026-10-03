@@ -17,7 +17,7 @@ use crate::snapshot::Snapshot;
 use crate::text::{collapse_whitespace, normalize_search};
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParsedStatementTransaction {
@@ -26,37 +26,48 @@ pub struct ParsedStatementTransaction {
     pub amount: f64,
     pub description: String,
     pub category: Option<String>,
+    #[serde(rename = "bankSource", default)]
+    pub bank_source: Option<String>,
+    #[serde(rename = "bankTransactionId", default)]
+    pub bank_transaction_id: Option<String>,
 }
 
 // --- CSV ---
 
 /// Découpe un CSV avec guillemets (séparateurs et retours à la ligne autorisés entre guillemets).
 pub fn parse_delimited_rows(content: &str, separator: char, has_header: bool) -> Vec<Vec<String>> {
-    let input = content.strip_prefix('\u{feff}').unwrap_or(content);
-    let chars: Vec<char> = input.chars().collect();
+    scan_delimited_rows(content, separator, has_header, usize::MAX).0
+}
 
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    let mut row: Vec<String> = Vec::new();
+/// Scan all rows for an exact count while retaining only the requested preview rows.
+fn scan_delimited_rows(content: &str, separator: char, has_header: bool, keep: usize) -> (Vec<Vec<String>>, usize) {
+    let mut chars = content.strip_prefix('\u{feff}').unwrap_or(content).chars().peekable();
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
     let mut cell = String::new();
+    let mut count = 0;
+    let mut header = has_header;
     let mut in_quotes = false;
-
-    let push_row = |row: &mut Vec<String>, cell: &mut String, rows: &mut Vec<Vec<String>>| {
+    let mut push_row = |row: &mut Vec<String>, cell: &mut String, rows: &mut Vec<Vec<String>>| {
         row.push(cell.trim().to_string());
         cell.clear();
         if row.iter().any(|value| !value.is_empty()) {
-            rows.push(std::mem::take(row));
-        } else {
-            row.clear();
+            if header {
+                header = false;
+            } else {
+                count += 1;
+                if rows.len() < keep {
+                    rows.push(std::mem::take(row));
+                }
+            }
         }
+        row.clear();
     };
-
-    let mut index = 0;
-    while index < chars.len() {
-        let character = chars[index];
+    while let Some(character) = chars.next() {
         if character == '"' {
-            if in_quotes && chars.get(index + 1) == Some(&'"') {
+            if in_quotes && chars.peek() == Some(&'"') {
                 cell.push('"');
-                index += 1;
+                chars.next();
             } else {
                 in_quotes = !in_quotes;
             }
@@ -64,24 +75,18 @@ pub fn parse_delimited_rows(content: &str, separator: char, has_header: bool) ->
             row.push(cell.trim().to_string());
             cell.clear();
         } else if (character == '\n' || character == '\r') && !in_quotes {
-            if character == '\r' && chars.get(index + 1) == Some(&'\n') {
-                index += 1;
+            if character == '\r' && chars.peek() == Some(&'\n') {
+                chars.next();
             }
             push_row(&mut row, &mut cell, &mut rows);
         } else {
             cell.push(character);
         }
-        index += 1;
     }
-
     if !cell.is_empty() || !row.is_empty() {
         push_row(&mut row, &mut cell, &mut rows);
     }
-
-    if has_header && !rows.is_empty() {
-        rows.remove(0);
-    }
-    rows
+    (rows, count)
 }
 
 /// Montant bancaire : `1 234,56 €`, `1,234.56`, `-12,5`… Une valeur illisible vaut 0.
@@ -172,6 +177,7 @@ pub fn parse_qif_date(value: &str, today: NaiveDate) -> String {
 }
 
 pub fn parse_qif_transactions(content: &str, _today: NaiveDate) -> CoreResult<Vec<ParsedStatementTransaction>> {
+    crate::limits::import_size(content)?;
     #[derive(Default)]
     struct Current {
         touched: bool,
@@ -200,6 +206,8 @@ pub fn parse_qif_transactions(content: &str, _today: NaiveDate) -> CoreResult<Ve
                 .filter(|description| !description.is_empty())
                 .unwrap_or_else(|| "Transaction QIF".to_string()),
             category: taken.category.filter(|category| !category.is_empty()),
+            bank_source: None,
+            bank_transaction_id: None,
         });
         Ok(())
     };
@@ -275,6 +283,7 @@ fn parse_ofx_date(value: &str) -> Option<String> {
 }
 
 pub fn parse_ofx_transactions(content: &str, _today: NaiveDate) -> CoreResult<Vec<ParsedStatementTransaction>> {
+    crate::limits::import_size(content)?;
     let lower = content.to_ascii_lowercase();
     let marker = "<stmttrn>";
     let starts: Vec<usize> = lower
@@ -296,6 +305,31 @@ pub fn parse_ofx_transactions(content: &str, _today: NaiveDate) -> CoreResult<Ve
                 .map(|next| next - marker.len())
                 .unwrap_or(content.len());
             let block = &content[*start..end];
+            let prefix = &lower[..*start];
+            let scope_start = prefix
+                .rfind("<stmtrs>")
+                .into_iter()
+                .chain(prefix.rfind("<ccstmtrs>"))
+                .max()
+                .unwrap_or(0);
+            let scope = &content[scope_start..end];
+            let account = ofx_tag_value(scope, "ACCTID");
+            let fitid = ofx_tag_value(block, "FITID");
+            let bank_source = (!account.is_empty() && !fitid.is_empty()).then(|| {
+                format!(
+                    "ofx:{}",
+                    serde_json::to_string(&[
+                        ofx_tag_value(content, "FID"),
+                        ofx_tag_value(content, "ORG"),
+                        ofx_tag_value(scope, "BANKID"),
+                        ofx_tag_value(scope, "BRANCHID"),
+                        account,
+                        ofx_tag_value(scope, "ACCTTYPE"),
+                    ])
+                    .expect("string array is serializable")
+                )
+            });
+            let bank_transaction_id = bank_source.as_ref().map(|_| fitid);
             let name = collapse_whitespace(&ofx_tag_value(block, "NAME"));
             let memo = collapse_whitespace(&ofx_tag_value(block, "MEMO"));
             let description = if !memo.is_empty() && memo != name {
@@ -323,6 +357,8 @@ pub fn parse_ofx_transactions(content: &str, _today: NaiveDate) -> CoreResult<Ve
                 })?,
                 description,
                 category: None,
+                bank_source,
+                bank_transaction_id,
             })
         })
         .collect()
@@ -339,6 +375,8 @@ pub struct ImportTransactionInput {
     pub category: String,
     pub account_id: Option<String>,
     pub checked: bool,
+    pub bank_source: Option<String>,
+    pub bank_transaction_id: Option<String>,
 }
 
 pub fn transaction_fingerprint(
@@ -362,38 +400,56 @@ pub fn filter_duplicate_transactions(
     existing: &[Transaction],
     fallback_account_id: &str,
 ) -> (Vec<ImportTransactionInput>, u32) {
-    let mut seen: HashSet<String> = existing
-        .iter()
-        .map(|transaction| {
-            transaction_fingerprint(
+    let mut remaining: HashMap<String, usize> = HashMap::new();
+    let mut identities: HashSet<(String, String, String)> = HashSet::new();
+    let existing_ids: HashSet<&str> = existing.iter().map(|transaction| transaction.id.as_str()).collect();
+    for transaction in existing {
+        if let (Some(source), Some(id)) = (&transaction.bank_source, &transaction.bank_transaction_id) {
+            identities.insert((transaction.account_id.clone(), source.clone(), id.clone()));
+        }
+        *remaining
+            .entry(transaction_fingerprint(
                 &transaction.date,
                 &transaction.account_id,
                 transaction.transaction_type,
                 transaction.amount,
                 &transaction.description,
-            )
-        })
-        .collect();
-
+            ))
+            .or_default() += 1;
+    }
     let mut unique = Vec::new();
     let mut duplicates = 0;
     for transaction in incoming {
         let account_id = transaction
             .account_id
             .as_deref()
-            .filter(|account_id| !account_id.is_empty())
+            .filter(|id| !id.is_empty())
             .unwrap_or(fallback_account_id);
-        let key = transaction_fingerprint(
-            &transaction.date,
-            account_id,
-            transaction.kind,
-            transaction.amount,
-            &transaction.description,
-        );
-        if seen.insert(key) {
-            unique.push(transaction);
+        let duplicate = if let (Some(source), Some(id)) = (&transaction.bank_source, &transaction.bank_transaction_id) {
+            // Bank identity wins: two FITIDs with identical values are distinct purchases.
+            // A later manual move keeps its stable ID: reimport must preserve that edit too.
+            existing_ids.contains(bank_import_id(account_id, Some(source), Some(id)).as_str())
+                || !identities.insert((account_id.to_string(), source.clone(), id.clone()))
         } else {
+            let key = transaction_fingerprint(
+                &transaction.date,
+                account_id,
+                transaction.kind,
+                transaction.amount,
+                &transaction.description,
+            );
+            let count = remaining.entry(key).or_default();
+            if *count > 0 {
+                *count -= 1;
+                true
+            } else {
+                false
+            }
+        };
+        if duplicate {
             duplicates += 1;
+        } else {
+            unique.push(transaction);
         }
     }
     (unique, duplicates)
@@ -469,18 +525,18 @@ pub struct CsvPreview {
 }
 
 pub fn preview_csv(content: &str, options: CsvOptions) -> CoreResult<CsvPreview> {
-    let rows = parse_delimited_rows(content, options.separator, options.has_header);
-    if rows.is_empty() {
+    crate::limits::import_size(content)?;
+    let (preview, row_count) = scan_delimited_rows(content, options.separator, options.has_header, 5);
+    if preview.is_empty() {
         return Err(CoreError::import(if options.has_header {
             "Le fichier ne contient que l'en-tête."
         } else {
             "Le fichier est vide."
         }));
     }
-    let preview: Vec<Vec<String>> = rows.iter().take(5).cloned().collect();
     Ok(CsvPreview {
         column_count: preview.iter().map(Vec::len).max().unwrap_or(0) as u32,
-        row_count: rows.len() as u32,
+        row_count: row_count as u32,
         rows: preview,
     })
 }
@@ -491,6 +547,7 @@ pub fn parse_statement(
     csv: Option<(CsvOptions, CsvColumnMapping)>,
     today: NaiveDate,
 ) -> CoreResult<Vec<ParsedStatementTransaction>> {
+    crate::limits::import_size(content)?;
     match format {
         StatementFormat::Qif => parse_qif_transactions(content, today),
         StatementFormat::Ofx => parse_ofx_transactions(content, today),
@@ -535,6 +592,8 @@ pub fn parse_statement(
                             description
                         },
                         category: (!category.is_empty()).then_some(category),
+                        bank_source: None,
+                        bank_transaction_id: None,
                     })
                 })
                 .collect()
@@ -603,19 +662,32 @@ pub struct StatementImportResult {
 
 /// Solde initial d'un nouveau compte pour que le solde final corresponde au relevé.
 pub fn initial_balance_from_final(transactions: &[ParsedStatementTransaction], final_balance: f64) -> f64 {
-    let mut seen = HashSet::new();
+    let mut identities = HashSet::new();
     let net: i128 = transactions
         .iter()
-        .filter(|transaction| {
-            seen.insert((
-                transaction.date.as_str(),
-                cents(transaction.amount),
-                normalize_search(&collapse_whitespace(&transaction.description)),
-            ))
-        })
+        .filter(
+            |transaction| match (&transaction.bank_source, &transaction.bank_transaction_id) {
+                (Some(source), Some(id)) => identities.insert((source, id)),
+                _ => true,
+            },
+        )
         .map(|transaction| i128::from(cents(transaction.amount)))
         .sum();
     (i128::from(cents(final_balance)) - net) as f64 / 100.0
+}
+
+/// Stable across desktop/mobile and independent imports of the same bank record.
+pub fn bank_import_id(account: &str, source: Option<&str>, id: Option<&str>) -> String {
+    match (source, id) {
+        (Some(source), Some(id)) => uuid::Uuid::new_v5(
+            &uuid::Uuid::NAMESPACE_URL,
+            serde_json::to_string(&[account, source, id])
+                .expect("string array serializable")
+                .as_bytes(),
+        )
+        .to_string(),
+        _ => uuid::Uuid::new_v4().to_string(),
+    }
 }
 
 pub async fn import_statement(pool: &DbPool, request: StatementImportRequest) -> CoreResult<StatementImportResult> {
@@ -750,6 +822,8 @@ pub async fn import_statement(pool: &DbPool, request: StatementImportRequest) ->
                 .unwrap_or_else(|| default_category.clone()),
             account_id: Some(account_id.clone()),
             checked: true,
+            bank_source: transaction.bank_source.clone(),
+            bank_transaction_id: transaction.bank_transaction_id.clone(),
         })
         .collect();
 
@@ -758,7 +832,11 @@ pub async fn import_statement(pool: &DbPool, request: StatementImportRequest) ->
         repo::insert_transaction(
             &mut tx,
             &Transaction {
-                id: uuid::Uuid::new_v4().to_string(),
+                id: bank_import_id(
+                    &account_id,
+                    input.bank_source.as_deref(),
+                    input.bank_transaction_id.as_deref(),
+                ),
                 date: input.date.clone(),
                 account_id: account_id.clone(),
                 transaction_type: input.kind,
@@ -768,6 +846,8 @@ pub async fn import_statement(pool: &DbPool, request: StatementImportRequest) ->
                 checked: input.checked,
                 is_transfer: false,
                 linked_transaction_id: None,
+                bank_source: input.bank_source.clone(),
+                bank_transaction_id: input.bank_transaction_id.clone(),
             },
         )
         .await?;
@@ -830,7 +910,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn duplicated_lines_do_not_change_the_final_balance_of_a_new_account() {
+    async fn identical_purchases_keep_multiplicity_and_final_balance() {
         let pool = open_memory_pool().await.unwrap();
         ensure_initial_data(&pool).await.unwrap();
         let transaction = ParsedStatementTransaction {
@@ -838,6 +918,8 @@ mod tests {
             amount: -20.0,
             description: "Café".into(),
             category: None,
+            bank_source: None,
+            bank_transaction_id: None,
         };
         let result = import_statement(
             &pool,
@@ -853,9 +935,9 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!((result.imported, result.duplicates), (1, 1));
+        assert_eq!((result.imported, result.duplicates), (2, 0));
         let snapshot = crate::snapshot::load(&pool).await.unwrap();
-        assert_eq!(snapshot.accounts[0].initial_balance, 120.0);
+        assert_eq!(snapshot.accounts[0].initial_balance, 140.0);
         assert_eq!(crate::metrics::balance_summary(&snapshot, &[]).current_balance, 100.0);
     }
 
@@ -876,6 +958,8 @@ mod tests {
                         amount,
                         description: "Test".into(),
                         category: None,
+                        bank_source: None,
+                        bank_transaction_id: None,
                     }],
                     target: ImportTarget::New {
                         name: "Compte".into(),
@@ -903,6 +987,8 @@ mod tests {
                 amount: -12.34,
                 description: "Cafe".into(),
                 category: Some("Restaurants".into()),
+                bank_source: None,
+                bank_transaction_id: None,
             }]
         );
         assert!(parse_qif_transactions("!Type:Bank\n", today()).is_err());
@@ -922,6 +1008,8 @@ mod tests {
                 amount: -42.5,
                 description: "SHOP & CO - Card".into(),
                 category: None,
+                bank_source: None,
+                bank_transaction_id: None,
             }]
         );
     }
@@ -939,6 +1027,8 @@ mod tests {
             checked: true,
             is_transfer: false,
             linked_transaction_id: None,
+            bank_source: None,
+            bank_transaction_id: None,
         }];
         let incoming = ImportTransactionInput {
             date: "2026-05-18".into(),
@@ -948,11 +1038,13 @@ mod tests {
             category: "food".into(),
             account_id: None,
             checked: true,
+            bank_source: None,
+            bank_transaction_id: None,
         };
         let (unique, duplicates) =
             filter_duplicate_transactions(vec![incoming.clone(), incoming], &existing, "account-1");
-        assert!(unique.is_empty());
-        assert_eq!(duplicates, 2);
+        assert_eq!(unique.len(), 1);
+        assert_eq!(duplicates, 1);
     }
 
     #[tokio::test]

@@ -1,5 +1,5 @@
-import React from 'react';
-import { createPortal } from 'react-dom';
+import React, { useId } from 'react';
+import DialogSurface from './DialogSurface';
 import { CalendarDays, Check, Sparkles, X } from 'lucide-react';
 import { CHANGELOG, VersionUpdate } from '../../constants/changelog';
 import { ICONS } from '../../constants/icons';
@@ -16,15 +16,13 @@ const ReleaseNotesModal: React.FC<ReleaseNotesModalProps> = ({
     onClose,
     versionData = CHANGELOG[0]
 }) => {
+    const titleId = useId();
     if (!isOpen) return null;
 
-    return createPortal(
-        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/35 p-0 backdrop-blur-sm animate-in fade-in duration-200 sm:items-center sm:p-4">
+    return (
+        <DialogSurface onClose={onClose} labelledBy={titleId} className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/35 p-0 backdrop-blur-sm animate-in fade-in duration-200 sm:items-center sm:p-4">
             <div
                 className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full flex-col overflow-hidden rounded-b-none rounded-t-2xl border border-primary-100/70 border-x-0 border-b-0 bg-white shadow-2xl animate-in slide-in-from-bottom-6 duration-200 dark:border-white/10 dark:bg-neutral-950 sm:max-h-[82vh] sm:max-w-xl sm:rounded-2xl sm:border"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="release-notes-title"
             >
                 <div className="sticky top-0 z-10 border-b border-primary-100/80 bg-white px-4 py-3 dark:border-white/10 dark:bg-neutral-950 sm:px-5">
                     <div className="flex items-start justify-between gap-3">
@@ -40,7 +38,7 @@ const ReleaseNotesModal: React.FC<ReleaseNotesModalProps> = ({
                                 </span>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
-                                <h2 id="release-notes-title" className="min-w-0 text-lg font-bold leading-snug text-gray-950 dark:text-white sm:truncate sm:text-xl">
+                                <h2 id={titleId} className="min-w-0 text-lg font-bold leading-snug text-gray-950 dark:text-white sm:truncate sm:text-xl">
                                     {versionData.title}
                                 </h2>
                                 <span className="shrink-0 rounded-md bg-primary-50 px-1.5 py-0.5 text-[11px] font-semibold text-primary-600 dark:bg-primary-500/10 dark:text-primary-300">
@@ -114,8 +112,7 @@ const ReleaseNotesModal: React.FC<ReleaseNotesModalProps> = ({
                     </Button>
                 </div>
             </div>
-        </div>,
-        document.body
+        </DialogSurface>
     );
 };
 

@@ -4,7 +4,7 @@
 DMX_ENTITLEMENTS_SUFFIX =
 // Conteneur CloudKit (ex. iCloud.com.dmxmoney.app) : vide = synchronisation iCloud indisponible.
 DMX_ICLOUD_CONTAINER =
-// Flux personnalisé : vide = releases GitHub V2 par défaut.
+// Releases GitHub officielles V2 : vide = URL par défaut ; les autres origines sont refusées.
 DMX_UPDATE_FEED_URL =
 
 // Les valeurs locales doivent suivre les défauts pour ne pas être écrasées.

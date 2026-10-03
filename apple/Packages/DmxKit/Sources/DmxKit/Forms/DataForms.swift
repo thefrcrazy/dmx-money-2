@@ -24,10 +24,14 @@ public enum AppInfo {
             let core: [Int]
             let prerelease: [String]?
 
-            init(_ raw: String) {
-                let cleaned = raw.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
+            init?(_ raw: String) {
+                let cleaned = raw.trimmingCharacters(in: CharacterSet(charactersIn: "vV ")).split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)[0]
                 let parts = cleaned.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: true)
-                core = parts[0].split(separator: ".").map { Int($0.filter(\.isNumber)) ?? 0 }
+                guard !cleaned.isEmpty, !parts.isEmpty else { return nil }
+                let numbers = parts[0].split(separator: ".", omittingEmptySubsequences: false)
+                let parsed = numbers.compactMap { Int($0) }
+                guard !parsed.isEmpty, parsed.count == numbers.count, parsed.allSatisfy({ $0 >= 0 }) else { return nil }
+                core = parsed
                 if parts.count > 1 {
                     prerelease = parts[1].split(separator: ".").map(String.init)
                 } else {
@@ -56,8 +60,8 @@ public enum AppInfo {
                         guard index < preB.count else { return true }
                         let compA = preA[index]
                         let compB = preB[index]
-                        let numA = Int(compA.filter(\.isNumber))
-                        let numB = Int(compB.filter(\.isNumber))
+                        let numA = Int(compA)
+                        let numB = Int(compB)
                         if let nA = numA, let nB = numB, nA != nB {
                             return nA > nB
                         }
@@ -70,7 +74,8 @@ public enum AppInfo {
             }
         }
 
-        return SemVer(candidate).isNewerThan(SemVer(current))
+        guard let candidate = SemVer(candidate), let current = SemVer(current) else { return false }
+        return candidate.isNewerThan(current)
     }
 }
 
@@ -160,6 +165,7 @@ struct RestoreBackupForm: View {
     @State private var mode: RestoreMode = .replace
     @State private var error: String?
     @State private var isWorking = false
+    @State private var readTask: StoreReadTask?
 
     init(content: String, fileName: String, onClose: @escaping () -> Void) {
         self.content = content
@@ -173,6 +179,7 @@ struct RestoreBackupForm: View {
             submitTitle: mode == .replace ? "Remplacer mes données" : "Fusionner",
             error: error,
             submitDisabled: summary == nil || isWorking,
+            cancelDisabled: isWorking,
             onCancel: onClose,
             onSubmit: submit
         ) {
@@ -202,15 +209,17 @@ struct RestoreBackupForm: View {
                 }
                 .labelsHidden()
                 .pickerStyle(SegmentedPickerStyle())
+                .disabled(isWorking)
             }
             Text(mode == .replace
                  ? "Toutes les données actuelles seront remplacées par celles de la sauvegarde."
-                 : "Les éléments de la sauvegarde sont ajoutés ; les éléments déjà présents sont conservés.")
+                 : "Les éléments absents de la sauvegarde sont conservés. À identifiant identique, la sauvegarde remplace l’élément actuel.")
                 .font(.system(size: 12))
                 .foregroundColor(mode == .replace ? DmxColors.warning : .secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .onAppear(perform: inspect)
+        .onDisappear { readTask?.cancel() }
     }
 
     private func count(_ value: UInt32, _ label: String) -> some View {
@@ -224,21 +233,23 @@ struct RestoreBackupForm: View {
     }
 
     private func inspect() {
-        do {
-            summary = try store.engine.inspectBackup(content: content)
-        } catch {
-            self.error = "Le fichier de sauvegarde est corrompu. (\(AppStore.message(for: error)))"
-        }
+        guard readTask == nil else { return }
+        let content = self.content
+        readTask = store.fetch({ try $0.inspectBackup(content: content) }, completion: { summary = $0 },
+                               failure: { error = "Le fichier de sauvegarde est illisible. (\($0))" })
     }
 
     private func submit() {
         isWorking = true
         let content = self.content
         let mode = self.mode
+        let generation = store.beginFormWork()
         store.perform({ engine in try engine.restoreBackup(content: content, mode: mode) }, completion: { [store] _ in
+            store.finishFormWork(generation: generation)
             store.showToast("Import réussi")
             onClose()
         }, failure: { message in
+            store.finishFormWork(generation: generation)
             error = message
             isWorking = false
         })
@@ -302,6 +313,8 @@ struct StatementImportWizard: View {
     @State private var finalBalance = ""
     @State private var error: String?
     @State private var isImporting = false
+    @State private var isPreparing = false
+    @State private var readTask: StoreReadTask?
 
     init(content: String, fileName: String, onClose: @escaping () -> Void) {
         self.content = content
@@ -316,7 +329,7 @@ struct StatementImportWizard: View {
             stepIndicator
             Divider()
             VStack(alignment: .leading, spacing: 14) {
-                stepContent
+                stepContent.disabled(isImporting)
                 if let error = error {
                     HStack(spacing: 6) {
                         DmxIcon("AlertTriangle", size: 13)
@@ -327,9 +340,11 @@ struct StatementImportWizard: View {
             }
             .padding(20)
             Divider()
+            if isPreparing { Text("Analyse du fichier…").font(.caption).foregroundColor(.secondary) }
             footer
         }
         .onAppear(perform: load)
+        .onDisappear { readTask?.cancel() }
     }
 
     // MARK: Structure
@@ -350,7 +365,7 @@ struct StatementImportWizard: View {
                 Text(fileName).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
             }
             Spacer()
-            IconButton("X", action: onClose)
+            IconButton("X", action: onClose).disabled(isImporting)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
@@ -615,6 +630,7 @@ struct StatementImportWizard: View {
     // MARK: Logique
 
     private var canContinue: Bool {
+        guard !isPreparing else { return false }
         switch step {
         case .columns: return mapping.date != nil && mapping.amount != nil
         case .account:
@@ -629,57 +645,69 @@ struct StatementImportWizard: View {
         loaded = true
         format = statementFormatForFile(fileName: fileName) ?? .csv
         if format == .csv {
-            separator = detectCsvSeparator(content: content)
-            refreshPreview()
+            refreshPreview(detectSeparator: true)
             step = .columns
         } else {
             parse()
+        }
+    }
+
+    private func refreshPreview(detectSeparator: Bool = false) {
+        readTask?.cancel()
+        isPreparing = true
+        let content = self.content
+        let options = CsvOptions(separator: separator, hasHeader: hasHeader)
+        readTask = store.fetch({ engine in
+            let separator = detectSeparator ? detectCsvSeparator(content: content) : options.separator
+            let preview = try engine.previewCsv(content: content, options: CsvOptions(separator: separator, hasHeader: options.hasHeader))
+            return (separator, preview)
+        }, completion: { result in
+            separator = result.0
+            preview = result.1
+            isPreparing = false
+            error = nil
+        }, failure: {
+            isPreparing = false
+            error = $0
+        })
+    }
+
+    private func parse() {
+        readTask?.cancel()
+        isPreparing = true
+        let format = self.format
+        let content = self.content
+        let options = format == .csv ? CsvOptions(separator: separator, hasHeader: hasHeader) : nil
+        let mapping = format == .csv ? self.mapping : nil
+        let today = store.today
+        readTask = store.fetch({ engine in
+            let parsed = try engine.parseStatement(format: format, content: content, csvOptions: options,
+                                                   csvMapping: mapping, today: today)
+            let sources = sourceCategories(transactions: parsed)
+            let matches = try engine.suggestCategoryMapping(sources: sources)
+            return (parsed, sources, matches)
+        }, completion: { result in
+            let (parsed, names, matches) = result
+            isPreparing = false
+            guard !parsed.isEmpty else {
+                error = "Aucune opération n'a été trouvée dans le fichier."
+                return
+            }
+            transactions = parsed
+            sources = names
+            categoryMapping = Dictionary(matches.map { ($0.source, $0.categoryId ?? Self.newCategoryId) }, uniquingKeysWith: { first, _ in first })
+            error = nil
             step = .account
-        }
-    }
-
-    private func refreshPreview() {
-        do {
-            preview = try store.engine.previewCsv(content: content, options: CsvOptions(separator: separator, hasHeader: hasHeader))
-            error = nil
-        } catch {
-            self.error = AppStore.message(for: error)
-        }
-    }
-
-    @discardableResult
-    private func parse() -> Bool {
-        do {
-            let isCsv = format == .csv
-            transactions = try store.engine.parseStatement(
-                format: format,
-                content: content,
-                csvOptions: isCsv ? CsvOptions(separator: separator, hasHeader: hasHeader) : nil,
-                csvMapping: isCsv ? mapping : nil,
-                today: store.today
-            )
-            guard !transactions.isEmpty else {
-                error = "Aucune transaction n'a été trouvée dans le fichier."
-                return false
-            }
-            sources = sourceCategories(transactions: transactions)
-            var suggested: [String: String] = [:]
-            for match in (try? store.engine.suggestCategoryMapping(sources: sources)) ?? [] {
-                suggested[match.source] = match.categoryId ?? Self.newCategoryId
-            }
-            categoryMapping = suggested
-            error = nil
-            return true
-        } catch {
-            self.error = AppStore.message(for: error)
-            return false
-        }
+        }, failure: {
+            isPreparing = false
+            error = $0
+        })
     }
 
     private func next() {
         switch step {
         case .columns:
-            if parse() { step = .account }
+            parse()
         case .account:
             if accountChoice == Self.newAccountId,
                !finalBalance.trimmingCharacters(in: .whitespaces).isEmpty,
@@ -717,11 +745,14 @@ struct StatementImportWizard: View {
         }
         let request = StatementImportRequest(transactions: transactions, target: target, categoryMapping: matches)
         isImporting = true
+        let generation = store.beginFormWork()
         store.perform({ engine in try engine.importStatement(request: request) }, completion: { [store] result in
+            store.finishFormWork(generation: generation)
             let duplicates = result.duplicates > 0 ? " (\(result.duplicates) doublons ignorés)" : ""
             store.showToast("\(result.imported) transactions importées\(duplicates)")
             onClose()
         }, failure: { message in
+            store.finishFormWork(generation: generation)
             error = message
             isImporting = false
         })

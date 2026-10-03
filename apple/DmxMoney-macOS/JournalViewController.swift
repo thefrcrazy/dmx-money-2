@@ -50,6 +50,7 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
     private var rowIndexes: [String: Int] = [:]
     private var cancellables = Set<AnyCancellable>()
     private var isApplyingSelection = false
+    private var editing: (field: NSTextField, transactionID: String, rowsRevision: UInt64)?
 
     init(store: AppStore, model: JournalModel) {
         self.store = store
@@ -139,6 +140,9 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
 
     private func reload() {
         guard isViewLoaded else { return }
+        // Clear the token before abortEditing can deliver an end-editing callback.
+        editing = nil
+        tableView.window?.makeFirstResponder(tableView)
         rows = model.rows
         rowIndexes = Dictionary(rows.enumerated().map { ($0.element.transaction.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
         tableView.reloadData()
@@ -233,7 +237,9 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
 
     func control(_ control: NSControl, textShouldBeginEditing fieldEditor: NSText) -> Bool {
         let index = tableView.row(for: control)
-        if control.identifier == Self.amountField, rows.indices.contains(index) {
+        guard let field = control as? NSTextField, rows.indices.contains(index) else { return false }
+        editing = (field, rows[index].transaction.id, model.rowsRevision)
+        if control.identifier == Self.amountField {
             fieldEditor.string = AmountInput.text(rows[index].transaction.amount, emptyWhenZero: false)
         }
         return true
@@ -241,8 +247,10 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
 
     func controlTextDidEndEditing(_ notification: Notification) {
         guard let field = notification.object as? NSTextField else { return }
-        let index = tableView.row(for: field)
-        guard rows.indices.contains(index) else { return }
+        guard let edit = editing, edit.field === field else { return }
+        editing = nil
+        guard edit.rowsRevision == model.rowsRevision,
+              let index = rowIndexes[edit.transactionID], rows.indices.contains(index) else { return }
         let row = rows[index]
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -251,7 +259,7 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
                 field.stringValue = row.transaction.description
                 return
             }
-            DispatchQueue.main.async { self.model.updateDescription(row.transaction.id, text) }
+            DispatchQueue.main.async { self.model.updateDescription(row.transaction.id, text, baseDescription: row.transaction.description) }
         } else if field.identifier == Self.amountField {
             let display = Money.signed(row.transaction.amount, kind: row.transaction.transactionType)
             guard let amount = AmountInput.parse(text), amount != row.transaction.amount else {
@@ -259,7 +267,7 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
                 return
             }
             DispatchQueue.main.async {
-                if !self.model.updateAmount(row.transaction.id, text: text) {
+                if !self.model.updateAmount(row.transaction.id, text: text, baseAmount: row.transaction.amount) {
                     field.stringValue = display
                 }
             }
@@ -409,8 +417,8 @@ struct JournalEmptyState: View {
         VStack(spacing: 10) {
             EmptyStateView(
                 icon: "Search",
-                title: "Aucune transaction",
-                message: model.hasFilters ? "Aucun résultat pour vos filtres actuels." : "Commencez par ajouter une transaction ou importez un relevé bancaire."
+                title: model.isLoading ? "Chargement du journal…" : "Aucune transaction",
+                message: model.isLoading ? nil : model.hasFilters ? "Aucun résultat pour vos filtres actuels." : "Commencez par ajouter une transaction ou importez un relevé bancaire."
             )
             if !model.hasFilters {
                 Button(action: { store.present(.transaction(id: nil)) }) {

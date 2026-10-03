@@ -1,3 +1,5 @@
+import { popoverContainer } from './DialogSurface';
+import { dismissPopoverOnEscape } from '../../utils/popoverKeyboard';
 import React, { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { Calendar as CalendarIcon } from "lucide-react";
@@ -208,10 +210,12 @@ const Input: React.FC<InputProps> = ({
             onChange(event);
         }
         setIsCalendarOpen(false);
+        inputRef.current?.focus();
     };
 
     return (
-        <div className={`space-y-1.5 ${containerClassName}`} ref={containerRef}>
+        <div className={`space-y-1.5 ${containerClassName}`} ref={containerRef}
+            onKeyDown={event => dismissPopoverOnEscape(event, isCalendarOpen, () => setIsCalendarOpen(false), inputRef.current)}>
             {label && (
                 <label htmlFor={inputId} className="block text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider ml-1">
                     {label}
@@ -263,10 +267,10 @@ const Input: React.FC<InputProps> = ({
                         <Calendar 
                             selectedDate={value && typeof value === "string" && isValid(parseISO(value)) ? parseISO(value) : new Date()} 
                             onDateSelect={handleDateSelect}
-                            onClose={() => setIsCalendarOpen(false)}
+                            onClose={() => { setIsCalendarOpen(false); inputRef.current?.focus(); }}
                         />
                     </div>,
-                    document.body
+                    popoverContainer(containerRef.current)
                 )}
             </div>
         </div>

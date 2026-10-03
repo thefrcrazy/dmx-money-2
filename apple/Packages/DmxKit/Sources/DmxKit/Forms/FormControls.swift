@@ -8,6 +8,7 @@ public struct FormSheet<Content: View>: View {
     private let submitTitle: String
     private let error: String?
     private let submitDisabled: Bool
+    private let cancelDisabled: Bool
     private let onCancel: () -> Void
     private let onSubmit: () -> Void
     private let content: Content
@@ -17,6 +18,7 @@ public struct FormSheet<Content: View>: View {
         submitTitle: String,
         error: String?,
         submitDisabled: Bool = false,
+        cancelDisabled: Bool = false,
         onCancel: @escaping () -> Void,
         onSubmit: @escaping () -> Void,
         @ViewBuilder content: () -> Content
@@ -25,6 +27,7 @@ public struct FormSheet<Content: View>: View {
         self.submitTitle = submitTitle
         self.error = error
         self.submitDisabled = submitDisabled
+        self.cancelDisabled = cancelDisabled
         self.onCancel = onCancel
         self.onSubmit = onSubmit
         self.content = content()
@@ -36,6 +39,7 @@ public struct FormSheet<Content: View>: View {
                 Text(title).font(.system(size: 17, weight: .semibold))
                 Spacer()
                 IconButton("X", action: onCancel)
+                    .disabled(cancelDisabled)
             }
             .padding(.horizontal, 20)
             .padding(.top, 16)
@@ -57,6 +61,7 @@ public struct FormSheet<Content: View>: View {
                 Spacer()
                 Button(action: onCancel) { Text("Annuler") }
                     .buttonStyle(DmxButtonStyle(.secondary))
+                    .disabled(cancelDisabled)
                 Button(action: onSubmit) { Text(submitTitle) }
                     .buttonStyle(DmxButtonStyle(.primary))
                     .disabled(submitDisabled)

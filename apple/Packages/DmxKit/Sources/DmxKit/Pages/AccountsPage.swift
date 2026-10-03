@@ -3,26 +3,27 @@ import SwiftUI
 public final class AccountsModel: PageModel {
     public var search = "" {
         willSet { objectWillChange.send() }
-        didSet { refresh() }
+        didSet { if oldValue != search { setNeedsRefresh(debounce: true) } }
     }
 
     public var types: [String] = [] {
         willSet { objectWillChange.send() }
-        didSet { refresh() }
+        didSet { setNeedsRefresh() }
     }
 
     public private(set) var view: AccountsView? = nil {
         willSet { objectWillChange.send() }
     }
 
-    public override init(store: AppStore) {
+    public init(store: AppStore, active: Bool = true) {
         super.init(store: store)
-        refresh()
+        isActive = active
+        if active { refresh() } else { setNeedsRefresh() }
     }
 
     public override func refresh() {
         let query = AccountsQuery(search: search, types: types)
-        view = store.read { engine in try engine.accounts(query: query) }
+        load({ try $0.accounts(query: query) }) { [weak self] in self?.view = $0 }
     }
 }
 
@@ -124,7 +125,7 @@ public struct AccountsPage: View {
                         EmptyStateView(icon: "Search", title: "Aucun compte ne correspond aux filtres.")
                     }
                 } else {
-                    VStack(alignment: .leading, spacing: 24) {
+                    AdaptiveStack(alignment: .leading, spacing: 24) {
                         ForEach(view.groups, id: \.name) { section in
                             groupSection(section)
                         }
@@ -147,7 +148,7 @@ public struct AccountsPage: View {
                     .frame(maxWidth: .infinity, minHeight: 64)
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(DmxPalette.separator, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
             } else {
-                VStack(spacing: 16) {
+                AdaptiveStack(spacing: 16) {
                     ForEach(Array(section.accounts.chunked(columns).enumerated()), id: \.offset) { row in
                         HStack(alignment: .top, spacing: 16) {
                             ForEach(row.element, id: \.account.id) { card in

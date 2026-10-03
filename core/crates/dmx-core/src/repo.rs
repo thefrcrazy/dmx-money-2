@@ -2,6 +2,7 @@
 //!
 //! Les écritures prennent une connexion (souvent une transaction SQL ouverte par l'appelant)
 //! afin de composer des opérations atomiques.
+//! Dynamic SQL uses only internal whitelisted identifiers; all external values are bound.
 
 use crate::error::{CoreError, CoreResult, DbContext};
 use crate::models::{
@@ -88,6 +89,8 @@ pub fn transaction_from_row(row: &SqliteRow) -> Transaction {
         checked: row_bool(row, "checked"),
         is_transfer: row_bool(row, "isTransfer"),
         linked_transaction_id: row_opt_reference(row, "linkedTransactionId"),
+        bank_source: row_opt_reference(row, "bankSource"),
+        bank_transaction_id: row_opt_reference(row, "bankTransactionId"),
     }
 }
 
@@ -138,6 +141,9 @@ pub async fn list_accounts<'e>(executor: impl Executor<'e, Database = Sqlite>) -
 }
 
 pub async fn insert_account(connection: &mut SqliteConnection, account: &Account) -> CoreResult<()> {
+    crate::limits::text(&account.id, crate::limits::MAX_ID_BYTES, "L’identifiant")?;
+    crate::limits::text(&account.name, crate::limits::MAX_DESCRIPTION_BYTES, "Le libellé")?;
+    crate::limits::account(account)?;
     validate_money(account.initial_balance)?;
     sqlx::query(
         "INSERT OR IGNORE INTO accounts (id, name, \"type\", \"initialBalance\", color, icon) VALUES ($1, $2, $3, $4, $5, $6)",
@@ -155,6 +161,9 @@ pub async fn insert_account(connection: &mut SqliteConnection, account: &Account
 }
 
 pub async fn update_account(connection: &mut SqliteConnection, account: &Account) -> CoreResult<()> {
+    crate::limits::text(&account.id, crate::limits::MAX_ID_BYTES, "L’identifiant")?;
+    crate::limits::text(&account.name, crate::limits::MAX_DESCRIPTION_BYTES, "Le libellé")?;
+    crate::limits::account(account)?;
     validate_money(account.initial_balance)?;
     sqlx::query(
         "UPDATE accounts SET name = $1, \"type\" = $2, \"initialBalance\" = $3, color = $4, icon = $5 WHERE id = $6",
@@ -215,7 +224,7 @@ pub async fn get_transaction(connection: &mut SqliteConnection, id: &str) -> Cor
     Ok(row.as_ref().map(transaction_from_row))
 }
 
-const INSERT_TRANSACTION: &str = "INTO transactions (id, date, \"accountId\", \"type\", amount, category, description, checked, \"isTransfer\", \"linkedTransactionId\") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)";
+const INSERT_TRANSACTION: &str = "INTO transactions (id, date, \"accountId\", \"type\", amount, category, description, checked, \"isTransfer\", \"linkedTransactionId\", \"bankSource\", \"bankTransactionId\") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)";
 
 async fn execute_insert_transaction(
     connection: &mut SqliteConnection,
@@ -223,8 +232,9 @@ async fn execute_insert_transaction(
     transaction: &Transaction,
 ) -> CoreResult<bool> {
     validate_money(transaction.amount)?;
+    crate::limits::transaction(transaction)?;
     let statement = format!("{verb} {INSERT_TRANSACTION}");
-    let result = sqlx::query(&statement)
+    let result = sqlx::query(sqlx::AssertSqlSafe(statement))
         .bind(&transaction.id)
         .bind(&transaction.date)
         .bind(&transaction.account_id)
@@ -235,6 +245,8 @@ async fn execute_insert_transaction(
         .bind(transaction.checked)
         .bind(transaction.is_transfer)
         .bind(&transaction.linked_transaction_id)
+        .bind(&transaction.bank_source)
+        .bind(&transaction.bank_transaction_id)
         .execute(&mut *connection)
         .await
         .ctx("ajout de transaction")?;
@@ -257,8 +269,9 @@ pub async fn insert_transaction_if_absent(
 
 pub async fn update_transaction(connection: &mut SqliteConnection, transaction: &Transaction) -> CoreResult<()> {
     validate_money(transaction.amount)?;
+    crate::limits::transaction(transaction)?;
     sqlx::query(
-        "UPDATE transactions SET date = $1, \"accountId\" = $2, \"type\" = $3, amount = $4, category = $5, description = $6, checked = $7, \"isTransfer\" = $8, \"linkedTransactionId\" = $9 WHERE id = $10",
+        "UPDATE transactions SET date = $1, \"accountId\" = $2, \"type\" = $3, amount = $4, category = $5, description = $6, checked = $7, \"isTransfer\" = $8, \"linkedTransactionId\" = $9, \"bankSource\" = COALESCE($11, \"bankSource\"), \"bankTransactionId\" = COALESCE($12, \"bankTransactionId\") WHERE id = $10",
     )
     .bind(&transaction.date)
     .bind(&transaction.account_id)
@@ -270,6 +283,8 @@ pub async fn update_transaction(connection: &mut SqliteConnection, transaction: 
     .bind(transaction.is_transfer)
     .bind(&transaction.linked_transaction_id)
     .bind(&transaction.id)
+    .bind(&transaction.bank_source)
+    .bind(&transaction.bank_transaction_id)
     .execute(&mut *connection)
     .await
     .ctx("mise à jour de transaction")?;
@@ -342,6 +357,9 @@ pub async fn list_categories<'e>(executor: impl Executor<'e, Database = Sqlite>)
 }
 
 pub async fn insert_category(connection: &mut SqliteConnection, category: &Category) -> CoreResult<()> {
+    crate::limits::category(category)?;
+    crate::limits::text(&category.id, crate::limits::MAX_ID_BYTES, "L’identifiant")?;
+    crate::limits::text(&category.name, crate::limits::MAX_DESCRIPTION_BYTES, "Le libellé")?;
     sqlx::query("INSERT OR IGNORE INTO categories (id, name, icon, color) VALUES ($1, $2, $3, $4)")
         .bind(&category.id)
         .bind(&category.name)
@@ -354,6 +372,9 @@ pub async fn insert_category(connection: &mut SqliteConnection, category: &Categ
 }
 
 pub async fn update_category(connection: &mut SqliteConnection, category: &Category) -> CoreResult<()> {
+    crate::limits::category(category)?;
+    crate::limits::text(&category.id, crate::limits::MAX_ID_BYTES, "L’identifiant")?;
+    crate::limits::text(&category.name, crate::limits::MAX_DESCRIPTION_BYTES, "Le libellé")?;
     sqlx::query("UPDATE categories SET name = $1, icon = $2, color = $3 WHERE id = $4")
         .bind(&category.name)
         .bind(&category.icon)
@@ -385,10 +406,11 @@ pub async fn list_budgets<'e>(executor: impl Executor<'e, Database = Sqlite>) ->
 }
 
 async fn execute_insert_budget(connection: &mut SqliteConnection, verb: &str, budget: &Budget) -> CoreResult<bool> {
+    crate::limits::budget(budget)?;
     validate_money(budget.amount)?;
     let statement =
         format!("{verb} INTO budgets (id, name, amount, category, \"accountId\") VALUES ($1, $2, $3, $4, $5)");
-    let result = sqlx::query(&statement)
+    let result = sqlx::query(sqlx::AssertSqlSafe(statement))
         .bind(&budget.id)
         .bind(&budget.name)
         .bind(budget.amount)
@@ -401,6 +423,8 @@ async fn execute_insert_budget(connection: &mut SqliteConnection, verb: &str, bu
 }
 
 pub async fn insert_budget(connection: &mut SqliteConnection, budget: &Budget) -> CoreResult<()> {
+    crate::limits::text(&budget.id, crate::limits::MAX_ID_BYTES, "L’identifiant")?;
+    crate::limits::text(&budget.name, crate::limits::MAX_DESCRIPTION_BYTES, "Le libellé")?;
     execute_insert_budget(connection, "INSERT", budget).await.map(|_| ())
 }
 
@@ -410,6 +434,9 @@ pub async fn insert_budget_if_absent(connection: &mut SqliteConnection, budget: 
 }
 
 pub async fn update_budget(connection: &mut SqliteConnection, budget: &Budget) -> CoreResult<()> {
+    crate::limits::text(&budget.id, crate::limits::MAX_ID_BYTES, "L’identifiant")?;
+    crate::limits::text(&budget.name, crate::limits::MAX_DESCRIPTION_BYTES, "Le libellé")?;
+    crate::limits::budget(budget)?;
     validate_money(budget.amount)?;
     sqlx::query("UPDATE budgets SET name = $1, amount = $2, category = $3, \"accountId\" = $4 WHERE id = $5")
         .bind(&budget.name)
@@ -453,6 +480,12 @@ pub async fn list_scheduled<'e>(
 }
 
 pub async fn insert_scheduled(connection: &mut SqliteConnection, scheduled: &ScheduledTransaction) -> CoreResult<()> {
+    crate::limits::text(&scheduled.id, crate::limits::MAX_ID_BYTES, "L’identifiant")?;
+    crate::limits::text(
+        &scheduled.description,
+        crate::limits::MAX_DESCRIPTION_BYTES,
+        "Le libellé",
+    )?;
     execute_insert_scheduled(connection, "INSERT", scheduled)
         .await
         .map(|_| ())
@@ -471,11 +504,12 @@ async fn execute_insert_scheduled(
     verb: &str,
     scheduled: &ScheduledTransaction,
 ) -> CoreResult<bool> {
+    crate::limits::scheduled(scheduled)?;
     validate_money(scheduled.amount)?;
     let statement = format!(
         "{verb} INTO scheduled_transactions (id, description, amount, \"type\", frequency, \"accountId\", \"nextDate\", category, \"toAccountId\", \"includeInForecast\", \"budgetId\", \"endDate\") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
     );
-    let result = sqlx::query(&statement)
+    let result = sqlx::query(sqlx::AssertSqlSafe(statement))
         .bind(&scheduled.id)
         .bind(&scheduled.description)
         .bind(scheduled.amount)
@@ -495,6 +529,13 @@ async fn execute_insert_scheduled(
 }
 
 pub async fn update_scheduled(connection: &mut SqliteConnection, scheduled: &ScheduledTransaction) -> CoreResult<()> {
+    crate::limits::text(&scheduled.id, crate::limits::MAX_ID_BYTES, "L’identifiant")?;
+    crate::limits::text(
+        &scheduled.description,
+        crate::limits::MAX_DESCRIPTION_BYTES,
+        "Le libellé",
+    )?;
+    crate::limits::scheduled(scheduled)?;
     validate_money(scheduled.amount)?;
     sqlx::query(
         "UPDATE scheduled_transactions SET description = $1, amount = $2, \"type\" = $3, frequency = $4, \"accountId\" = $5, \"nextDate\" = $6, category = $7, \"toAccountId\" = $8, \"includeInForecast\" = $9, \"budgetId\" = $10, \"endDate\" = $11 WHERE id = $12",
@@ -568,7 +609,7 @@ pub async fn replace_all_data(connection: &mut SqliteConnection, data: &AppData)
         ("accounts", "nettoyage des comptes"),
         ("categories", "nettoyage des catégories"),
     ] {
-        sqlx::query(&format!("DELETE FROM {table}"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table}")))
             .execute(&mut *connection)
             .await
             .ctx(context)?;

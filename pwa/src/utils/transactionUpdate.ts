@@ -10,3 +10,12 @@ export function applyTransactionUpdate(items: Transaction[], updated: Transactio
     return item;
   });
 }
+
+/** A stale form only changes the fields the user edited; the server arbitrates conflicts. */
+export function mergeTransactionDisplay(current: Transaction, submitted: Transaction, base: Transaction): Transaction {
+  const merged = { ...current };
+  for (const key of Object.keys(submitted) as (keyof Transaction)[]) {
+    if (JSON.stringify(submitted[key]) !== JSON.stringify(base[key])) Object.assign(merged, { [key]: submitted[key] });
+  }
+  return merged;
+}

@@ -1,4 +1,5 @@
 import CoreImage
+import Combine
 import SwiftUI
 
 #if os(macOS)
@@ -42,6 +43,7 @@ public struct ICloudSettings {
     public var setEnabled: (Bool) -> Void
     public var status: () -> String
     public var syncNow: () -> Void
+    public var changes: AnyPublisher<Void, Never>
 
     public init(
         isAvailable: @escaping () -> Bool,
@@ -49,7 +51,8 @@ public struct ICloudSettings {
         isEnabled: @escaping () -> Bool,
         setEnabled: @escaping (Bool) -> Void,
         status: @escaping () -> String,
-        syncNow: @escaping () -> Void
+        syncNow: @escaping () -> Void,
+        changes: AnyPublisher<Void, Never> = Empty<Void, Never>().eraseToAnyPublisher()
     ) {
         self.isAvailable = isAvailable
         self.unavailableReason = unavailableReason
@@ -57,6 +60,7 @@ public struct ICloudSettings {
         self.setEnabled = setEnabled
         self.status = status
         self.syncNow = syncNow
+        self.changes = changes
     }
 }
 
@@ -129,6 +133,7 @@ public struct SettingsPage: View {
         }
         .background(DmxPalette.pageBackground)
         .onAppear { store.refreshBridgeStatus() }
+        .onReceive(actions.iCloud?.changes ?? Empty<Void, Never>().eraseToAnyPublisher()) { _ in refreshTick &+= 1 }
     }
 
     // MARK: Structure
@@ -229,7 +234,7 @@ public struct SettingsPage: View {
             row(
                 "Synchroniser avec iCloud",
                 subtitle: available
-                    ? "Vos comptes, transactions, budgets et réglages sont partagés entre vos appareils Apple connectés au même compte iCloud."
+                    ? "Base privée iCloud entre vos appareils Apple. Sa protection dépend de votre compte Apple ; elle n'est pas le chiffrement de bout en bout du compagnon Internet."
                     : iCloud.unavailableReason()
             ) {
                 Toggle("", isOn: Binding(get: { enabled }, set: { value in
@@ -239,7 +244,7 @@ public struct SettingsPage: View {
                 .labelsHidden()
                 .disabled(!available)
             }
-            if enabled {
+            if enabled || iCloud.status().hasPrefix("Dernière erreur :") {
                 Divider()
                 row("État", subtitle: iCloud.status()) {
                     Button(action: {
@@ -252,6 +257,7 @@ public struct SettingsPage: View {
                         }
                     }
                     .buttonStyle(DmxButtonStyle(.secondary))
+                    .disabled(!enabled)
                 }
             }
         }

@@ -1,3 +1,4 @@
+import SyncIssues from './components/SyncIssues';
 import React, { useState, useEffect, useRef } from 'react';
 import Layout from './layouts/Layout';
 import Dashboard from './pages/Dashboard';
@@ -688,6 +689,7 @@ const AppContent: React.FC = () => {
   return (
     <>
       <Layout activePage={activePage} setActivePage={setActivePage}>
+        {isMobileCompanion() && <SyncIssues />}
         {isMobileCompanion() && mobileConnectionError && (
           <div role="status" className="m-4 rounded-xl border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950 dark:bg-amber-950 dark:text-amber-100">
             {mobileConnectionError}

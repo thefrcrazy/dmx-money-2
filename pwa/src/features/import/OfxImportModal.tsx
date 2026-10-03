@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useId, useRef } from 'react';
 import { X, Upload, ArrowRight, Check, FileText, Settings, Database, Tag, AlertTriangle } from 'lucide-react';
 import Button from '../../components/ui/Button';
+import DialogSurface from '../../components/ui/DialogSurface';
 import SearchableSelect from '../../components/ui/SearchableSelect';
 import { useBank } from '../../context/BankContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useToast } from '../../context/ToastContext';
 import { parseBankAmount, parseOfxTransactions } from '../../utils/importParsers';
+import { ofxInitialBalanceFromFinal, prepareOfxImport } from './ofxImportMapping';
 
 interface OfxImportModalProps {
     isOpen: boolean;
@@ -28,6 +30,9 @@ const OfxImportModal: React.FC<OfxImportModalProps> = ({ isOpen, onClose, file, 
     const [finalBalance, setFinalBalance] = useState('');
     const [categoryMapping, setCategoryMapping] = useState<Record<string, string>>({});
     const [isImporting, setIsImporting] = useState(false);
+    const importing = useRef(false);
+    const titleId = useId();
+    const close = () => { if (!importing.current) onClose(); };
     const [importError, setError] = useState<string | null>(null);
 
     // Reset state when file changes or modal opens
@@ -101,16 +106,13 @@ const OfxImportModal: React.FC<OfxImportModalProps> = ({ isOpen, onClose, file, 
     };
 
     const handleFinalImport = async () => {
+        if (importing.current) return;
+        importing.current = true;
         setIsImporting(true);
         setError(null);
         try {
             // 1. Prepare transactions
-            let processedTransactions = parsedData.map(tx => ({
-                ...tx,
-                amount: Math.abs(tx.amount),
-                type: tx.amount >= 0 ? 'income' : 'expense',
-                checked: true
-            }));
+            const processedTransactions = prepareOfxImport(parsedData, selectedAccountId, categoryMapping, categories[0]?.id || 'uncategorized');
 
             // 2. Handle New Account Logic
             let targetAccountId = selectedAccountId;
@@ -121,12 +123,7 @@ const OfxImportModal: React.FC<OfxImportModalProps> = ({ isOpen, onClose, file, 
                 let initialBalance = 0;
 
                 if (finalBalance) {
-                    // Remove first and last logic if applicable, or keep all
-                    const netChange = processedTransactions.reduce((sum, tx) => {
-                        return sum + (tx.type === 'income' ? tx.amount : -tx.amount);
-                    }, 0);
-
-                    initialBalance = parseBankAmount(finalBalance) - netChange;
+                    initialBalance = ofxInitialBalanceFromFinal(processedTransactions, parseBankAmount(finalBalance));
                 }
 
                 targetAccountId = await addAccount({
@@ -152,22 +149,7 @@ const OfxImportModal: React.FC<OfxImportModalProps> = ({ isOpen, onClose, file, 
             }
 
             // 4. Finalize transactions
-            const transactionsToImport = processedTransactions.map(tx => {
-                let categoryId = categories[0]?.id || 'uncategorized';
-                if (tx.category) {
-                    categoryId = finalCategoryMapping[tx.category] || categoryId;
-                }
-
-                return {
-                    date: tx.date,
-                    amount: tx.amount,
-                    type: tx.type as 'income' | 'expense',
-                    description: tx.description,
-                    category: categoryId,
-                    accountId: targetAccountId,
-                    checked: tx.checked
-                };
-            });
+            const transactionsToImport = prepareOfxImport(parsedData, targetAccountId, finalCategoryMapping, categories[0]?.id || 'uncategorized');
 
             await onImport(transactionsToImport, targetAccountId);
             showToast(`${transactionsToImport.length} transactions importées avec succès`, "success");
@@ -177,6 +159,7 @@ const OfxImportModal: React.FC<OfxImportModalProps> = ({ isOpen, onClose, file, 
             setError(e.message || "Erreur lors de l'importation");
             showToast(e.message || "Erreur lors de l'importation", "error");
         } finally {
+            importing.current = false;
             setIsImporting(false);
         }
     };
@@ -192,7 +175,7 @@ const OfxImportModal: React.FC<OfxImportModalProps> = ({ isOpen, onClose, file, 
                     </div>
                     <h4 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">Erreur de lecture</h4>
                     <p className="text-gray-500 dark:text-gray-400 max-w-md mb-6">{error}</p>
-                    <Button variant="secondary" onClick={onClose}>Fermer</Button>
+                    <Button variant="secondary" onClick={close}>Fermer</Button>
                 </div>
             );
         }
@@ -397,26 +380,27 @@ const OfxImportModal: React.FC<OfxImportModalProps> = ({ isOpen, onClose, file, 
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 app-modal-overlay">
-            <div className="app-card w-full max-w-2xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in duration-200 app-modal-content app-import-wizard-modal">
+        <DialogSurface onClose={close} busy={isImporting} labelledBy={titleId}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 app-modal-overlay">
+            <div className="app-card w-full max-w-2xl flex flex-col overflow-hidden max-h-[calc(100dvh-2rem)] animate-in fade-in zoom-in duration-200 app-modal-content app-import-wizard-modal">
                 {/* Header */}
-                <div className="p-6 border-b border-gray-100 dark:border-neutral-800 flex items-center justify-between app-modal-header">
+                <div className="p-6 border-b border-gray-100 dark:border-neutral-800 flex shrink-0 items-center justify-between app-modal-header">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-primary-100 dark:bg-primary-900/30 rounded-lg text-primary-600 dark:text-primary-400 app-modal-icon-container">
                             <FileText className="w-5 h-5" />
                         </div>
                         <div>
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 app-modal-title">Assistant d'import OFX</h3>
-                            <p className="text-xs text-gray-500 dark:text-gray-400 app-modal-subtitle">{file.name}</p>
+                            <h3 id={titleId} className="text-lg font-bold text-gray-900 dark:text-gray-100 app-modal-title">Assistant d'import OFX</h3>
+                            <p className="break-all text-xs text-gray-500 dark:text-gray-400 app-modal-subtitle">{file.name}</p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 app-modal-close-btn">
+                    <button type="button" onClick={close} disabled={isImporting} aria-label="Fermer" className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 app-modal-close-btn">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
 
                 {/* Steps Indicator */}
-                <div className="px-6 py-4 bg-gray-50 dark:bg-[#1a1a1a] border-b border-gray-100 dark:border-neutral-800 flex justify-between app-wizard-steps-container">
+                <div className="px-6 py-4 bg-gray-50 dark:bg-[#1a1a1a] border-b border-gray-100 dark:border-neutral-800 flex shrink-0 justify-between app-wizard-steps-container">
                     {[
                         { id: 'preview', label: 'Aperçu', icon: Settings },
                         { id: 'account', label: 'Compte', icon: Database },
@@ -442,15 +426,15 @@ const OfxImportModal: React.FC<OfxImportModalProps> = ({ isOpen, onClose, file, 
                 </div>
 
                 {/* Content */}
-                <div className={`p-6 flex-1 ${currentStep === 'preview' ? 'overflow-y-auto' : 'overflow-visible'} app-modal-body`}>
-                    {renderStepContent()}
+                <div className="p-6 min-h-0 flex-1 overflow-y-auto overscroll-contain app-modal-body">
+                    <fieldset disabled={isImporting} className="min-w-0">{renderStepContent()}</fieldset>
                 </div>
 
                 {/* Footer */}
-                <div className="p-6 border-t border-gray-100 dark:border-neutral-800 flex justify-between bg-gray-50 dark:bg-[#1a1a1a] app-modal-footer">
+                <div className="p-6 border-t border-gray-100 dark:border-neutral-800 flex shrink-0 justify-between bg-gray-50 dark:bg-[#1a1a1a] app-modal-footer">
                     <Button
                         variant="ghost"
-                        onClick={currentStep === 'preview' ? onClose : handleBack}
+                        onClick={currentStep === 'preview' ? close : handleBack}
                         disabled={isImporting}
                     >
                         {currentStep === 'preview' ? 'Annuler' : 'Retour'}
@@ -477,7 +461,7 @@ const OfxImportModal: React.FC<OfxImportModalProps> = ({ isOpen, onClose, file, 
                     )}
                 </div>
             </div>
-        </div>
+        </DialogSurface>
     );
 };
 

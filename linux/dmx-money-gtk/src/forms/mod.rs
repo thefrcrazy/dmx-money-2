@@ -5,7 +5,11 @@ pub mod controls;
 mod data;
 mod entities;
 
+use std::any::Any;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+
+thread_local! { static OPEN_FORMS: RefCell<Vec<Rc<FormShell>>> = const { RefCell::new(Vec::new()) }; }
 
 use adw::prelude::*;
 
@@ -39,6 +43,12 @@ pub struct FormShell {
     submit: gtk::Button,
     submit_label: gtk::Label,
     header_extra: gtk::Box,
+    submit_handler: RefCell<Option<gtk::glib::SignalHandlerId>>,
+    held_controls: RefCell<Vec<Rc<dyn Any>>>,
+    cleanup: RefCell<Vec<Box<dyn Fn()>>>,
+    closed: Cell<bool>,
+    busy: Cell<bool>,
+    progress: gtk::Spinner,
 }
 
 impl FormShell {
@@ -76,6 +86,10 @@ impl FormShell {
         actions.append(&error);
         let header_extra = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         actions.append(&header_extra);
+        let progress = gtk::Spinner::new();
+        progress.set_visible(false);
+        progress.set_tooltip_text(Some("Traitement en cours"));
+        actions.append(&progress);
         let cancel = gtk::Button::with_label(if submit_title.is_some() { "Annuler" } else { "Fermer" });
         actions.append(&cancel);
         let submit_label = gtk::Label::new(Some(submit_title.unwrap_or("Enregistrer")));
@@ -87,19 +101,45 @@ impl FormShell {
         view.add_bottom_bar(&actions);
 
         dialog.set_child(Some(&view));
-        let dialog_for_cancel = dialog.clone();
+        let dialog_for_cancel = dialog.downgrade();
         cancel.connect_clicked(move |_| {
-            dialog_for_cancel.close();
+            if let Some(dialog) = dialog_for_cancel.upgrade() {
+                dialog.close();
+            }
         });
 
-        Rc::new(Self {
+        let shell = Rc::new(Self {
             dialog,
             body,
             error,
             submit,
             submit_label,
             header_extra,
-        })
+            submit_handler: RefCell::new(None),
+            held_controls: RefCell::new(Vec::new()),
+            cleanup: RefCell::new(Vec::new()),
+            closed: Cell::new(false),
+            busy: Cell::new(false),
+            progress,
+        });
+        let weak = Rc::downgrade(&shell);
+        shell.dialog.connect_closed(move |_| {
+            if let Some(shell) = weak.upgrade() {
+                shell.closed.set(true);
+                if let Some(handler) = shell.submit_handler.borrow_mut().take() {
+                    shell.submit.disconnect(handler);
+                }
+                for cleanup in shell.cleanup.borrow_mut().drain(..) {
+                    cleanup();
+                }
+                shell.held_controls.borrow_mut().clear();
+                widgets::clear(&shell.body);
+                widgets::clear(&shell.header_extra);
+                shell.dialog.set_child(gtk::Widget::NONE);
+                OPEN_FORMS.with(|forms| forms.borrow_mut().retain(|candidate| !Rc::ptr_eq(candidate, &shell)));
+            }
+        });
+        shell
     }
 
     pub fn body(&self) -> &gtk::Box {
@@ -112,6 +152,9 @@ impl FormShell {
     }
 
     pub fn set_error(&self, message: Option<&str>) {
+        if self.is_closed() {
+            return;
+        }
         self.error.set_text(message.unwrap_or(""));
         self.error.set_visible(message.is_some());
     }
@@ -121,7 +164,10 @@ impl FormShell {
     }
 
     pub fn on_submit(&self, action: impl Fn() + 'static) {
-        self.submit.connect_clicked(move |_| action());
+        if let Some(handler) = self.submit_handler.borrow_mut().take() {
+            self.submit.disconnect(handler);
+        }
+        *self.submit_handler.borrow_mut() = Some(self.submit.connect_clicked(move |_| action()));
     }
 
     /// Reconstruit le contenu après chaque écriture, et se désabonne à la fermeture :
@@ -132,8 +178,34 @@ impl FormShell {
         self.dialog.connect_closed(move |_| store.unsubscribe(id));
     }
 
-    pub fn present(&self, parent: &impl IsA<gtk::Widget>) {
+    pub fn present(self: &Rc<Self>, parent: &impl IsA<gtk::Widget>) {
+        OPEN_FORMS.with(|forms| forms.borrow_mut().push(self.clone()));
         self.dialog.present(Some(parent.as_ref()));
+    }
+
+    pub fn hold<T: Any>(&self, control: Rc<T>) {
+        self.held_controls.borrow_mut().push(control);
+    }
+    pub fn release_controls(&self) {
+        self.held_controls.borrow_mut().clear();
+    }
+    pub fn on_close(&self, cleanup: impl Fn() + 'static) {
+        self.cleanup.borrow_mut().push(Box::new(cleanup));
+    }
+    pub fn is_closed(&self) -> bool {
+        self.closed.get()
+    }
+    pub fn is_busy(&self) -> bool {
+        self.busy.get()
+    }
+    pub fn set_busy(&self, busy: bool) {
+        self.busy.set(busy);
+        self.progress.set_spinning(busy);
+        self.progress.set_visible(busy);
+        self.submit.set_sensitive(!busy);
+        self.body.set_sensitive(!busy);
+        self.header_extra.set_sensitive(!busy);
+        self.dialog.set_can_close(!busy);
     }
 
     pub fn close(&self) {
@@ -150,4 +222,20 @@ impl FormShell {
             }
         }
     }
+}
+
+#[cfg(all(test, feature = "ui-tests"))]
+pub fn verify_closed_form_releases_its_callbacks() {
+    let shell = FormShell::new("Fixture", Some("Enregistrer"), 400);
+    let weak = Rc::downgrade(&shell);
+    let captured = shell.clone();
+    shell.on_submit(move || captured.set_error(None));
+    let dialog = shell.dialog.clone();
+    drop(shell);
+    assert!(
+        weak.upgrade().is_some(),
+        "Fixture must reproduce the retained submit callback"
+    );
+    dialog.emit_by_name::<()>("closed", &[]);
+    assert!(weak.upgrade().is_none(), "Closed form retained its submit callback");
 }

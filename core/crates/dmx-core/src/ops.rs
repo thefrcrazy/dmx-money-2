@@ -135,7 +135,10 @@ pub async fn save_account(pool: &DbPool, draft: AccountDraft) -> CoreResult<Stri
         icon: non_empty(Some(draft.icon)).unwrap_or_else(|| default_icon.to_string()),
     };
 
-    let mut tx = pool.begin().await.ctx("enregistrement du compte")?;
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .ctx("enregistrement du compte")?;
     if draft.id.is_some() {
         if !account_exists(&mut tx, &account.id).await? {
             return Err(CoreError::not_found("Compte introuvable."));
@@ -144,47 +147,49 @@ pub async fn save_account(pool: &DbPool, draft: AccountDraft) -> CoreResult<Stri
     } else {
         repo::insert_account(&mut tx, &account).await?;
     }
-    tx.commit().await.ctx("enregistrement du compte")?;
-
     let group = non_empty(draft.group);
-    let current = settings::load_app_settings(pool).await?;
+    let current = settings::load_app_settings(&mut *tx).await?;
     if current.account_groups.get(&account.id) != group.as_ref() {
-        settings::apply_change(
-            pool,
+        let patch = settings::change_to_patch(
+            &current,
             SettingsChange::AccountGroup {
                 account_id: account.id.clone(),
                 group,
             },
-        )
-        .await?;
+        )?;
+        settings::apply_settings_patch_locked(&mut tx, patch).await?;
     }
-
+    tx.commit().await.ctx("enregistrement du compte")?;
     Ok(account.id)
 }
 
 pub async fn delete_account(pool: &DbPool, id: &str) -> CoreResult<()> {
-    let mut tx = pool.begin().await.ctx("suppression du compte")?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.ctx("suppression du compte")?;
     repo::delete_account(&mut tx, id).await?;
-    tx.commit().await.ctx("suppression du compte")?;
-
-    let current = settings::load_app_settings(pool).await?;
+    let current = settings::load_app_settings(&mut *tx).await?;
     if current.account_groups.contains_key(id) {
-        settings::apply_change(
-            pool,
+        let patch = settings::change_to_patch(
+            &current,
             SettingsChange::AccountGroup {
                 account_id: id.to_string(),
                 group: None,
             },
-        )
-        .await?;
+        )?;
+        settings::apply_settings_patch_locked(&mut tx, patch).await?;
     }
+    let current = settings::load_app_settings(&mut *tx).await?;
     if let Some(order) = current
         .accounts_order
+        .clone()
         .filter(|order| order.iter().any(|item| item == id))
     {
-        let order = order.into_iter().filter(|item| item != id).collect();
-        settings::apply_change(pool, SettingsChange::AccountsOrder(order)).await?;
+        let patch = settings::change_to_patch(
+            &current,
+            SettingsChange::AccountsOrder(order.into_iter().filter(|item| item != id).collect()),
+        )?;
+        settings::apply_settings_patch_locked(&mut tx, patch).await?;
     }
+    tx.commit().await.ctx("suppression du compte")?;
     Ok(())
 }
 
@@ -392,14 +397,17 @@ pub fn transaction_draft(snapshot: &Snapshot, id: &str) -> Option<TransactionDra
         .as_deref()
         .and_then(|linked_id| snapshot.transaction(linked_id))
         .filter(|linked| repo::are_transfer_counterparts(transaction, linked));
+    Some(draft_from_transaction(transaction, linked))
+}
 
+fn draft_from_transaction(transaction: &Transaction, linked: Option<&Transaction>) -> TransactionDraft {
     if let (true, Some(linked)) = (transaction.category == TRANSFER_CATEGORY_ID, linked) {
         let (from, to) = if transaction.is_income() {
             (linked, transaction)
         } else {
             (transaction, linked)
         };
-        return Some(TransactionDraft {
+        return TransactionDraft {
             id: Some(transaction.id.clone()),
             kind: TransactionType::Transfer,
             date: transaction.date.clone(),
@@ -408,10 +416,10 @@ pub fn transaction_draft(snapshot: &Snapshot, id: &str) -> Option<TransactionDra
             category_id: TRANSFER_CATEGORY_ID.to_string(),
             account_id: from.account_id.clone(),
             to_account_id: Some(to.account_id.clone()),
-        });
+        };
     }
 
-    Some(TransactionDraft {
+    TransactionDraft {
         id: Some(transaction.id.clone()),
         kind: if transaction.is_income() {
             TransactionType::Income
@@ -424,7 +432,7 @@ pub fn transaction_draft(snapshot: &Snapshot, id: &str) -> Option<TransactionDra
         category_id: transaction.category.clone(),
         account_id: transaction.account_id.clone(),
         to_account_id: None,
-    })
+    }
 }
 
 struct TransferValues<'a> {
@@ -450,6 +458,8 @@ fn transfer_pair(
         checked,
         is_transfer: true,
         linked_transaction_id: Some(linked),
+        bank_source: None,
+        bank_transaction_id: None,
     };
     (
         base(
@@ -466,27 +476,132 @@ fn transfer_pair(
 /// Crée ou modifie une opération, y compris les conversions simple ↔ virement.
 /// Renvoie les identifiants écrits (deux pour un virement : source puis destination).
 pub async fn save_transaction(pool: &DbPool, draft: TransactionDraft) -> CoreResult<Vec<String>> {
-    let date = valid_date(&draft.date)?;
-    let amount = positive_amount(draft.amount)?;
-    let description = draft.description.trim().to_string();
-    let is_transfer = draft.kind == TransactionType::Transfer;
+    save_transaction_impl(pool, draft, None).await
+}
 
-    let mut tx = pool.begin().await.ctx("enregistrement de la transaction")?;
-    require_account(&mut tx, &draft.account_id).await?;
-
-    let to_account = if is_transfer {
-        let to_account = non_empty(draft.to_account_id.clone())
-            .filter(|to_account| *to_account != draft.account_id)
-            .ok_or_else(|| CoreError::validation("Sélectionnez un compte destination différent"))?;
-        require_account(&mut tx, &to_account).await?;
-        Some(to_account)
-    } else {
-        None
-    };
-    if !is_transfer && draft.category_id.trim().is_empty() {
-        return Err(CoreError::validation("Sélectionnez une catégorie"));
+/// Three-way merge against the values originally displayed in the editor. A conflicting
+/// field is rejected before any write; unrelated remote edits and checked state survive.
+pub async fn save_transaction_with_base(
+    pool: &DbPool,
+    draft: TransactionDraft,
+    base: TransactionDraft,
+) -> CoreResult<Vec<String>> {
+    if draft.id.is_none() || draft.id != base.id {
+        return Err(CoreError::validation(
+            "L’opération d’origine ne correspond pas au formulaire.",
+        ));
     }
+    save_transaction_impl(pool, draft, Some(base)).await
+}
 
+fn merge_edit<T: PartialEq>(edited: T, base: &T, current: T, label: &str) -> CoreResult<T> {
+    if edited == *base {
+        Ok(current)
+    } else if current == *base || edited == current {
+        Ok(edited)
+    } else {
+        Err(CoreError::validation(format!(
+            "Conflit de modification ({label}) : cette valeur a changé sur un autre appareil. Votre saisie est conservée ; rechargez l’opération avant de réessayer."
+        )))
+    }
+}
+
+/// Merge the two sides of an existing transfer while the caller owns the write lock.
+/// Identity and linkage are immutable; each edited field keeps unrelated concurrent changes.
+pub fn merge_transfer_transactions(
+    current_from: &Transaction,
+    current_to: &Transaction,
+    base_from: &Transaction,
+    base_to: &Transaction,
+    desired_from: &Transaction,
+    desired_to: &Transaction,
+) -> CoreResult<(Transaction, Transaction)> {
+    fn pair(from: &Transaction, to: &Transaction) -> CoreResult<()> {
+        crate::limits::transaction(from)?;
+        crate::limits::transaction(to)?;
+        if !repo::are_transfer_counterparts(from, to)
+            || from.transaction_type != TransactionType::Expense
+            || to.transaction_type != TransactionType::Income
+            || !crate::metrics::is_valid_money(from.amount)
+            || !crate::metrics::is_valid_money(to.amount)
+            || crate::metrics::cents(from.amount) < 1
+            || crate::metrics::cents(from.amount) != crate::metrics::cents(to.amount)
+            || from.date != to.date
+            || from.description != to.description
+            || from.date.len() != 10
+            || parse_date(&from.date).is_none()
+        {
+            return Err(CoreError::validation(
+                "Virement incohérent : les deux contreparties doivent correspondre.",
+            ));
+        }
+        Ok(())
+    }
+    pair(current_from, current_to)?;
+    pair(base_from, base_to)?;
+    pair(desired_from, desired_to)?;
+    if current_from.id != base_from.id
+        || current_to.id != base_to.id
+        || current_from.id != desired_from.id
+        || current_to.id != desired_to.id
+    {
+        return Err(CoreError::validation("L’identité du virement ne peut pas changer."));
+    }
+    let mut from = current_from.clone();
+    let mut to = current_to.clone();
+    from.account_id = merge_edit(
+        desired_from.account_id.clone(),
+        &base_from.account_id,
+        current_from.account_id.clone(),
+        "compte source",
+    )?;
+    to.account_id = merge_edit(
+        desired_to.account_id.clone(),
+        &base_to.account_id,
+        current_to.account_id.clone(),
+        "compte destinataire",
+    )?;
+    from.amount = merge_edit(desired_from.amount, &base_from.amount, current_from.amount, "montant")?;
+    from.date = merge_edit(
+        desired_from.date.clone(),
+        &base_from.date,
+        current_from.date.clone(),
+        "date",
+    )?;
+    from.description = merge_edit(
+        desired_from.description.clone(),
+        &base_from.description,
+        current_from.description.clone(),
+        "libellé",
+    )?;
+    from.checked = merge_edit(
+        desired_from.checked,
+        &base_from.checked,
+        current_from.checked,
+        "pointage du débit",
+    )?;
+    to.checked = merge_edit(
+        desired_to.checked,
+        &base_to.checked,
+        current_to.checked,
+        "pointage du crédit",
+    )?;
+    to.amount = from.amount;
+    to.date = from.date.clone();
+    to.description = from.description.clone();
+    pair(&from, &to)?;
+    Ok((from, to))
+}
+
+async fn save_transaction_impl(
+    pool: &DbPool,
+    mut draft: TransactionDraft,
+    base: Option<TransactionDraft>,
+) -> CoreResult<Vec<String>> {
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .ctx("enregistrement de la transaction")?;
     let existing = match draft.id.as_deref() {
         Some(id) => Some(
             repo::get_transaction(&mut tx, id)
@@ -508,6 +623,44 @@ pub async fn save_transaction(pool: &DbPool, draft: TransactionDraft) -> CoreRes
             .is_some_and(|transaction| repo::are_transfer_counterparts(transaction, linked))
     });
 
+    if let Some(base) = base {
+        let current = draft_from_transaction(
+            existing
+                .as_ref()
+                .ok_or_else(|| CoreError::not_found("Transaction introuvable."))?,
+            linked.as_ref(),
+        );
+        draft.kind = merge_edit(draft.kind, &base.kind, current.kind, "type")?;
+        draft.date = merge_edit(draft.date, &base.date, current.date, "date")?;
+        draft.amount = merge_edit(draft.amount, &base.amount, current.amount, "montant")?;
+        draft.description = merge_edit(draft.description, &base.description, current.description, "libellé")?;
+        draft.category_id = merge_edit(draft.category_id, &base.category_id, current.category_id, "catégorie")?;
+        draft.account_id = merge_edit(draft.account_id, &base.account_id, current.account_id, "compte source")?;
+        draft.to_account_id = merge_edit(
+            draft.to_account_id,
+            &base.to_account_id,
+            current.to_account_id,
+            "compte destination",
+        )?;
+    }
+    let date = valid_date(&draft.date)?;
+    let amount = positive_amount(draft.amount)?;
+    let description = draft.description.trim().to_string();
+    let is_transfer = draft.kind == TransactionType::Transfer;
+    require_account(&mut tx, &draft.account_id).await?;
+    let to_account = if is_transfer {
+        let to_account = non_empty(draft.to_account_id.clone())
+            .filter(|to_account| *to_account != draft.account_id)
+            .ok_or_else(|| CoreError::validation("Sélectionnez un compte destination différent"))?;
+        require_account(&mut tx, &to_account).await?;
+        Some(to_account)
+    } else {
+        None
+    };
+    if !is_transfer && draft.category_id.trim().is_empty() {
+        return Err(CoreError::validation("Sélectionnez une catégorie"));
+    }
+
     let ids = match (existing, linked, to_account) {
         (Some(existing), Some(linked), Some(to_account)) => {
             let (from, to) = if existing.is_income() {
@@ -520,15 +673,19 @@ pub async fn save_transaction(pool: &DbPool, draft: TransactionDraft) -> CoreRes
                 amount,
                 description: &description,
             };
-            let (from, to) = transfer_pair(
+            let (mut updated_from, mut updated_to) = transfer_pair(
                 (from.id, to.id),
                 (&draft.account_id, &to_account),
                 &values,
                 (from.checked, to.checked),
             );
-            repo::update_transaction(&mut tx, &from).await?;
-            repo::update_transaction(&mut tx, &to).await?;
-            vec![from.id, to.id]
+            updated_from.bank_source = from.bank_source;
+            updated_from.bank_transaction_id = from.bank_transaction_id;
+            updated_to.bank_source = to.bank_source;
+            updated_to.bank_transaction_id = to.bank_transaction_id;
+            repo::update_transaction(&mut tx, &updated_from).await?;
+            repo::update_transaction(&mut tx, &updated_to).await?;
+            vec![updated_from.id, updated_to.id]
         }
         (existing, _, Some(to_account)) => {
             let checked = existing.as_ref().map(|existing| existing.checked).unwrap_or(false);
@@ -540,22 +697,49 @@ pub async fn save_transaction(pool: &DbPool, draft: TransactionDraft) -> CoreRes
                 amount,
                 description: &description,
             };
-            let (from, to) = transfer_pair(
-                (new_id(), new_id()),
+            // Preserve the imported bank row's stable ID on its original debit/credit side.
+            let from_id = existing
+                .as_ref()
+                .filter(|item| !item.is_income() && item.bank_source.is_some() && item.bank_transaction_id.is_some())
+                .map(|item| item.id.clone())
+                .unwrap_or_else(new_id);
+            let to_id = existing
+                .as_ref()
+                .filter(|item| item.is_income() && item.bank_source.is_some() && item.bank_transaction_id.is_some())
+                .map(|item| item.id.clone())
+                .unwrap_or_else(new_id);
+            let (mut from, mut to) = transfer_pair(
+                (from_id, to_id),
                 (&draft.account_id, &to_account),
                 &values,
                 (checked, checked),
             );
+            if let Some(existing) = existing {
+                let original_side = if existing.is_income() { &mut to } else { &mut from };
+                original_side.bank_source = existing.bank_source;
+                original_side.bank_transaction_id = existing.bank_transaction_id;
+            }
             repo::insert_transaction(&mut tx, &from).await?;
             repo::insert_transaction(&mut tx, &to).await?;
             vec![from.id, to.id]
         }
         (existing, linked, None) => {
+            let bank_identity = |item: &Transaction| item.bank_source.clone().zip(item.bank_transaction_id.clone());
+            let existing_identity = existing.as_ref().and_then(bank_identity);
+            let linked_identity = linked.as_ref().and_then(bank_identity);
+            if existing_identity.is_some() && linked_identity.is_some() && existing_identity != linked_identity {
+                return Err(CoreError::validation(
+                    "Ce virement possède deux identités bancaires distinctes et ne peut pas être fusionné en une opération simple.",
+                ));
+            }
+            // Editing the synthetic counterpart must not discard the only imported identity.
+            let survivor = if existing_identity.is_none() && linked_identity.is_some() {
+                linked.as_ref()
+            } else {
+                existing.as_ref()
+            };
             let transaction = Transaction {
-                id: existing
-                    .as_ref()
-                    .map(|existing| existing.id.clone())
-                    .unwrap_or_else(new_id),
+                id: survivor.map(|existing| existing.id.clone()).unwrap_or_else(new_id),
                 date,
                 account_id: draft.account_id.clone(),
                 transaction_type: if draft.kind == TransactionType::Income {
@@ -569,6 +753,8 @@ pub async fn save_transaction(pool: &DbPool, draft: TransactionDraft) -> CoreRes
                 checked: existing.as_ref().map(|existing| existing.checked).unwrap_or(false),
                 is_transfer: false,
                 linked_transaction_id: None,
+                bank_source: survivor.and_then(|item| item.bank_source.clone()),
+                bank_transaction_id: survivor.and_then(|item| item.bank_transaction_id.clone()),
             };
             match (&existing, linked) {
                 (Some(_), Some(_)) => {
@@ -641,10 +827,44 @@ pub enum InlineEdit {
 
 /// Modifie une cellule ; les deux côtés d'un virement restent cohérents.
 pub async fn update_transaction_inline(pool: &DbPool, id: &str, edit: InlineEdit) -> CoreResult<()> {
-    let mut tx = pool.begin().await.ctx("mise à jour de transaction")?;
+    update_transaction_inline_impl(pool, id, edit, None).await
+}
+pub async fn update_transaction_inline_with_base(
+    pool: &DbPool,
+    id: &str,
+    edit: InlineEdit,
+    base: InlineEdit,
+) -> CoreResult<()> {
+    update_transaction_inline_impl(pool, id, edit, Some(base)).await
+}
+async fn update_transaction_inline_impl(
+    pool: &DbPool,
+    id: &str,
+    mut edit: InlineEdit,
+    base: Option<InlineEdit>,
+) -> CoreResult<()> {
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .ctx("mise à jour de transaction")?;
     let transaction = repo::get_transaction(&mut tx, id)
         .await?
         .ok_or_else(|| CoreError::not_found("Transaction introuvable."))?;
+    if let Some(base) = base {
+        edit = match (edit, base) {
+            (InlineEdit::Description(edited), InlineEdit::Description(base)) => {
+                InlineEdit::Description(merge_edit(edited, &base, transaction.description.clone(), "libellé")?)
+            }
+            (InlineEdit::Amount(edited), InlineEdit::Amount(base)) => {
+                InlineEdit::Amount(merge_edit(edited, &base, transaction.amount, "montant")?)
+            }
+            _ => {
+                return Err(CoreError::validation(
+                    "Le champ d’origine ne correspond pas à cette modification.",
+                ))
+            }
+        };
+    }
     let linked = match transaction.linked_transaction_id.as_deref() {
         Some(linked_id) => repo::get_transaction(&mut tx, linked_id).await?,
         None => None,

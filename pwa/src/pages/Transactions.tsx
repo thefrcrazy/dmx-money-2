@@ -1,3 +1,4 @@
+import { format } from 'date-fns';
 import React, { useState, useMemo, useCallback, useEffect, useDeferredValue } from 'react';
 import { Plus, Search, Trash2, Edit2, CheckCircle2, ArrowRightLeft, Tag, Circle, Check } from 'lucide-react';
 import Button from '../components/ui/Button';
@@ -14,6 +15,7 @@ import MobileTransactionList from '../components/transactions/MobileTransactionL
 import Input from '../components/ui/Input';
 import { useFinancialMetrics } from '../hooks/useFinancialMetrics';
 import { formatCurrency, formatDate } from '../utils/format';
+import { allowedTransactionFormTypes, transactionFormTypeError, TRANSACTION_CONVERSION_NOTICE } from '../utils/transactionEditTypes';
 
 type TransactionWithBalance = Transaction & { balance: number };
 
@@ -29,6 +31,12 @@ const TRANSACTION_TYPE_FILTER_OPTIONS = [
     { id: 'expense', label: 'Dépenses', icon: 'TrendingDown', color: '#ef4444' },
     { id: 'income', label: 'Revenus', icon: 'TrendingUp', color: '#10b981' },
     { id: 'transfer', label: 'Virements', icon: 'ArrowRightLeft', color: '#6366f1' }
+];
+
+const TRANSACTION_FORM_TYPE_OPTIONS = [
+    { id: 'expense' as const, label: 'Dépense', icon: 'TrendingDown', color: '#ef4444' },
+    { id: 'income' as const, label: 'Revenu', icon: 'TrendingUp', color: '#10b981' },
+    { id: 'transfer' as const, label: 'Virement', icon: 'ArrowRightLeft', color: '#6366f1' }
 ];
 
 const TRANSACTION_STATUS_FILTER_OPTIONS = [
@@ -49,6 +57,7 @@ const Transactions: React.FC = () => {
         addTransaction,
         addTransfer,
         updateTransaction,
+        updateTransfer,
         deleteTransaction,
         toggleTransactionCheck,
         processDueScheduledTransactions,
@@ -66,7 +75,9 @@ const Transactions: React.FC = () => {
     const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
     const [filterBudgets, setFilterBudgets] = useState<string[]>([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingLinked, setEditingLinked] = useState<Transaction | null>(null);
     const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+    const [formError, setFormError] = useState<string | null>(null);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [transactionToDelete, setTransactionToDelete] = useState<string | null>(null);
     
@@ -76,7 +87,7 @@ const Transactions: React.FC = () => {
     const [isGroupDeleteModalOpen, setIsGroupDeleteModalOpen] = useState(false);
 
     const [formData, setFormData] = useState({
-        date: new Date().toISOString().split('T')[0],
+        date: format(new Date(), 'yyyy-MM-dd'),
         description: '',
         amount: '',
         type: 'expense' as any,
@@ -246,8 +257,10 @@ const Transactions: React.FC = () => {
     ), 0), [displayTransactions]);
 
     const handleOpenModal = (transaction?: Transaction) => {
+        setFormError(null);
         if (transaction) {
             setEditingTransaction(transaction);
+            setEditingLinked(transactions.find(item => item.id === transaction.linkedTransactionId) ?? null);
             
             let toAccountId = '';
             let type = transaction.type;
@@ -278,8 +291,9 @@ const Transactions: React.FC = () => {
             });
         } else {
             setEditingTransaction(null);
+            setEditingLinked(null);
             setFormData({
-                date: new Date().toISOString().split('T')[0],
+                date: format(new Date(), 'yyyy-MM-dd'),
                 description: '',
                 amount: '',
                 type: 'expense',
@@ -377,6 +391,13 @@ const Transactions: React.FC = () => {
 
     const handleSubmitTransaction = async (e: React.FormEvent) => {
         e.preventDefault();
+        const typeError = transactionFormTypeError(editingTransaction, formData.type);
+        if (typeError) {
+            setFormError(typeError);
+            showToast(typeError, 'error');
+            return;
+        }
+        setFormError(null);
         try {
             const amount = parseFloat(formData.amount);
             const isTransfer = formData.type === 'transfer';
@@ -389,22 +410,18 @@ const Transactions: React.FC = () => {
                     accountId: editingTransaction.type === 'income' && isTransfer ? (formData.toAccountId || formData.accountId) : formData.accountId,
                     type: isTransfer ? editingTransaction.type : formData.type as 'income' | 'expense',
                 };
-                await updateTransaction({ ...editingTransaction, ...transactionData });
-                
-                // Mettre à jour la transaction liée si elle existe
-                if (isTransfer && editingTransaction.linkedTransactionId) {
-                    const linkedTx = transactions.find(t => t.id === editingTransaction.linkedTransactionId);
-                    if (linkedTx) {
-                        await updateTransaction({
-                            ...linkedTx,
-                            date: formData.date,
-                            amount,
-                            description: formData.description,
-                            accountId: formData.toAccountId || linkedTx.accountId,
-                        });
-                    }
-                }
-                
+                const updated = { ...editingTransaction, ...transactionData };
+                if (isTransfer) {
+                    if (!editingTransaction.linkedTransactionId || !editingLinked) throw new Error('La contrepartie du virement est absente. Reconnectez-vous avant de le modifier.');
+                    const linked = { ...editingLinked, date: formData.date, amount, description: formData.description,
+                        accountId: editingTransaction.type === 'income' ? formData.accountId : formData.toAccountId };
+                    const from = editingTransaction.type === 'expense' ? updated : linked;
+                    const to = editingTransaction.type === 'income' ? updated : linked;
+                    const baseFrom = editingTransaction.type === 'expense' ? editingTransaction : editingLinked;
+                    const baseTo = editingTransaction.type === 'income' ? editingTransaction : editingLinked;
+                    await updateTransfer(from, to, baseFrom, baseTo);
+                } else await updateTransaction(updated, editingTransaction);
+
                 showToast("Transaction mise à jour", "success");
             } else {
                 if (isTransfer && formData.toAccountId) {
@@ -426,7 +443,9 @@ const Transactions: React.FC = () => {
             }
             setIsModalOpen(false);
         } catch (err) {
-            showToast("Une erreur est survenue", "error");
+            const message = err instanceof Error ? err.message : 'La transaction n’a pas pu être enregistrée.';
+            setFormError(message);
+            showToast(message, "error");
         }
     };
 
@@ -806,6 +825,7 @@ const Transactions: React.FC = () => {
                 submitLabel={editingTransaction ? 'OK' : 'Ajouter'}
             >
                 <div className="space-y-4">
+                    {formError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{formError}</p>}
                     <Input label="Description" required value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder="Ex: Loyer" />
                     
                     <div className="grid grid-cols-2 gap-4">
@@ -813,15 +833,13 @@ const Transactions: React.FC = () => {
                         <SearchableSelect
                             label="Type"
                             value={formData.type}
-                            onChange={(value) => setFormData({ ...formData, type: value })}
-                            options={[
-                                { id: 'expense', label: 'Dépense', icon: 'TrendingDown', color: '#ef4444' },
-                                { id: 'income', label: 'Revenu', icon: 'TrendingUp', color: '#10b981' },
-                                { id: 'transfer', label: 'Virement', icon: 'ArrowRightLeft', color: '#6366f1' }
-                            ]}
+                            onChange={(value) => { setFormData({ ...formData, type: value }); setFormError(null); }}
+                            options={TRANSACTION_FORM_TYPE_OPTIONS.filter(option => allowedTransactionFormTypes(editingTransaction).includes(option.id))}
                             placeholder="Sélectionner un type"
                         />
                     </div>
+
+                    {editingTransaction && <p className="text-xs text-gray-500 dark:text-neutral-400">{TRANSACTION_CONVERSION_NOTICE}</p>}
 
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>

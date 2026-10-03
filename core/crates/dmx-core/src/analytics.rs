@@ -4,7 +4,7 @@ use crate::dates::{
     add_days, add_months, days_between, each_day, each_month, format_date, month_key, parse_date, start_of_month,
 };
 use crate::format::{date_day_month, date_long, month_year};
-use crate::metrics::{cents, euros, is_internal_transfer, signed_cents};
+use crate::metrics::{euros, is_internal_transfer, wide_cents as cents, wide_signed_cents as signed_cents};
 use crate::models::{TimeRange, TransactionType};
 use crate::settings::AppSettings;
 use crate::snapshot::{is_selected, CategoryDisplay, Snapshot};
@@ -92,7 +92,7 @@ pub struct AnalyticsView {
 }
 
 /// Bornes incluses de la période analysée.
-pub fn analytics_range(
+pub(crate) fn requested_range(
     range: TimeRange,
     custom_start: Option<&str>,
     custom_end: Option<&str>,
@@ -124,8 +124,19 @@ pub fn analytics_range(
     }
 }
 
-fn category_slices(snapshot: &Snapshot, totals: Vec<(String, i64)>, hidden: &[String]) -> Vec<CategorySlice> {
-    let visible_total: i64 = totals
+pub fn analytics_range(
+    range: TimeRange,
+    custom_start: Option<&str>,
+    custom_end: Option<&str>,
+    month_starts_on_first: bool,
+    today: NaiveDate,
+) -> (NaiveDate, NaiveDate) {
+    let (start, end) = requested_range(range, custom_start, custom_end, month_starts_on_first, today);
+    (start, crate::limits::bounded_end(start, end))
+}
+
+fn category_slices(snapshot: &Snapshot, totals: Vec<(String, i128)>, hidden: &[String]) -> Vec<CategorySlice> {
+    let visible_total: i128 = totals
         .iter()
         .filter(|(category, _)| !hidden.contains(category))
         .map(|(_, value)| *value)
@@ -175,8 +186,8 @@ pub fn analytics(snapshot: &Snapshot, query: &AnalyticsQuery, today: NaiveDate) 
         .filter(|(_, date)| *date >= start && *date <= end)
         .collect();
 
-    let mut expenses: Vec<(String, i64)> = Vec::new();
-    let mut income: Vec<(String, i64)> = Vec::new();
+    let mut expenses: Vec<(String, i128)> = Vec::new();
+    let mut income: Vec<(String, i128)> = Vec::new();
     for (transaction, _) in &in_range {
         if is_internal_transfer(transaction) {
             continue;
@@ -196,7 +207,7 @@ pub fn analytics(snapshot: &Snapshot, query: &AnalyticsQuery, today: NaiveDate) 
     }
 
     let daily_buckets = days_between(start, end) <= 31;
-    let mut buckets: HashMap<String, (i64, i64)> = HashMap::new();
+    let mut buckets: HashMap<String, (i128, i128)> = HashMap::new();
     for (transaction, date) in &in_range {
         if is_internal_transfer(transaction) {
             continue;
@@ -231,7 +242,7 @@ pub fn analytics(snapshot: &Snapshot, query: &AnalyticsQuery, today: NaiveDate) 
             .collect()
     };
 
-    let mut balances: Vec<i64> = accounts.iter().map(|account| cents(account.initial_balance)).collect();
+    let mut balances: Vec<i128> = accounts.iter().map(|account| cents(account.initial_balance)).collect();
     let account_index: HashMap<&str, usize> = accounts
         .iter()
         .enumerate()
@@ -336,6 +347,8 @@ mod tests {
             checked: false,
             is_transfer: false,
             linked_transaction_id: None,
+            bank_source: None,
+            bank_transaction_id: None,
         };
         let snapshot = Snapshot {
             accounts: vec![Account {

@@ -24,7 +24,7 @@ PWA, le QR d'appairage et les mobiles appairés.
 
 ## Prérequis
 
-* Rust stable (1.88+)
+* Rust stable (1.94+)
 * GTK 4.12+ et libadwaita 1.5+ avec leurs fichiers de développement
 
 ```bash
@@ -52,6 +52,17 @@ cargo run -p dmx-money-gtk
 
 Sur macOS, `scripts/build-linux.sh` sert uniquement de contrôle de compilation
 (`brew install gtk4 libadwaita`) ; l'icône de zone de notification n'est compilée que sous Linux.
+
+Les tests d'import et de coalescence des notifications ne nécessitent aucune base utilisateur :
+
+```bash
+cargo test -p dmx-money-gtk
+# Objets GTK réels : fermeture des formulaires et libération des contrôles.
+xvfb-run cargo test -p dmx-money-gtk --features ui-tests --test ui-lifecycle
+```
+
+Le second test nécessite un affichage GTK disponible (`xvfb-run` sur une CI Linux). Il vérifie
+les références après fermeture, sans ouvrir de base ni simuler une session financière réelle.
 
 ## Captures de vérification
 

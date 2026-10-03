@@ -3,7 +3,7 @@
 
 use crate::dates::{month_key, parse_date};
 use crate::format::{currency_fr, date_day_month, date_numeric, js_number, weekday_day_month};
-use crate::metrics::{cents, euros, signed_cents};
+use crate::metrics::{euros, wide_cents as cents, wide_signed_cents as signed_cents};
 use crate::models::{string_enum, Account, Budget, Transaction, TransactionType, TRANSFER_CATEGORY_ID};
 use crate::snapshot::{CategoryDisplay, Snapshot};
 use crate::text::{search_tokens, SearchText};
@@ -89,7 +89,7 @@ pub struct JournalView {
 
 /// Dépenses (hors virements) par catégorie, compte et mois.
 pub(crate) struct BudgetSpending<'a> {
-    by_scope: HashMap<(&'a str, Option<&'a str>), HashMap<&'a str, i64>>,
+    by_scope: HashMap<(&'a str, Option<&'a str>), HashMap<&'a str, i128>>,
 }
 
 impl<'a> BudgetSpending<'a> {
@@ -113,7 +113,7 @@ impl<'a> BudgetSpending<'a> {
         Self { by_scope }
     }
 
-    fn spent(&self, category: &str, account_id: Option<&str>, month: &str) -> i64 {
+    fn spent(&self, category: &str, account_id: Option<&str>, month: &str) -> i128 {
         self.by_scope
             .get(&(category, account_id))
             .and_then(|months| months.get(month))
@@ -157,7 +157,7 @@ fn budget_remaining(budget: &Budget, spending: &BudgetSpending<'_>, transaction:
 }
 
 /// Solde de chaque compte après chaque transaction, dans l'ordre chronologique d'insertion.
-pub fn running_balances(snapshot: &Snapshot) -> HashMap<String, i64> {
+pub fn running_balances(snapshot: &Snapshot) -> HashMap<String, i128> {
     let mut order: Vec<usize> = (0..snapshot.transactions.len()).collect();
     // Les instantanés SQLite sont déjà décroissants : leur inversion évite un second tri.
     // Le repli conserve le comportement de cette fonction pour un instantané non ordonné.
@@ -176,7 +176,7 @@ pub fn running_balances(snapshot: &Snapshot) -> HashMap<String, i64> {
         });
     }
 
-    let mut balances: HashMap<&str, i64> = snapshot
+    let mut balances: HashMap<&str, i128> = snapshot
         .accounts
         .iter()
         .map(|account| (account.id.as_str(), cents(account.initial_balance)))
@@ -325,7 +325,7 @@ pub fn journal(snapshot: &Snapshot, query: &JournalQuery) -> JournalView {
     }
 
     let mut day_groups: Vec<JournalDayGroup> = Vec::new();
-    let mut visible_net = 0_i64;
+    let mut visible_net = 0_i128;
     for (index, row) in rows.iter().enumerate() {
         let amount = signed_cents(&row.transaction);
         visible_net += amount;
@@ -387,6 +387,8 @@ mod tests {
             checked: false,
             is_transfer: false,
             linked_transaction_id: None,
+            bank_source: None,
+            bank_transaction_id: None,
         }
     }
 

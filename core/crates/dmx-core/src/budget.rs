@@ -3,7 +3,7 @@
 use crate::dashboard::visible_budgets;
 use crate::dates::{add_months, days_in_month, end_of_month, parse_date, start_of_month};
 use crate::format::{date_day_month, date_day_month_year, js_number, month_year_long};
-use crate::metrics::{cents, euros};
+use crate::metrics::{euros, wide_cents as cents};
 use crate::models::{string_enum, Budget, Transaction, TransactionType, TRANSFER_CATEGORY_ID};
 use crate::snapshot::{is_selected, CategoryDisplay, Snapshot};
 use crate::text::{compare_fr, search_tokens, SearchText};
@@ -106,11 +106,11 @@ pub struct BudgetOverview {
 
 struct CategoryTotals {
     id: String,
-    budgeted: i64,
-    spent: i64,
+    budgeted: i128,
+    spent: i128,
 }
 
-fn progress(spent: i64, budgeted: i64) -> f64 {
+fn progress(spent: i128, budgeted: i128) -> f64 {
     if budgeted > 0 {
         spent as f64 / budgeted as f64 * 100.0
     } else {
@@ -127,8 +127,8 @@ fn is_month_expense(transaction: &Transaction, start: NaiveDate, end: NaiveDate)
 pub fn budget_overview(snapshot: &Snapshot, query: &BudgetQuery, today: NaiveDate) -> BudgetOverview {
     let month_start = start_of_month(today);
     let month_end = end_of_month(today);
-    let days = days_in_month(today) as i64;
-    let current_day = (today.day() as i64).min(days);
+    let days = days_in_month(today) as i128;
+    let current_day = (today.day() as i128).min(days);
     let remaining_days = (days - current_day + 1).max(1);
 
     let visible: Vec<&Budget> = visible_budgets(snapshot, &query.accounts).collect();
@@ -185,7 +185,7 @@ pub fn budget_overview(snapshot: &Snapshot, query: &BudgetQuery, today: NaiveDat
                 .iter()
                 .filter(|budget| budget.category == totals.id)
                 .map(|budget| {
-                    let spent: i64 = month_expenses
+                    let spent: i128 = month_expenses
                         .iter()
                         .filter(|transaction| {
                             transaction.category == budget.category
@@ -292,8 +292,8 @@ pub fn budget_overview(snapshot: &Snapshot, query: &BudgetQuery, today: NaiveDat
         })
         .collect();
 
-    let total_budgeted: i64 = visible.iter().map(|budget| cents(budget.amount)).sum();
-    let total_spent: i64 = month_expenses.iter().map(|transaction| cents(transaction.amount)).sum();
+    let total_budgeted: i128 = visible.iter().map(|budget| cents(budget.amount)).sum();
+    let total_spent: i128 = month_expenses.iter().map(|transaction| cents(transaction.amount)).sum();
     let remaining = total_budgeted - total_spent;
     let expected_spend = total_budgeted as f64 * current_day as f64 / days as f64;
 
@@ -330,8 +330,8 @@ pub fn budget_suggestions(snapshot: &Snapshot, accounts: &[String], today: Naive
         key: String,
         category: String,
         account_id: Option<String>,
-        total: i64,
-        current_month_spent: i64,
+        total: i128,
+        current_month_spent: i128,
         months: BTreeSet<(i32, u32)>,
     }
 
@@ -399,7 +399,7 @@ pub fn budget_suggestions(snapshot: &Snapshot, accounts: &[String], today: Naive
     let mut suggestions: Vec<BudgetSuggestion> = groups
         .into_iter()
         .map(|group| {
-            let month_count = group.months.len().max(1) as i64;
+            let month_count = group.months.len().max(1) as i128;
             let average = (group.total + month_count - 1).div_euclid(month_count);
             let category = snapshot.category_display(&group.category);
             BudgetSuggestion {
@@ -441,6 +441,8 @@ mod tests {
             checked: false,
             is_transfer: false,
             linked_transaction_id: None,
+            bank_source: None,
+            bank_transaction_id: None,
         }
     }
 

@@ -1,5 +1,5 @@
 import type { Account, Budget, Category, ScheduledTransaction, Transaction } from '../types';
-import { applyTransactionUpdate } from '../utils/transactionUpdate';
+import { applyTransactionUpdate, mergeTransactionDisplay } from '../utils/transactionUpdate';
 
 export interface BankSnapshot {
     accounts: Account[];
@@ -14,8 +14,19 @@ export const bankKeys: BankKey[] = ['accounts', 'transactions', 'categories', 'b
 // Pure transformation used inside one IndexedDB transaction with the outgoing message.
 export function applyBankMutation(data: BankSnapshot, path: string, method: string, body?: string) {
     const [, , resource, encodedId] = path.split('/');
-    const payload = body ? JSON.parse(body) : undefined;
+    const raw = body ? JSON.parse(body) : undefined;
+    const { _base: explicitBase, ...payload } = raw || {};
     const key = resource as BankKey;
+    if (resource === 'transfers' && method === 'PATCH') {
+        const additions: Transaction[] = [payload.fromTransaction, payload.toTransaction];
+        for (const item of additions) {
+            const current = data.transactions.find(row => row.id === item.id);
+            const base = item.type === 'expense' ? explicitBase?.fromTransaction : explicitBase?.toTransaction;
+            if (!current || !base) throw new Error('Virement absent ou état initial manquant. Reconnectez-vous avant de le modifier.');
+            data.transactions = data.transactions.map(row => row.id === item.id ? mergeTransactionDisplay(current, item, base) : row);
+        }
+        return { method, body };
+    }
     if (resource === 'transfers' && method === 'POST') {
         const additions: Transaction[] = [payload.fromTransaction, payload.toTransaction];
         data.transactions = [...additions, ...data.transactions.filter(item => !additions.some(next => next.id === item.id))];
@@ -29,9 +40,9 @@ export function applyBankMutation(data: BankSnapshot, path: string, method: stri
     } else if (method === 'PUT') {
         const previous = items.find(item => item.id === payload.id);
         if (!previous) throw new Error('Élément absent du cache. Reconnectez-vous avant de le modifier.');
-        if (key === 'transactions') data.transactions = applyTransactionUpdate(data.transactions, payload);
+        if (key === 'transactions') data.transactions = applyTransactionUpdate(data.transactions, explicitBase ? mergeTransactionDisplay(previous as Transaction, payload, explicitBase) : payload);
         else (data[key] as { id: string }[]) = items.map(item => item.id === payload.id ? payload : item);
-        return { method: 'PATCH', body: JSON.stringify({ ...payload, _base: previous }) };
+        return { method: 'PATCH', body: JSON.stringify({ ...payload, _base: explicitBase ?? previous }) };
     } else if (method === 'DELETE') {
         const id = decodeURIComponent(encodedId);
         (data[key] as { id: string }[]) = items.filter(item => item.id !== id);

@@ -7,6 +7,7 @@ namespace DmxMoney.ViewModels;
 public abstract class FormViewModel : ObservableObject
 {
     private string? error;
+    protected CancellationTokenSource PreparationLifetime { get; } = new();
 
     protected EngineStore Store { get; }
 
@@ -23,6 +24,16 @@ public abstract class FormViewModel : ObservableObject
     public virtual string SubmitTitle => "Enregistrer";
 
     public virtual bool ShowsSubmit => true;
+
+    public virtual bool IsBusy => false;
+
+    public virtual bool IsSubmitting => false;
+
+    public virtual Task<bool> SubmitAsync() => Task.FromResult(Submit());
+
+    public virtual void Close() => PreparationLifetime.Cancel();
+
+    public void ReportError(Exception exception) => Error = EngineStore.Message(exception);
 
     /// <summary>Valide le formulaire ; renvoie <c>true</c> si la boîte de dialogue peut se fermer.</summary>
     public abstract bool Submit();

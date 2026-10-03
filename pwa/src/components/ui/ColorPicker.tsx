@@ -1,3 +1,5 @@
+import { popoverContainer } from './DialogSurface';
+import { dismissPopoverOnEscape } from '../../utils/popoverKeyboard';
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown } from 'lucide-react';
@@ -12,6 +14,7 @@ interface ColorPickerProps {
 const ColorPicker: React.FC<ColorPickerProps> = ({ value, onChange, colors, size = 'md' }) => {
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
+    const triggerRef = useRef<HTMLButtonElement>(null);
     const popupRef = useRef<HTMLDivElement>(null);
 
     const sizes = {
@@ -82,12 +85,16 @@ const ColorPicker: React.FC<ColorPickerProps> = ({ value, onChange, colors, size
         console.log('ColorPicker: handleSelect called with', color);
         onChange(color);
         setIsOpen(false);
+        triggerRef.current?.focus();
     };
 
     return (
-        <div className="relative app-colorpicker" ref={containerRef}>
+        <div className="relative app-colorpicker" ref={containerRef}
+            onKeyDown={event => dismissPopoverOnEscape(event, isOpen, () => setIsOpen(false), triggerRef.current)}>
             <button
+                ref={triggerRef}
                 type="button"
+                aria-expanded={isOpen}
                 onClick={() => setIsOpen(!isOpen)}
                 className={`w-full flex items-center justify-between app-input transition-shadow app-colorpicker-button ${sizes[size]} ${padding[size]} ${isOpen ? 'ring-2 ring-primary-500 border-primary-500' : ''}`}
             >
@@ -124,7 +131,7 @@ const ColorPicker: React.FC<ColorPickerProps> = ({ value, onChange, colors, size
                         ))}
                     </div>
                 </div>,
-                document.body
+                popoverContainer(containerRef.current)
             )}
         </div>
     );

@@ -12,8 +12,8 @@ pub(super) struct AuthorizedSession {
     pub(super) id: String,
 }
 
-pub(super) async fn create_session(
-    pool: &DbPool,
+pub(super) async fn create_session<'e>(
+    pool: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
     passkey_id: Option<String>,
     device_label: Option<String>,
 ) -> Result<SessionTokens, String> {
@@ -47,6 +47,16 @@ pub(super) async fn create_session(
         raw_csrf,
         expires_at,
     })
+}
+
+pub(super) async fn revoke_session(pool: &DbPool, id: &str) -> Result<(), String> {
+    sqlx::query("UPDATE mobile_sessions SET revoked_at=$1 WHERE id=$2")
+        .bind(Utc::now().to_rfc3339())
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|error| map_db_error(error, "révocation de session mobile"))?;
+    Ok(())
 }
 
 pub(super) fn session_response(session: SessionTokens, passkey_required: bool) -> AuthRouteOutput {
@@ -88,17 +98,6 @@ pub(super) async fn authorize_session_for_auth(
     Ok(AuthorizedSession {
         id: row.try_get::<String, _>("id").map_err(|error| error.to_string())?,
     })
-}
-
-pub(super) async fn revoke_session(pool: &DbPool, id: &str) -> Result<(), String> {
-    let now = Utc::now().to_rfc3339();
-    sqlx::query("UPDATE mobile_sessions SET revoked_at = $1 WHERE id = $2")
-        .bind(now)
-        .bind(id)
-        .execute(pool)
-        .await
-        .map_err(|error| map_db_error(error, "révocation de session mobile"))?;
-    Ok(())
 }
 
 /// Stable across reloads and tabs; the high-entropy session remains the only bearer secret.

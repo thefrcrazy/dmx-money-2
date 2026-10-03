@@ -27,12 +27,16 @@ fn date(value: &str) -> Result<(), String> {
     }
 }
 fn transaction(item: &Transaction) -> Result<(), String> {
+    dmx_core::limits::transaction(item).map_err(|error| error.to_string())?;
     required(&item.id)?;
     required(&item.account_id)?;
     amount(item.amount)?;
     date(&item.date)?;
     if item.transaction_type == TransactionType::Transfer {
         return Err("Un virement doit contenir un débit et un crédit.".into());
+    }
+    if item.category == TRANSFER_CATEGORY_ID && !item.is_transfer {
+        return Err("Un virement doit contenir une contrepartie liée.".into());
     }
     if item.is_transfer
         && (item.category != TRANSFER_CATEGORY_ID
@@ -56,6 +60,7 @@ pub(super) fn validate(resource: &str, body: &[u8]) -> Result<(), String> {
     match resource {
         "accounts" => {
             let item: Account = decode(body)?;
+            dmx_core::limits::account(&item).map_err(|error| error.to_string())?;
             required(&item.id)?;
             required(&item.name)?;
             if !dmx_core::metrics::is_valid_money(item.initial_balance) {
@@ -64,18 +69,21 @@ pub(super) fn validate(resource: &str, body: &[u8]) -> Result<(), String> {
         }
         "categories" => {
             let item: Category = decode(body)?;
+            dmx_core::limits::category(&item).map_err(|error| error.to_string())?;
             required(&item.id)?;
             required(&item.name)?;
         }
         "transactions" => transaction(&decode(body)?)?,
         "budgets" => {
             let item: Budget = decode(body)?;
+            dmx_core::limits::budget(&item).map_err(|error| error.to_string())?;
             required(&item.id)?;
             required(&item.name)?;
             amount(item.amount)?;
         }
         "scheduled" => {
             let item: ScheduledTransaction = decode(body)?;
+            dmx_core::limits::scheduled(&item).map_err(|error| error.to_string())?;
             required(&item.id)?;
             required(&item.account_id)?;
             amount(item.amount)?;

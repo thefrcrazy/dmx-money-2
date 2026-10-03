@@ -3,21 +3,60 @@
   "name": "dmxmoney-remote-relay",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-22",
-  "compatibility_flags": ["nodejs_compat"],
-  "vars": { "COMPANION_ORIGIN": "https://dmxmoney-companion.pages.dev" },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "vars": {
+    "COMPANION_ORIGIN": "https://dmxmoney-companion.pages.dev"
+  },
   "assets": {
     "directory": ".assets",
     "binding": "ASSETS",
     "run_worker_first": true
   },
   "durable_objects": {
-    "bindings": [{ "name": "RELAYS", "class_name": "DeviceRelay" }]
+    "bindings": [
+      {
+        "name": "RELAYS",
+        "class_name": "DeviceRelay"
+      }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceRelay"] }],
-  "ratelimits": [{
-    "name": "ENROLLMENT_LIMIT",
-    "namespace_id": "1001",
-    "simple": { "limit": 5, "period": 60 }
-  }],
-  "observability": { "enabled": false }
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "DeviceRelay"
+      ]
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "ENROLLMENT_LIMIT",
+      "namespace_id": "1001",
+      "simple": {
+        "limit": 5,
+        "period": 60
+      }
+    },
+    {
+      "name": "REQUEST_LIMIT",
+      "namespace_id": "1002",
+      "simple": {
+        "limit": 600,
+        "period": 60
+      }
+    },
+    {
+      "name": "SERVICE_LIMIT",
+      "namespace_id": "1003",
+      "simple": {
+        "limit": 6000,
+        "period": 60
+      }
+    }
+  ],
+  "observability": {
+    "enabled": false
+  }
 }

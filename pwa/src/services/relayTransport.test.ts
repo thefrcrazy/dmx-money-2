@@ -16,7 +16,7 @@ const fromBase64 = (value: string) => Uint8Array.from(atob(value.replace(/-/g, '
 beforeEach(() => {
     const storage = new Map<string, string>();
     Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: indexedDB });
-    Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: { pathname: '/mobile', origin: 'https://sync.example.test' }, isSecureContext: true, PublicKeyCredential: class {}, setTimeout, clearTimeout } });
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: { pathname: '/mobile', origin: 'https://sync.example.test' }, isSecureContext: true, PublicKeyCredential: class {}, setTimeout, clearTimeout, dispatchEvent: () => true } });
     Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { credentials: { get: mock(async () => { throw new Error('WebAuthn must be user initiated'); }), create: mock(async () => { throw new Error('WebAuthn must be user initiated'); }) }, userAgent: 'Fixture', platform: 'Fixture' } });
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
         getItem: (key: string) => storage.get(key) ?? null,
@@ -456,4 +456,21 @@ test('invalid pagination cannot loop forever or overwrite the existing cache', a
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     expect(await offlineStore.getData('transactions')).toEqual([{ id: 'saved' }] as never);
     await offlineStore.clearAll();
+});
+
+test('oversized pages reduce their limit without dropping or duplicating the completed journal', async () => {
+    await configureMobileRelay(endpoint, encodedKey);
+    setMobileApiBaseUrl(endpoint);
+    await markMobileRelayAuthenticated(sessionExpiresAt());
+    const paths: string[] = [];
+    globalThis.fetch = mock(async (_url: string, init: RequestInit) => {
+        const envelope = JSON.parse(init.body as string);
+        const clear = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromBase64(envelope.nonce) }, await peerKey('request'), fromBase64(envelope.ciphertext));
+        const request = JSON.parse(decode.decode(clear));
+        paths.push(request.path);
+        if (paths.length === 1) return respond(envelope.id, { id: envelope.id, status: 413, headers: {}, body: '{"error":"response_too_large"}' });
+        return respond(envelope.id, { id: envelope.id, status: 200, headers: {}, body: JSON.stringify({ transactions: [{ id: 'retained' }], dataVersion: 7, nextOffset: null }) });
+    }) as never;
+    expect(await new DatabaseService().getTransactions()).toEqual([{ id: 'retained' }] as never);
+    expect(paths).toEqual(['/api/transactions/page?offset=0&limit=2000', '/api/transactions/page?offset=0&limit=1000']);
 });

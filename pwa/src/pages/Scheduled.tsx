@@ -1,6 +1,6 @@
 import { useLocalToday } from '../hooks/useLocalToday';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Plus, Calendar, Trash2, Edit2, Clock, X, Tag, Sparkles, Search, ChevronDown, ArrowRightLeft } from 'lucide-react';
 import Button from '../components/ui/Button';
 import { useBank } from '../context/BankContext';
@@ -16,6 +16,9 @@ import { ScheduledDueRange, ScheduledTransaction, Transaction, TransactionType, 
 import { ICONS } from '../constants/icons';
 import Table from '../components/ui/Table';
 import Input from '../components/ui/Input';
+import VirtualCardList from '../components/scheduled/VirtualCardList';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { formatCurrency } from '../utils/format';
 
 type RecurrenceIdentityInput = {
     description: string;
@@ -118,12 +121,15 @@ const getRecurrenceIdentity = (item: RecurrenceIdentityInput) => [
 
 const Scheduled: React.FC = () => {
     const localToday = useLocalToday();
+    const desktopLayout = useMediaQuery('(min-width: 768px)');
     const { accounts, transactions, scheduled, categories, budgets, addScheduled, updateScheduled, deleteScheduled, filterAccount } = useBank();
     const { showToast } = useToast();
     const { settings, updateDismissedScheduledSuggestions, updateSettings } = useSettings();
     const dueRange = settings.scheduledDueRange || 'all';
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingTransaction, setEditingTransaction] = useState<ScheduledTransaction | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
+    const saving = useRef(false);
     const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [isDueRangeDropdownOpen, setIsDueRangeDropdownOpen] = useState(false);
@@ -195,7 +201,7 @@ const Scheduled: React.FC = () => {
                     typeLabel,
                     transaction.description,
                     transaction.amount,
-                    `${amountPrefix}${new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(transaction.amount)} €`,
+                    `${amountPrefix}${formatCurrency(transaction.amount)}`,
                     budgetLabel,
                     statusLabel
                 ].map(normalizeSearchValue).join(' ');
@@ -354,6 +360,7 @@ const Scheduled: React.FC = () => {
     });
 
     const handleOpenModal = (transaction?: ScheduledTransaction) => {
+        if (saving.current) return;
         if (transaction) {
             setEditingTransaction(transaction);
             setFormData({
@@ -390,8 +397,11 @@ const Scheduled: React.FC = () => {
         setIsModalOpen(true);
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!isModalOpen || saving.current) return;
+        saving.current = true;
+        setIsSaving(true);
         const transactionData = {
             description: formData.description,
             amount: parseFloat(formData.amount),
@@ -406,12 +416,19 @@ const Scheduled: React.FC = () => {
             endDate: formData.endDate || undefined
         };
 
-        if (editingTransaction) {
-            updateScheduled({ ...transactionData, id: editingTransaction.id });
-        } else {
-            addScheduled(transactionData);
+        try {
+            if (editingTransaction) {
+                await updateScheduled({ ...transactionData, id: editingTransaction.id });
+            } else {
+                await addScheduled(transactionData);
+            }
+            setIsModalOpen(false);
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : "L'échéance n'a pas pu être enregistrée.", "error");
+        } finally {
+            saving.current = false;
+            setIsSaving(false);
         }
-        setIsModalOpen(false);
     };
 
     const handleDeleteClick = (id: string) => {
@@ -490,7 +507,7 @@ const Scheduled: React.FC = () => {
         const category = getCategoryDetails(budget.category);
         return {
             id: budget.id,
-            label: `${budget.name} · ${new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(budget.amount)} €`,
+            label: `${budget.name} · ${formatCurrency(budget.amount, 0)}`,
             icon: category.icon,
             color: category.color
         };
@@ -622,7 +639,7 @@ const Scheduled: React.FC = () => {
                 </div>
             </div>
 
-            <div className="hidden md:flex flex-1 bg-white dark:bg-[#121212] rounded-xl border border-black/[0.05] dark:border-white/10 shadow-sm overflow-hidden flex-col min-h-[calc(100vh-170px)] max-h-[calc(100vh-170px)]">
+            {desktopLayout && <div className="flex flex-1 bg-white dark:bg-[#121212] rounded-xl border border-black/[0.05] dark:border-white/10 shadow-sm overflow-hidden flex-col min-h-[calc(100vh-170px)] max-h-[calc(100vh-170px)]">
                 <Table
                     data={scheduledTransactions}
                     keyExtractor={(t) => t.id}
@@ -635,7 +652,7 @@ const Scheduled: React.FC = () => {
                         {
                             header: 'Compte',
                             render: (transaction) => {
-                                const account = accounts.find(a => a.id === transaction.accountId);
+                                const account = accountMap.get(transaction.accountId);
                                 const isEnded = transaction.endDate && new Date(transaction.endDate) < new Date();
                                 return (
                                     <div className="flex items-center gap-3 min-w-0">
@@ -735,7 +752,7 @@ const Scheduled: React.FC = () => {
                                 <span className={`text-sm font-medium ${transaction.type === 'income' ? 'text-emerald-600' :
                                     transaction.type === 'transfer' ? 'text-blue-600 dark:text-blue-400' : 'text-red-600'
                                     } group-[.retro]:text-black`}>
-                                    {transaction.type === 'income' ? '+' : transaction.type === 'transfer' ? '' : '-'}{new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(transaction.amount)} €
+                                    {transaction.type === 'income' ? '+' : transaction.type === 'transfer' ? '' : '-'}{formatCurrency(transaction.amount)}
                                 </span>
                             ),
                             className: "whitespace-nowrap"
@@ -769,12 +786,14 @@ const Scheduled: React.FC = () => {
                         return isEnded ? 'bg-red-5 dark:bg-red-900/10' : '';
                     }}
                 />
-            </div>
+            </div>}
 
-            <div className="md:hidden space-y-3 pb-4">
+            {!desktopLayout && <div className="pb-4">
                 {scheduledTransactions.length > 0 ? (
-                    scheduledTransactions.map(transaction => {
-                        const account = accounts.find(a => a.id === transaction.accountId);
+                    <VirtualCardList data={scheduledTransactions} label="Transactions récurrentes" rowHeight={180}
+                        resetKey={JSON.stringify([filterAccount, dueRange, filterCategories, filterFrequencies, searchTerm])}
+                        renderRow={transaction => {
+                        const account = accountMap.get(transaction.accountId);
                         const category = getCategoryDetails(transaction.category);
                         const isIncome = transaction.type === 'income';
                         const isTransfer = transaction.type === 'transfer';
@@ -783,7 +802,7 @@ const Scheduled: React.FC = () => {
                         return (
                             <article 
                                 key={transaction.id} 
-                                className={`p-4 rounded-2xl border border-black/[0.05] dark:border-white/10 bg-white dark:bg-[#121212] shadow-sm relative overflow-hidden transition-all ${
+                                className={`h-full p-4 rounded-2xl border border-black/[0.05] dark:border-white/10 bg-white dark:bg-[#121212] shadow-sm relative overflow-hidden transition-all ${
                                     isEnded ? 'opacity-60 border-red-200 dark:border-red-900/30' : ''
                                 }`}
                             >
@@ -803,21 +822,21 @@ const Scheduled: React.FC = () => {
                                                 <p className={`shrink-0 text-[15px] font-bold tabular-nums ${
                                                     isIncome ? 'text-emerald-600' : isTransfer ? 'text-blue-600 dark:text-blue-400' : 'text-red-600'
                                                 }`}>
-                                                    {isIncome ? '+' : isTransfer ? '' : '-'}{new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(transaction.amount)} €
+                                                    {isIncome ? '+' : isTransfer ? '' : '-'}{formatCurrency(transaction.amount)}
                                                 </p>
                                             </div>
-                                            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-gray-500 dark:text-neutral-400">
-                                                <span className="truncate max-w-[120px]">{account?.name || 'Compte'}</span>
-                                                <span className="h-1 w-1 rounded-full bg-gray-300 dark:bg-neutral-700" />
-                                                <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-tight" style={{ 
+                                            <div className="mt-1.5 space-y-1 text-[11px] text-gray-500 dark:text-neutral-400">
+                                                <div className="flex min-w-0 items-center justify-between gap-2">
+                                                    <span className="min-w-0 flex-1 truncate" title={account?.name || 'Compte'}>{account?.name || 'Compte'}</span>
+                                                    <span className="shrink-0 font-semibold text-primary-600 dark:text-primary-400">
+                                                        {FREQUENCY_LABELS[transaction.frequency]}
+                                                    </span>
+                                                </div>
+                                                <span className="inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-tight" style={{
                                                     backgroundColor: isTransfer ? '#6366f114' : `${category.color}14`, 
                                                     color: isTransfer ? '#6366f1' : category.color 
                                                 }}>
-                                                    {isTransfer ? 'Virement' : category.name}
-                                                </span>
-                                                <span className="h-1 w-1 rounded-full bg-gray-300 dark:bg-neutral-700" />
-                                                <span className="font-semibold text-primary-600 dark:text-primary-400">
-                                                    {FREQUENCY_LABELS[transaction.frequency]}
+                                                    <span className="truncate">{isTransfer ? 'Virement' : category.name}</span>
                                                 </span>
                                             </div>
                                             <div className="mt-2 pt-2 border-t border-black/[0.03] dark:border-white/[0.03] flex items-center justify-between text-[11px] text-gray-400 dark:text-neutral-500">
@@ -855,7 +874,7 @@ const Scheduled: React.FC = () => {
                                 </div>
                             </article>
                         );
-                    })
+                    }} />
                 ) : (
                     <div className="rounded-2xl border border-black/[0.05] dark:border-white/10 bg-white dark:bg-[#121212] p-8 text-center shadow-sm">
                         <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-50 dark:bg-neutral-900">
@@ -869,7 +888,7 @@ const Scheduled: React.FC = () => {
                         </p>
                     </div>
                 )}
-            </div>
+            </div>}
 
             <FormPopup
                 isOpen={isSuggestionsOpen}
@@ -913,7 +932,7 @@ const Scheduled: React.FC = () => {
                                     <span className={`text-sm font-semibold tabular-nums whitespace-nowrap ${suggestion.type === 'income' ? 'text-emerald-600' :
                                         suggestion.type === 'transfer' ? 'text-blue-600 dark:text-blue-400' : 'text-red-600'
                                         }`}>
-                                        {suggestion.type === 'income' ? '+' : suggestion.type === 'transfer' ? '' : '-'}{new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(suggestion.amount)} €
+                                        {suggestion.type === 'income' ? '+' : suggestion.type === 'transfer' ? '' : '-'}{formatCurrency(suggestion.amount)}
                                     </span>
                                     <Button
                                         variant="secondary"
@@ -941,11 +960,12 @@ const Scheduled: React.FC = () => {
 
             <FormPopup
                 isOpen={isModalOpen}
-                onClose={() => setIsModalOpen(false)}
+                onClose={() => { if (!saving.current) setIsModalOpen(false); }}
+                isSubmitting={isSaving}
+                title={editingTransaction ? "Modifier la transaction récurrente" : "Nouvelle transaction récurrente"}
             >
                 <form onSubmit={handleSubmit} className="p-6 space-y-6">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-200">{editingTransaction ? "Modifier la transaction" : "Nouvelle transaction récurrente"}</h3>
-                    <div className="space-y-4">
+                    <fieldset disabled={isSaving} className="space-y-4 min-w-0">
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Date de début</label>
@@ -1144,18 +1164,20 @@ const Scheduled: React.FC = () => {
                                 type="button"
                                 variant="secondary"
                                 onClick={() => setIsModalOpen(false)}
+                                disabled={isSaving}
                                 className="flex-1"
                             >
                                 Annuler
                             </Button>
                             <Button
                                 type="submit"
+                                isLoading={isSaving}
                                 className="flex-1"
                             >
                                 {editingTransaction ? 'Modifier' : 'Ajouter'}
                             </Button>
                         </div>
-                    </div>
+                    </fieldset>
                 </form>
             </FormPopup>
 

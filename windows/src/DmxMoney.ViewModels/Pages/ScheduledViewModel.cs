@@ -12,6 +12,8 @@ public sealed partial class ScheduledViewModel : PageViewModel
     [ObservableProperty]
     private string search = string.Empty;
 
+    private bool reconcilingCategories;
+
     [ObservableProperty]
     private IReadOnlyList<string> categories = [];
 
@@ -41,8 +43,14 @@ public sealed partial class ScheduledViewModel : PageViewModel
         }
     }
 
+    public IReadOnlyList<Category> CategoryChoices => Store.Categories;
+
     public override void Refresh()
     {
+        var validIds = CategoryChoices.Select(category => category.Id).ToHashSet();
+        var filtered = Categories.Where(validIds.Contains).ToArray();
+        if (!Categories.SequenceEqual(filtered)) { reconcilingCategories = true; Categories = filtered; reconcilingCategories = false; }
+        OnPropertyChanged(nameof(CategoryChoices));
         var query = new ScheduledQuery(
             [.. Store.SelectedAccountIds],
             Store.Settings.ScheduledDueRange,
@@ -57,7 +65,7 @@ public sealed partial class ScheduledViewModel : PageViewModel
 
     partial void OnSearchChanged(string value) => Refresh();
 
-    partial void OnCategoriesChanged(IReadOnlyList<string> value) => Refresh();
+    partial void OnCategoriesChanged(IReadOnlyList<string> value) { if (!reconcilingCategories) Refresh(); }
 
     partial void OnFrequenciesChanged(IReadOnlyList<Periodicity> value) => Refresh();
 

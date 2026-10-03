@@ -9,8 +9,8 @@ import UIKit
 /// État partagé de l'application : moteur Rust, réglages, comptes, catégories et filtre global.
 ///
 /// Toutes les valeurs métier viennent du noyau ; le store ne fait que les relayer aux vues.
-/// Les lectures sont rapides (instantané en cache côté Rust) et peuvent se faire sur le fil
-/// principal ; les opérations longues (pont, import, restauration) passent par `perform`.
+/// Les pages et imports utilisent la file du noyau ; les résultats publiés reviennent sur le fil UI.
+/// Les écritures longues (pont, import, restauration) passent par `perform`.
 public final class AppStore: ObservableObject {
     public let engine: DmxEngine
 
@@ -30,7 +30,13 @@ public final class AppStore: ObservableObject {
     @Published public var route: AppRoute = .dashboard {
         didSet { if oldValue != route { processDueScheduled() } }
     }
-    @Published public var form: FormRequest?
+    @Published public var form: FormRequest? {
+        didSet { formGeneration &+= 1 }
+    }
+    public private(set) var formGeneration: UInt64 = 0
+    private var importReadGeneration: UInt64 = 0
+    @Published public private(set) var formWorkGeneration: UInt64?
+    public var formBusy: Bool { formWorkGeneration != nil }
     @Published public var confirmation: ConfirmRequest?
     @Published public var toast: String?
     @Published public private(set) var bridgeStatus: CompanionStatus?
@@ -43,6 +49,7 @@ public final class AppStore: ObservableObject {
     private var processingDue = false
     private var lastDueCheck: (day: String, version: Int64)?
     private var loadedSnapshot: (version: Int64, day: String)?
+    private var balanceReadTask: StoreReadTask?
 
     /// Install once after the window exists; also refresh date-sensitive pages after midnight.
     public func startScheduledRefresh() {
@@ -152,9 +159,11 @@ public final class AppStore: ObservableObject {
     public var assistantRewriter: (@Sendable (String) -> String?)?
 
     private func bumpRevision() {
-        if let summary = try? engine.dashboard(accounts: selectedAccountIds, today: today).balances {
-            balances = summary
-        }
+        balanceReadTask?.cancel()
+        let accounts = selectedAccountIds, day = today
+        balanceReadTask = fetch({ try $0.dashboard(accounts: accounts, today: day).balances }, completion: { [weak self] in
+            self?.balances = $0
+        }, failure: { [weak self] in self?.errorMessage = $0 })
         revision &+= 1
     }
 
@@ -230,6 +239,26 @@ public final class AppStore: ObservableObject {
         }
     }
 
+    /// Cancellable read: a closed form never receives a stale parse/query result.
+    @discardableResult
+    public func fetch<T>(_ work: @escaping (DmxEngine) throws -> T, completion: @escaping (T) -> Void,
+                         failure: @escaping (String) -> Void) -> StoreReadTask {
+        let task = StoreReadTask()
+        let engine = self.engine
+        queue.async {
+            guard !task.isCancelled else { return }
+            let result = Result { try work(engine) }
+            DispatchQueue.main.async {
+                guard !task.isCancelled else { return }
+                switch result {
+                case .success(let value): completion(value)
+                case .failure(let error): failure(AppStore.message(for: error))
+                }
+            }
+        }
+        return task
+    }
+
     public func apply(_ change: SettingsChange) {
         if let message = attempt({ engine in _ = try engine.applySettingsChange(change: change) }) {
             errorMessage = message
@@ -272,7 +301,42 @@ public final class AppStore: ObservableObject {
     // MARK: - Présentation (formulaires, confirmations, messages)
 
     public func present(_ request: FormRequest) {
+        guard !formBusy else { return }
         form = request
+    }
+
+    public func closeForm(generation: UInt64) {
+        guard generation == formGeneration, !formBusy else { return }
+        form = nil
+    }
+
+    @discardableResult
+    public func beginFormWork() -> UInt64 {
+        formWorkGeneration = formGeneration
+        return formGeneration
+    }
+
+    public func finishFormWork(generation: UInt64) {
+        if formWorkGeneration == generation { formWorkGeneration = nil }
+    }
+
+    /// Retains the provider's security-scoped access on the reading queue, not just the UI callback.
+    public func openImport(_ url: URL) {
+        guard !formBusy else { return }
+        let generation = formGeneration
+        importReadGeneration &+= 1
+        let readGeneration = importReadGeneration
+        FileText.readAsync(url) { [weak self] result in
+            guard let self, self.importReadGeneration == readGeneration, self.formGeneration == generation, !self.formBusy else { return }
+            switch result {
+            case .success(let content):
+                let name = url.lastPathComponent
+                self.present(["dmx", "json"].contains(url.pathExtension.lowercased())
+                    ? .restoreBackup(content: content, fileName: name)
+                    : .statementImport(content: content, fileName: name))
+            case .failure(let error): self.errorMessage = error.localizedDescription
+            }
+        }
     }
 
     public func confirm(title: String, message: String, confirmTitle: String = "Supprimer", destructive: Bool = true, action: @escaping () -> Void) {
@@ -361,6 +425,13 @@ public final class AppStore: ObservableObject {
         accentColor: nil,
         effectiveGroupOrder: []
     )
+}
+
+public final class StoreReadTask: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    public func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+    public var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
 }
 
 /// Relais des notifications du noyau (écritures faites par le pont PWA ou la synchronisation).

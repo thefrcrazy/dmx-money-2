@@ -13,5 +13,14 @@ if [[ "$(uname -s)" == "Darwin" && -d /Applications/Xcode.app ]]; then
     export SDKROOT
 fi
 
+# Rust's Mach-O strip path can misalign LINKEDIT for dyld on Xcode/macOS27.
+# Keep the native library loadable; Xcode still controls stripping of the final application.
+# https://github.com/rust-lang/rust/issues/157750
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    export CARGO_PROFILE_DEV_STRIP=none
+    export CARGO_PROFILE_TEST_STRIP=none
+    export CARGO_PROFILE_RELEASE_STRIP=none
+fi
+
 export DMX_VERSION
 DMX_VERSION="$(tr -d '[:space:]' < "$DMX_ROOT/VERSION")"

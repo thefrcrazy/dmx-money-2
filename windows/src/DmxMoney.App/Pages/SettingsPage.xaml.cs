@@ -55,6 +55,8 @@ public sealed partial class SettingsPage : Page
                 BorderThickness = new Thickness(0),
                 Tag = hex,
             };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, $"Couleur d’accent {hex}");
+            ToolTipService.SetToolTip(button, $"Couleur d’accent {hex}");
             button.Click += OnAccentClicked;
             return button;
         }).ToList();
@@ -68,6 +70,14 @@ public sealed partial class SettingsPage : Page
         DarkTheme.IsChecked = ViewModel.Theme == Theme.Dark;
         SystemTheme.IsChecked = ViewModel.Theme == Theme.System;
         DefaultAccent.BorderThickness = new Thickness(ViewModel.IsDefaultAccent ? 2 : 1);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(DefaultAccent, ViewModel.IsDefaultAccent ? "Sélectionnée" : "Non sélectionnée");
+        foreach (var swatch in AccentColors.ItemsSource as IEnumerable<Button> ?? [])
+        {
+            var selected = swatch.Tag is string hex && hex == ViewModel.AccentColor;
+            swatch.BorderThickness = new Thickness(selected ? 2 : 0);
+            swatch.BorderBrush = Palette.Resource("TextFillColorPrimaryBrush");
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(swatch, selected ? "Sélectionnée" : "Non sélectionnée");
+        }
 
         BridgeSection.Visibility = ViewModel.BridgeAvailable ? Visibility.Visible : Visibility.Collapsed;
         BridgeSwitch.IsOn = ViewModel.BridgeSwitchOn;

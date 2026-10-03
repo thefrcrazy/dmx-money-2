@@ -7,6 +7,7 @@ use dmx_core::settings::{
     apply_settings_patch, get_settings_record, legacy_mobile_settings_patch, SettingsPatch, SettingsRecord,
 };
 use dmx_core::{dates, ops, repo, scheduling, CoreError};
+use futures_util::TryStreamExt;
 use sqlx::SqliteConnection;
 
 fn core_error(error: CoreError) -> String {
@@ -30,6 +31,8 @@ struct TransferPayload {
     to_transaction: Transaction,
     #[serde(rename = "_mutationId", default)]
     mutation_id: Option<String>,
+    #[serde(rename = "_mutationCreatedAt", default)]
+    mutation_created_at: Option<String>,
 }
 
 fn ok(status: u16) -> HttpResponse {
@@ -55,10 +58,21 @@ pub(super) async fn route_api_request(
     let id = parts.get(2).map(String::as_str);
     let method = request.method.as_str();
 
+    if matches!(method, "POST" | "PUT" | "PATCH") && matches!(resource, "transactions" | "transfers") {
+        let payload: serde_json::Value = parse_json(&request.body)?;
+        if let Err(error) = bank_sync::replay_deadline(&payload) {
+            return Ok((error_response(409, &error), false));
+        }
+    }
+
     if matches!(method, "POST" | "PUT") && !(resource == "scheduled" && id == Some("process-due")) {
         if let Err(error) = super::validation::validate(resource, &request.body) {
             return Ok((error_response(400, &error), false));
         }
+    }
+
+    if method == "PATCH" && resource == "transfers" {
+        return super::bank_sync::patch_transfer(pool, &request.body).await;
     }
 
     if method == "PATCH" && resource != "settings" {
@@ -178,6 +192,15 @@ pub(super) async fn route_api_request(
         }
         ("POST", "transfers") => {
             let payload: TransferPayload = parse_json(&request.body)?;
+            let stamp = payload
+                .mutation_created_at
+                .as_ref()
+                .map(|value| json!({"_mutationCreatedAt": value}))
+                .unwrap_or_else(|| json!({}));
+            let replay_until = match bank_sync::replay_deadline(&stamp) {
+                Ok(value) => value,
+                Err(error) => return Ok((error_response(409, &error), false)),
+            };
             let mut tx = pool
                 .begin_with("BEGIN IMMEDIATE")
                 .await
@@ -225,9 +248,10 @@ pub(super) async fn route_api_request(
                 .await
                 .map_err(core_error)?;
             if let Some(id) = &payload.mutation_id {
-                sqlx::query("INSERT INTO mobile_mutation_receipts (id, fingerprint) VALUES (?, ?)")
+                sqlx::query("INSERT INTO mobile_mutation_receipts (id, fingerprint, replay_until) VALUES (?, ?, ?)")
                     .bind(id)
                     .bind(fingerprint)
+                    .bind(replay_until)
                     .execute(&mut *tx)
                     .await
                     .map_err(|e| e.to_string())?;
@@ -384,18 +408,39 @@ async fn transaction_page(pool: &DbPool, path: &str) -> Result<(HttpResponse, bo
             false,
         ));
     }
-    let rows = sqlx::query("SELECT * FROM transactions ORDER BY date DESC, rowid DESC LIMIT $1 OFFSET $2")
+    // JSON is embedded as a string in the encrypted response. 3 MiB leaves margin
+    // for a worst-case 2x escape expansion followed by base64 (relay cap: 12 MiB).
+    const PAGE_JSON_BUDGET: usize = 3 * 1024 * 1024;
+    let mut rows = sqlx::query("SELECT * FROM transactions ORDER BY date DESC, rowid DESC LIMIT $1 OFFSET $2")
         .bind(limit + 1)
         .bind(offset)
-        .fetch_all(&mut *read)
+        .fetch(&mut *read);
+    let mut transactions = Vec::new();
+    let mut bytes = 256;
+    let mut has_more = false;
+    while let Some(row) = rows
+        .try_next()
         .await
-        .map_err(|error| map_db_error(error, "lecture du journal paginé"))?;
-    let next_offset = (rows.len() > limit as usize).then_some(offset + limit);
-    let transactions: Vec<_> = rows
-        .iter()
-        .take(limit as usize)
-        .map(repo::transaction_from_row)
-        .collect();
+        .map_err(|error| map_db_error(error, "lecture du journal paginé"))?
+    {
+        if transactions.len() >= limit as usize {
+            has_more = true;
+            break;
+        }
+        let item = repo::transaction_from_row(&row);
+        let item_bytes = serde_json::to_vec(&item).map_err(|error| error.to_string())?.len() + 1;
+        if bytes + item_bytes > PAGE_JSON_BUDGET {
+            if transactions.is_empty() {
+                return Ok((error_response(413, "Une opération dépasse la taille de synchronisation autorisée. Réduisez son libellé depuis l’application de bureau."), false));
+            }
+            has_more = true;
+            break;
+        }
+        bytes += item_bytes;
+        transactions.push(item);
+    }
+    drop(rows);
+    let next_offset = has_more.then_some(offset + transactions.len() as i64);
     read.commit()
         .await
         .map_err(|error| map_db_error(error, "lecture du journal paginé"))?;
@@ -441,4 +486,72 @@ async fn is_deleted(connection: &mut SqliteConnection, entity: &str, id: &str) -
         .await
         .map_err(|error| CoreError::Database(map_db_error(error, "lecture de suppression")))?;
     Ok(deleted.unwrap_or(false))
+}
+
+#[cfg(test)]
+mod byte_page_tests {
+    use super::*;
+    #[tokio::test]
+    async fn escaped_descriptions_split_pages_and_preserve_every_record_within_relay_cap() {
+        let pool = dmx_core::db::open_memory_pool().await.unwrap();
+        let account = ops::save_account(
+            &pool,
+            ops::AccountDraft {
+                name: "Fictif".into(),
+                ..ops::new_account_draft()
+            },
+        )
+        .await
+        .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        for index in 0..450 {
+            repo::insert_transaction(
+                &mut tx,
+                &Transaction {
+                    id: format!("fixture-{index}"),
+                    date: "2026-10-03".into(),
+                    account_id: account.clone(),
+                    transaction_type: dmx_core::models::TransactionType::Expense,
+                    amount: 1.0,
+                    category: "test".into(),
+                    description: "\\\"".repeat(2048),
+                    checked: false,
+                    is_transfer: false,
+                    linked_transaction_id: None,
+                    bank_source: None,
+                    bank_transaction_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        tx.commit().await.unwrap();
+        let mut offset = 0;
+        let mut ids = std::collections::HashSet::new();
+        let mut pages = 0;
+        loop {
+            let (response, changed) =
+                transaction_page(&pool, &format!("/api/transactions/page?limit=2000&offset={offset}"))
+                    .await
+                    .unwrap();
+            assert_eq!(response.status, 200);
+            assert!(!changed);
+            assert!(response.body.len() <= 3 * 1024 * 1024);
+            let clear = serde_json::to_vec(&json!({"id":"fixture", "status":200, "headers":{"content-type":response.content_type}, "body":String::from_utf8(response.body.clone()).unwrap()})).unwrap();
+            let encoded = (clear.len() + 16).div_ceil(3) * 4 + 256;
+            assert!(encoded < 12 * 1024 * 1024);
+            let page: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+            for row in page["transactions"].as_array().unwrap() {
+                assert!(ids.insert(row["id"].as_str().unwrap().to_string()));
+            }
+            pages += 1;
+            let Some(next) = page["nextOffset"].as_i64() else {
+                break;
+            };
+            assert!(next > offset);
+            offset = next;
+        }
+        assert_eq!(ids.len(), 450);
+        assert!(pages >= 2);
+    }
 }

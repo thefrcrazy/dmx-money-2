@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         controller.showWindow(nil)
+        UpdateChecker.reportHealthyLaunch()
         statusItemController = StatusItemController(store: store, appDelegate: self)
 
         store.startScheduledRefresh()
@@ -204,17 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @discardableResult
     func openImportFile(_ url: URL) -> Bool {
-        guard let content = FileText.read(url) else {
-            store.errorMessage = "Le fichier n'a pas pu être lu."
-            return false
-        }
-        let name = url.lastPathComponent
-        switch url.pathExtension.lowercased() {
-        case "dmx", "json":
-            store.present(.restoreBackup(content: content, fileName: name))
-        default:
-            store.present(.statementImport(content: content, fileName: name))
-        }
+        store.openImport(url)
         return true
     }
 

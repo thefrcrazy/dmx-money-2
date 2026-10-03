@@ -12,13 +12,21 @@ public sealed partial class BudgetViewModel : PageViewModel
     [ObservableProperty]
     private string search = string.Empty;
 
+    private bool reconcilingCategories;
+
     [ObservableProperty]
     private IReadOnlyList<string> categories = [];
 
     public BudgetViewModel(EngineStore store) : base(store) => Refresh();
 
+    public IReadOnlyList<Category> CategoryChoices => Store.SelectableCategories;
+
     public override void Refresh()
     {
+        var validIds = CategoryChoices.Select(category => category.Id).ToHashSet();
+        var filtered = Categories.Where(validIds.Contains).ToArray();
+        if (!Categories.SequenceEqual(filtered)) { reconcilingCategories = true; Categories = filtered; reconcilingCategories = false; }
+        OnPropertyChanged(nameof(CategoryChoices));
         var query = new BudgetQuery([.. Store.SelectedAccountIds], Search, [.. Categories]);
         var today = Store.Today;
         View = Store.Read(engine => engine.Budget(query, today));
@@ -29,7 +37,7 @@ public sealed partial class BudgetViewModel : PageViewModel
 
     partial void OnSearchChanged(string value) => Refresh();
 
-    partial void OnCategoriesChanged(IReadOnlyList<string> value) => Refresh();
+    partial void OnCategoriesChanged(IReadOnlyList<string> value) { if (!reconcilingCategories) Refresh(); }
 
     public string StateLabel => View is null ? string.Empty : DmxFfiMethods.BudgetStateLabel(View.State);
 

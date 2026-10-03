@@ -97,7 +97,7 @@ public static class Format
     public static string ScheduledSuggestionDetails(string accountName, Periodicity frequency, uint occurrences, string nextDate)
         => string.Join(" • ", accountName, FrequencyLabel(frequency), Count((int)occurrences, "occurrence"), $"prochaine le {Short(nextDate)}");
 
-    public static string BackupDate(string? date) => date is null ? string.Empty : $"Sauvegarde du {date}";
+    public static string BackupDate(string? date) => date is null ? "Date de sauvegarde inconnue" : $"Sauvegarde du {date}";
 
     public static string VersionLabel(string version) => $"DmxMoney {version}";
 

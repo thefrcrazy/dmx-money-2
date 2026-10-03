@@ -311,13 +311,21 @@ pub fn category(store: &Rc<Store>, parent: &impl IsA<gtk::Widget>, id: Option<St
 
     {
         let preview = preview.clone();
-        let colors = colors.clone();
-        icons_grid.connect_changed(move |icon| preview.set(&icon, &colors.value()));
+        let colors = Rc::downgrade(&colors);
+        icons_grid.connect_changed(move |icon| {
+            if let Some(colors) = colors.upgrade() {
+                preview.set(&icon, &colors.value());
+            }
+        });
     }
     {
         let preview = preview.clone();
-        let icons_grid = icons_grid.clone();
-        colors.connect_changed(move |color| preview.set(&icons_grid.value(), &color));
+        let icons_grid = Rc::downgrade(&icons_grid);
+        colors.connect_changed(move |color| {
+            if let Some(icons_grid) = icons_grid.upgrade() {
+                preview.set(&icons_grid.value(), &color);
+            }
+        });
     }
 
     {
@@ -421,11 +429,16 @@ pub fn transaction(store: &Rc<Store>, parent: &impl IsA<gtk::Widget>, id: Option
         let store = store.clone();
         let shell = shell.clone();
         shell.clone().on_submit(move || {
-            let value = match required_amount(&amount) {
+            let value = match if editing && amount.text().as_str() == format::amount_input(draft.amount) {
+                Ok(draft.amount)
+            } else {
+                required_amount(&amount)
+            } {
                 Ok(value) => value,
                 Err(message) => return shell.set_error(Some(&message)),
             };
             let kind_value = kind.value();
+            let base = draft.clone();
             let draft = TransactionDraft {
                 id: draft.id.clone(),
                 kind: kind_value,
@@ -436,7 +449,13 @@ pub fn transaction(store: &Rc<Store>, parent: &impl IsA<gtk::Widget>, id: Option
                 account_id: account_select.required_value(),
                 to_account_id: to_select.value(),
             };
-            let error = store.attempt(|engine| engine.save_transaction(draft));
+            let error = store.attempt(|engine| {
+                if editing {
+                    engine.save_transaction_with_base(draft, base)
+                } else {
+                    engine.save_transaction(draft)
+                }
+            });
             let success = if editing {
                 "Transaction mise à jour"
             } else if kind_value == TransactionType::Transfer {

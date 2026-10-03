@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useState } from 'react';
-import { createPortal } from 'react-dom';
+import DialogSurface from './DialogSurface';
 import { X } from 'lucide-react';
 import Button from './Button';
 
@@ -27,6 +27,8 @@ const FormPopup: React.FC<FormPopupProps> = ({
     maxWidth = 'lg'
 }) => {
     const formId = useId();
+    const titleId = useId();
+    const close = () => { if (!isSubmitting) onClose(); };
     const [shouldRender, setShouldRender] = useState(isOpen);
     const [isClosing, setIsClosing] = useState(false);
 
@@ -47,28 +49,6 @@ const FormPopup: React.FC<FormPopupProps> = ({
 
         return () => window.clearTimeout(timeout);
     }, [isOpen, shouldRender]);
-
-    useEffect(() => {
-        const handleEscape = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose();
-        };
-        if (shouldRender && !isClosing) window.addEventListener('keydown', handleEscape);
-        return () => window.removeEventListener('keydown', handleEscape);
-    }, [isClosing, onClose, shouldRender]);
-
-    useEffect(() => {
-        if (!shouldRender) return;
-
-        const previousBodyOverflow = document.body.style.overflow;
-        const previousDocumentOverflow = document.documentElement.style.overflow;
-        document.body.style.overflow = 'hidden';
-        document.documentElement.style.overflow = 'hidden';
-
-        return () => {
-            document.body.style.overflow = previousBodyOverflow;
-            document.documentElement.style.overflow = previousDocumentOverflow;
-        };
-    }, [shouldRender]);
 
     if (!shouldRender) return null;
 
@@ -96,7 +76,7 @@ const FormPopup: React.FC<FormPopupProps> = ({
                     <Button
                         type="button"
                         variant="secondary"
-                        onClick={onClose}
+                        onClick={close}
                         disabled={isSubmitting}
                     >
                         Annuler
@@ -112,25 +92,29 @@ const FormPopup: React.FC<FormPopupProps> = ({
         </div>
     );
 
-    return createPortal(
-        <div
+    return (
+        <DialogSurface onClose={close} busy={isSubmitting} labelledBy={title ? titleId : undefined} label="Formulaire"
             className={`fixed inset-0 z-[90] flex h-[100dvh] w-screen items-center justify-center p-4 bg-black/50 backdrop-blur-sm app-modal-overlay app-form-popup-overlay ${overlayAnimationClass}`}
         >
             <div
+                inert={!isOpen}
+                onSubmitCapture={event => {
+                    if (!isOpen || isSubmitting) { event.preventDefault(); event.stopPropagation(); }
+                }}
                 className={`app-card w-full ${maxWidthClasses[maxWidth]} max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden app-modal-content app-form-popup-content ${contentAnimationClass}`}
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Poignée de la feuille (mobile) */}
-                <div className="flex justify-center pt-2 pb-1 md:hidden cursor-pointer" onClick={onClose}>
+                <div className="flex justify-center pt-2 pb-1 md:hidden cursor-pointer" onClick={close}>
                     <div className="h-[5px] w-9 rounded-full bg-[var(--ios-fill)]" />
                 </div>
 
                 {title && (
-                    <div className="relative flex min-h-11 items-center justify-between gap-3 p-4 md:border-b border-black/[0.05] dark:border-white/10 app-modal-header">
+                    <div className="relative flex min-h-11 items-center justify-between gap-3 p-4 md:border-b border-black/[0.05] dark:border-white/10 app-modal-header shrink-0">
                         {onSubmit ? (
                             <button
                                 type="button"
-                                onClick={onClose}
+                                onClick={close}
                                 disabled={isSubmitting}
                                 className="relative z-10 max-w-[104px] truncate text-[17px] text-primary-500 disabled:opacity-40 md:hidden cursor-pointer"
                             >
@@ -139,7 +123,7 @@ const FormPopup: React.FC<FormPopupProps> = ({
                         ) : (
                             <span className="w-8 md:hidden" aria-hidden="true" />
                         )}
-                        <h3 className="pointer-events-none absolute inset-x-28 truncate text-center text-[17px] font-semibold text-gray-900 dark:text-gray-100 md:static md:inset-auto md:text-left md:text-lg app-modal-title">
+                        <h3 id={titleId} className="pointer-events-none absolute inset-x-28 truncate text-center text-[17px] font-semibold text-gray-900 dark:text-gray-100 md:static md:inset-auto md:text-left md:text-lg app-modal-title">
                             {title}
                         </h3>
                         {onSubmit && (
@@ -154,8 +138,9 @@ const FormPopup: React.FC<FormPopupProps> = ({
                         )}
                         <button
                             type="button"
-                            onClick={onClose}
+                            onClick={close}
                             aria-label="Fermer"
+                            disabled={isSubmitting}
                             className={`${onSubmit
                                 ? 'hidden md:block'
                                 : 'flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ios-fill-tertiary)] md:block md:h-auto md:w-auto md:bg-transparent'
@@ -166,7 +151,7 @@ const FormPopup: React.FC<FormPopupProps> = ({
                     </div>
                 )}
 
-                <div className={onSubmit ? "p-4 app-modal-body" : "app-modal-body"}>
+                <div className={`min-h-0 overflow-y-auto app-modal-body ${onSubmit ? "p-4" : ""}`}>
                     {onSubmit ? (
                         <form id={formId} onSubmit={onSubmit}>
                             {Content}
@@ -176,8 +161,7 @@ const FormPopup: React.FC<FormPopupProps> = ({
                     )}
                 </div>
             </div>
-        </div>,
-        document.body
+        </DialogSurface>
     );
 };
 
