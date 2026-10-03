@@ -35,6 +35,9 @@ fn transaction(item: &Transaction) -> Result<(), String> {
     if item.transaction_type == TransactionType::Transfer {
         return Err("Un virement doit contenir un débit et un crédit.".into());
     }
+    if item.category == TRANSFER_CATEGORY_ID && !item.is_transfer {
+        return Err("Un virement doit contenir une contrepartie liée.".into());
+    }
     if item.is_transfer
         && (item.category != TRANSFER_CATEGORY_ID
             || item

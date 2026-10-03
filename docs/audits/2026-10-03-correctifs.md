@@ -9,14 +9,14 @@ Les défauts d’intégrité, de disponibilité et d’interface identifiés ont
 | Constat | Correction | Vérification |
 | --- | --- | --- |
 | B01 — Brouillon obsolète | État initial immuable dans les formulaires et APIs FFI WithBase ; fusion des seuls champs modifiés sous transaction, conflit explicite. SwiftUI, AppKit, WinUI et GTK utilisent le contrat. | Tests Rust de concurrence/rollback ; formulaire Mac fictif ouvert à 47,32 €, montant concurrent 48,32 €, édition du libellé conservant 48,32 €. |
-| B02 — Achats identiques fusionnés | Multiplicité CSV/QIF ; identité banque/compte/FITID OFX persistée, UUIDv5 déterministe compatible entre noyau et PWA. Réimport après déplacement manuel reconnu par ID ; mapping final OFX conservant l’identité et solde initial calculé après dédoublonnage. | FITID distincts sur mêmes valeurs conservés ; réimport identique sans nouvelle ligne ; backup/restauration et note locale préservés. |
+| B02 — Achats identiques fusionnés | Multiplicité CSV/QIF ; identité banque/compte/FITID OFX persistée, UUIDv5 déterministe compatible entre noyau et PWA. Réimport après déplacement manuel reconnu par ID ; conversion/édition des virements conservant l’identité du côté bancaire ; mapping final OFX conservant l’identité et solde initial calculé après dédoublonnage. | FITID distincts sur mêmes valeurs conservés ; réimport identique sans nouvelle ligne, y compris après conversion en virement ; backup/restauration et note locale préservés. |
 | B03 — Références orphelines | FK toujours actives ; staging durable des dépendances et contreparties, application atomique des paires et conversions de virements. | Parents reçus après enfants, paires et suppressions en lots séparés, conversions dans les deux ordres, contrôle des FK. |
 | B04 — Compteur passkey | Compteur SQL relu et écrit conditionnellement ; challenge, compteur, enrollment et création de session finalisés atomiquement. | Régression 0→5→1 refusée ; compteur zéro synchronisé compatible ; courses challenge/enrollment et rollback. |
 | B05 — Création anonyme de stockage | Méthode, format du bearer et quotas contrôlés avant routage DO ; schéma applicatif créé après enrollment valide. | Tests Worker/Miniflare sur IDs inconnus, méthodes et credentials invalides. |
 | B06 — Lecteurs/réponses non bornés | Réservation avant lecture ; deux slots fixes de 12 Mio, maintenus pendant lecture, attente et consommation du flux de réponse ; délais 10 s/25 s ; saturation 503 réessayable. PWA limitée à deux appels simultanés. | Saturation, EOF/cancel/error, lecture lente, réponse sans resérialisation et délai réel 25 s→504 puis réutilisation. CORS conservé dans les sorties d’erreur. |
 | B07 / P12 — Page trop grosse | Pagination plafonnée à 3 Mio de JSON et 2 000 lignes ; offsets effectifs, réduction adaptative du lot client lors d’un 413, garde dataVersion. | Descriptions fortement échappées, IDs présents exactement une fois ; retry au même offset ; cache conservé en cas d’échec. |
 | B08 / P11 — Calcul non borné | 1 826 jours inclusifs et 500 000 points avant allocation ; validation moteur/settings/API/UI ; rattrapage limité à 1 000 occurrences par échéance et appel. | Millions de jours refusés, ancienne récurrence avancée sans itération journalière exhaustive ; aucune écriture partielle de réglages invalides. |
-| B09 — Permissions Unix | Dossier 0700, DB/WAL/SHM 0600 ; propriétaire et liens symboliques contrôlés. | Dossier et fichiers fictifs existants durcis depuis 755/644. |
+| B09 — Permissions Unix | Dossier 0700, DB/WAL/SHM 0600 ; UID effectif et types vérifiés sur handles ouverts sans suivre le lien final ; modes appliqués par handle. | Dossier et fichiers fictifs existants durcis depuis 755/644 ; liens de dossier/base/sidecars refusés sans toucher la cible ; garde UID testé sans changer de propriétaire réel. |
 | B10 — Débordement d’agrégats | Intermédiaires en centimes i128 pour soldes, journal, analyses, prévisions, budgets et tableau de bord. | 1 025 valeurs extrêmes admises ne produisent plus de total négatif par débordement i64. |
 | Durcissements complémentaires | Compte et groupe atomiques ; nettoyage borné des sessions/challenges/QR ; receipts horodatés conservés 90 jours, anciens receipts sans échéance conservés. | Échec SQL injecté sans écriture partielle ; mutations trop anciennes refusées explicitement sans effacement de la file mobile. |
 
@@ -38,7 +38,7 @@ Sources principales : `core/crates/dmx-core`, `core/crates/dmx-bridge`, `core/cr
 | P10 — Dates UTC/locales mélangées | Dates bancaires locales explicites et calcul de jours calendaires ; solde d’ouverture excluant correctement le premier jour. | Fuseau négatif, DST, date invalide et borne du premier jour. |
 | P11 — Plages personnalisées | Validation partagée des dates/dimensions avant création de séries et message d’erreur visible. | Plages énormes rejetées avant allocation. |
 | P12 — Retry pagination | Voir B07 ; réduction du lot sans avancer l’offset après un 413. | Page initiale refusée puis lot réduit complet, sans perte d’ID. |
-| Compléments de revue | Imports utilisant les mêmes dialogues, double lancement empêché ; échéance attendue avant fermeture et erreur conservant le brouillon ; libellé de fusion exact. Corps de mutation nuls/primitifs/malformés conservés comme illisibles ; récupération explicite utilise les IDs bruts. | Régressions de corruptions, garde d’IDs lors d’abandon, snapshot cohérent et quota ; libellés d’issues défensifs. Tests de verrouillage/session maintenus après introduction de la concurrence limitée. |
+| Compléments de revue | Imports utilisant les mêmes dialogues, double lancement empêché ; échéance attendue avant fermeture et erreur conservant le brouillon ; libellé de fusion exact. Corps de mutation nuls/primitifs/malformés conservés comme illisibles ; récupération explicite utilise les IDs bruts. | Régressions de corruptions, garde d’IDs lors d’abandon, snapshot cohérent et quota ; libellés d’issues défensifs. Tests de verrouillage/session maintenus après introduction de la concurrence limitée. Le mobile distingue création/édition de virements et conversion : les conversions simple↔virement existantes, non atomiques dans ce chemin, sont indisponibles ; elles restent proposées dans les interfaces natives. |
 
 Sources : `pwa/src/services`, `context`, `pages`, `features/import`, `components/ui`, `components/scheduled` et `utils`.
 
@@ -61,7 +61,7 @@ Sources : `pwa/src/services`, `context`, `pages`, `features/import`, `components
 | H1 — AppIntents | Authentification locale requise ; notifications génériques. | Compilation ; Siri sur appareil verrouillé reste un test physique. |
 | H2 — Identité de l’updater | URLs épinglées au dépôt V2 ; signature et TeamID de l’installation exigés pour remplacement automatique ; ad hoc = téléchargement manuel. | Tests de provenance/signature et rollback. Pas de nouveau manifeste signé ni garantie contre une équipe de publication compromise. |
 | H3 — Accessibilité | Couleurs/icônes nommées et sélection accessible ; cibles 44 pt sur iOS, action Pointer/Dépointer nommée. | Source/build ; modificateurs d’accessibilité typés pour Intel/Catalina 10.15 ; pas de parcours VoiceOver/Dynamic Type physique. |
-| H4 — Index AppKit obsolète | ID et révision capturés au début, édition invalidée lors d’un reload, APIs avec base. | Test métier noyau ; variante AppKit typée sur ARM, runtime Intel à confirmer en CI. |
+| H4 — Index AppKit obsolète | ID et révision capturés au début, édition invalidée lors d’un reload, APIs avec base. | Test métier noyau ; AppKit exécuté sur le host CI et build Intel vérifié. Exécution physique Intel/Catalina non vérifiée. |
 
 Sources : `apple/Packages/DmxKit`, variantes iOS/macOS, `scripts/build-macos.sh`, `scripts/tests/test-macos-updater.py`.
 
@@ -77,9 +77,9 @@ Sources : `apple/Packages/DmxKit`, variantes iOS/macOS, `scripts/build-macos.sh`
 | WL-06 | GIO HANDLES_OPEN et traitement de fichiers de sauvegarde au démarrage/instance existante. | Compilation/source ; association Linux physique à confirmer. |
 | WL-07 | Références faibles et déconnexion des signaux à la fermeture des formulaires GTK. | 20 cycles réels GTK/libadwaita sur Mac sans base financière, objets libérés. Test ajouté à CI Linux sous Xvfb. |
 | WL-08 | Événements de statut séparés des changements de données, canal borné et coalescence. | Revue/couverture événementielle et compilation. |
-| WL-09 | Graphiques réagissant à la publication de la vue plutôt qu’à chaque notification dérivée. | Tests ViewModels ; rendu WinUI final confié à CI. |
+| WL-09 | Graphiques réagissant à la publication de la vue plutôt qu’à chaque notification dérivée. | Tests ViewModels ; CI x64 ouvre les pages WinUI. Fluidité du défilement et rendu sur appareil Windows physique non mesurés. |
 | WL-10 | Préparation des imports hors UI, aperçu limité et formats/tailles contrôlés ; confirmation await et fermeture bloquée durant écriture. | 100 000 lignes fictives : constructeur ~0,03 ms/2 128 octets, préparation ~119–120 ms en worker. Baseline ~214,89 ms/~8,98 Mo dans le constructeur. Aucun gain FPS déduit. |
-| WL-11 | Windows App SDK 2.5.1 et BuildTools 10.0.26100.4654 compatibles ; toolchain Rust alignée 1.94.0. | Tests .NET locaux ; compilation WinUI x64/ARM64 en CI requise. |
+| WL-11 | Windows App SDK 2.5.1 et BuildTools 10.0.26100.4654 compatibles ; toolchain Rust alignée 1.94.0. | Tests .NET locaux ; compilation et smoke WinUI x64 en CI de PR. ARM64 relève du workflow de release et reste non exécuté dans cette PR. |
 | WL-C01 | Identité d’édition capturée ; réaffectation/reload annule un brouillon périmé. | 11 scénarios utilisant EditableCell réel avec stubs d’événements WinUI ; test ajouté en CI. |
 | WL-O01 | Noms et états sélectionnés accessibles des boutons d’accent Windows. | Source ; Narrator/Orca physiques non exécutés. |
 
@@ -87,8 +87,8 @@ Sources : `windows/src`, `windows/tests`, `linux/dmx-money-gtk/src`, `linux/dmx-
 
 ## Validations exécutées
 
-- Rust noyau/bridge/FFI : **166 tests réussis**, un smoke réseau ignoré ; format et Clippy all-targets `-D warnings` réussis.
-- PWA : **119 tests réussis**, 572 assertions ; TypeScript, ESLint et build de production réussis.
+- Rust noyau/bridge/FFI : **174 tests réussis**, un smoke réseau ignoré ; format et Clippy all-targets `-D warnings` réussis.
+- PWA : **123 tests réussis**, 615 assertions ; TypeScript, ESLint et build de production réussis.
 - Worker : **16 tests réussis** sous Miniflare, dont délai réel de 25 s ; typage réussi.
 - .NET : **73 tests réussis** avec la FFI host fraîche ; 11 scénarios EditableCell et assertions du vrai FormDialog sur le traitement asynchrone séparés.
 - Apple : **30 XCTest réussis**, build moderne ARM/ad hoc vérifié ; AppKit typé sur ARM et tests du script updater/entitlements réussis.

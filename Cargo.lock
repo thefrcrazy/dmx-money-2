@@ -976,6 +976,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "dirs",
+ "libc",
  "libsqlite3-sys",
  "log",
  "serde",

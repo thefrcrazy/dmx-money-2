@@ -673,15 +673,19 @@ async fn save_transaction_impl(
                 amount,
                 description: &description,
             };
-            let (from, to) = transfer_pair(
+            let (mut updated_from, mut updated_to) = transfer_pair(
                 (from.id, to.id),
                 (&draft.account_id, &to_account),
                 &values,
                 (from.checked, to.checked),
             );
-            repo::update_transaction(&mut tx, &from).await?;
-            repo::update_transaction(&mut tx, &to).await?;
-            vec![from.id, to.id]
+            updated_from.bank_source = from.bank_source;
+            updated_from.bank_transaction_id = from.bank_transaction_id;
+            updated_to.bank_source = to.bank_source;
+            updated_to.bank_transaction_id = to.bank_transaction_id;
+            repo::update_transaction(&mut tx, &updated_from).await?;
+            repo::update_transaction(&mut tx, &updated_to).await?;
+            vec![updated_from.id, updated_to.id]
         }
         (existing, _, Some(to_account)) => {
             let checked = existing.as_ref().map(|existing| existing.checked).unwrap_or(false);
@@ -693,22 +697,49 @@ async fn save_transaction_impl(
                 amount,
                 description: &description,
             };
-            let (from, to) = transfer_pair(
-                (new_id(), new_id()),
+            // Preserve the imported bank row's stable ID on its original debit/credit side.
+            let from_id = existing
+                .as_ref()
+                .filter(|item| !item.is_income() && item.bank_source.is_some() && item.bank_transaction_id.is_some())
+                .map(|item| item.id.clone())
+                .unwrap_or_else(new_id);
+            let to_id = existing
+                .as_ref()
+                .filter(|item| item.is_income() && item.bank_source.is_some() && item.bank_transaction_id.is_some())
+                .map(|item| item.id.clone())
+                .unwrap_or_else(new_id);
+            let (mut from, mut to) = transfer_pair(
+                (from_id, to_id),
                 (&draft.account_id, &to_account),
                 &values,
                 (checked, checked),
             );
+            if let Some(existing) = existing {
+                let original_side = if existing.is_income() { &mut to } else { &mut from };
+                original_side.bank_source = existing.bank_source;
+                original_side.bank_transaction_id = existing.bank_transaction_id;
+            }
             repo::insert_transaction(&mut tx, &from).await?;
             repo::insert_transaction(&mut tx, &to).await?;
             vec![from.id, to.id]
         }
         (existing, linked, None) => {
+            let bank_identity = |item: &Transaction| item.bank_source.clone().zip(item.bank_transaction_id.clone());
+            let existing_identity = existing.as_ref().and_then(bank_identity);
+            let linked_identity = linked.as_ref().and_then(bank_identity);
+            if existing_identity.is_some() && linked_identity.is_some() && existing_identity != linked_identity {
+                return Err(CoreError::validation(
+                    "Ce virement possède deux identités bancaires distinctes et ne peut pas être fusionné en une opération simple.",
+                ));
+            }
+            // Editing the synthetic counterpart must not discard the only imported identity.
+            let survivor = if existing_identity.is_none() && linked_identity.is_some() {
+                linked.as_ref()
+            } else {
+                existing.as_ref()
+            };
             let transaction = Transaction {
-                id: existing
-                    .as_ref()
-                    .map(|existing| existing.id.clone())
-                    .unwrap_or_else(new_id),
+                id: survivor.map(|existing| existing.id.clone()).unwrap_or_else(new_id),
                 date,
                 account_id: draft.account_id.clone(),
                 transaction_type: if draft.kind == TransactionType::Income {
@@ -722,8 +753,8 @@ async fn save_transaction_impl(
                 checked: existing.as_ref().map(|existing| existing.checked).unwrap_or(false),
                 is_transfer: false,
                 linked_transaction_id: None,
-                bank_source: existing.as_ref().and_then(|item| item.bank_source.clone()),
-                bank_transaction_id: existing.as_ref().and_then(|item| item.bank_transaction_id.clone()),
+                bank_source: survivor.and_then(|item| item.bank_source.clone()),
+                bank_transaction_id: survivor.and_then(|item| item.bank_transaction_id.clone()),
             };
             match (&existing, linked) {
                 (Some(_), Some(_)) => {

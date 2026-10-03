@@ -106,6 +106,48 @@ fn api_requires_a_finalized_session() {
 }
 
 #[test]
+fn unpaired_transfer_category_is_refused_before_companion_writes() {
+    let harness = Harness::start();
+    let account = json!({"id":"simple-account","name":"Compte fictif","type":"Courant","initialBalance":100});
+    assert_eq!(
+        harness
+            .request("POST", "/api/accounts", Some(&account.to_string()), true)
+            .0,
+        201
+    );
+    let simple = json!({"id":"simple-row","date":"2026-10-03","accountId":"simple-account","type":"expense","amount":10,"category":"food","description":"Fictif","checked":false,"isTransfer":false});
+    assert_eq!(
+        harness
+            .request("POST", "/api/transactions", Some(&simple.to_string()), true)
+            .0,
+        201
+    );
+    let before = harness.engine.snapshot().unwrap();
+    let version = harness.engine.data_version().unwrap();
+    let mut unpaired = simple.clone();
+    unpaired["category"] = json!("transfer");
+    unpaired["_base"] = simple;
+    unpaired["_mutationId"] = json!("unpaired-existing");
+    for method in ["PATCH", "PUT"] {
+        let (status, _, body) = harness.request(method, "/api/transactions", Some(&unpaired.to_string()), true);
+        assert_eq!(status, 400, "{method}: {body}");
+    }
+    unpaired["id"] = json!("new-unpaired");
+    unpaired["_mutationId"] = json!("unpaired-new");
+    let (status, _, body) = harness.request("POST", "/api/transactions", Some(&unpaired.to_string()), true);
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(harness.engine.snapshot().unwrap().transactions, before.transactions);
+    assert_eq!(harness.engine.data_version().unwrap(), version);
+    let receipts: i64 = harness.engine.block_on(async {
+        sqlx::query_scalar("SELECT count(*) FROM mobile_mutation_receipts WHERE id LIKE 'unpaired-%'")
+            .fetch_one(harness.engine.pool())
+            .await
+            .unwrap()
+    });
+    assert_eq!(receipts, 0);
+}
+
+#[test]
 fn revoking_a_mobile_invalidates_its_existing_sessions_immediately() {
     let harness = Harness::start();
     assert_eq!(harness.request("GET", "/api/accounts", None, true).0, 200);

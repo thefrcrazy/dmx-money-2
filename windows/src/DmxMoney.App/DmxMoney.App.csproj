@@ -11,9 +11,11 @@
     <Platforms>x64;ARM64</Platforms>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <UseWinUI>true</UseWinUI>
-    <!-- Indispensable même sans MSIX : c'est ce réglage qui produit resources.pri (le XAML compilé
-         de l'app) et le publie. Sans lui, l'app se ferme dès son lancement (WindowsAppSDK#3718). -->
+    <!-- Active la génération et la publication du PRI contenant le XAML compilé. -->
     <EnableMsixTooling>true</EnableMsixTooling>
+    <!-- Les targets MSIX du SDK 2.x nomment par défaut le PRI DmxMoney.pri pour une app
+         non empaquetée. Garder le nom contrôlé par notre script de publication. -->
+    <ProjectPriFileName>resources.pri</ProjectPriFileName>
     <!-- Application non empaquetée : installation et mises à jour par Velopack. -->
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>

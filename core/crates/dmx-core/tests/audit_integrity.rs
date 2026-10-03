@@ -523,3 +523,112 @@ async fn fitid_reimport_preserves_a_manual_move_and_note() {
     assert_eq!(rows[0].account_id, moved);
     assert_eq!(rows[0].description, "Note conservée");
 }
+
+#[tokio::test]
+async fn fitid_survives_transfer_conversion_edits_and_conversion_from_synthetic_side() {
+    for (amount, kind) in [(-20, TransactionType::Expense), (20, TransactionType::Income)] {
+        let pool = db::open_memory_pool().await.unwrap();
+        let original_account = account(&pool, "Banque fictive").await;
+        let other_account = account(&pool, "Contrepartie fictive").await;
+        let content = format!("<OFX><STMTRS><BANKACCTFROM><ACCTID>A<ACCTTYPE>CHECKING</BANKACCTFROM><STMTTRN><DTPOSTED>20261003<TRNAMT>{amount}<NAME>CAFE<FITID>imported</STMTTRN></STMTRS></OFX>");
+        let parsed = import::parse_ofx_transactions(&content, date()).unwrap();
+        let request = || StatementImportRequest {
+            transactions: parsed.clone(),
+            target: ImportTarget::Existing(original_account.clone()),
+            category_mapping: vec![],
+        };
+        import::import_statement(&pool, request()).await.unwrap();
+        let imported = repo::list_transactions(&pool).await.unwrap().remove(0);
+        let base = ops::transaction_draft(&snapshot::load(&pool).await.unwrap(), &imported.id).unwrap();
+        let mut transfer = base.clone();
+        transfer.kind = TransactionType::Transfer;
+        (transfer.account_id, transfer.to_account_id) = if kind == TransactionType::Expense {
+            (original_account.clone(), Some(other_account))
+        } else {
+            (other_account, Some(original_account.clone()))
+        };
+        let ids = ops::save_transaction_with_base(&pool, transfer, base).await.unwrap();
+        assert_eq!(ids[usize::from(kind == TransactionType::Income)], imported.id);
+        for id in &ids {
+            let base = ops::transaction_draft(&snapshot::load(&pool).await.unwrap(), id).unwrap();
+            let mut edit = base.clone();
+            edit.description = format!("Note fictive depuis {id}");
+            ops::save_transaction_with_base(&pool, edit, base).await.unwrap();
+            let rows = repo::list_transactions(&pool).await.unwrap();
+            let bank_row = rows.iter().find(|row| row.id == imported.id).unwrap();
+            assert_eq!(bank_row.transaction_type, kind);
+            assert_eq!(bank_row.bank_source, imported.bank_source);
+            assert_eq!(bank_row.bank_transaction_id, imported.bank_transaction_id);
+            let synthetic = rows.iter().find(|row| row.id != imported.id).unwrap();
+            assert!(synthetic.bank_source.is_none() && synthetic.bank_transaction_id.is_none());
+            let report = import::import_statement(&pool, request()).await.unwrap();
+            assert_eq!((report.imported, report.duplicates), (0, 1));
+            assert_eq!(repo::list_transactions(&pool).await.unwrap().len(), 2);
+        }
+        let synthetic_id = ids.iter().find(|id| **id != imported.id).unwrap();
+        let base = ops::transaction_draft(&snapshot::load(&pool).await.unwrap(), synthetic_id).unwrap();
+        let mut simple = base.clone();
+        simple.kind = kind;
+        simple.account_id = original_account.clone();
+        simple.to_account_id = None;
+        simple.category_id = "food".into();
+        assert_eq!(
+            ops::save_transaction_with_base(&pool, simple, base).await.unwrap(),
+            vec![imported.id.clone()]
+        );
+        let rows = repo::list_transactions(&pool).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, imported.id);
+        assert_eq!(rows[0].bank_source, imported.bank_source);
+        assert_eq!(rows[0].bank_transaction_id, imported.bank_transaction_id);
+        let report = import::import_statement(&pool, request()).await.unwrap();
+        assert_eq!((report.imported, report.duplicates), (0, 1));
+    }
+}
+
+#[tokio::test]
+async fn distinct_bank_identities_are_kept_when_editing_and_cannot_be_merged_into_one_row() {
+    let pool = db::open_memory_pool().await.unwrap();
+    let source = account(&pool, "Banque source").await;
+    let destination = account(&pool, "Banque destination").await;
+    let mut transfer = ops::new_transaction_draft(
+        &snapshot::load(&pool).await.unwrap(),
+        std::slice::from_ref(&source),
+        date(),
+    );
+    transfer.kind = TransactionType::Transfer;
+    transfer.amount = 20.0;
+    transfer.to_account_id = Some(destination);
+    let ids = ops::save_transaction(&pool, transfer).await.unwrap();
+    for (id, bank_source, fitid) in [(&ids[0], "ofx:source", "debit"), (&ids[1], "ofx:destination", "credit")] {
+        sqlx::query("UPDATE transactions SET \"bankSource\"=?, \"bankTransactionId\"=? WHERE id=?")
+            .bind(bank_source)
+            .bind(fitid)
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let before = repo::list_transactions(&pool).await.unwrap();
+    let base = ops::transaction_draft(&snapshot::load(&pool).await.unwrap(), &ids[1]).unwrap();
+    let mut edit = base.clone();
+    edit.description = "Note fictive".into();
+    ops::save_transaction_with_base(&pool, edit, base).await.unwrap();
+    let after = repo::list_transactions(&pool).await.unwrap();
+    for row in &after {
+        let original = before.iter().find(|original| original.id == row.id).unwrap();
+        assert_eq!(row.bank_source, original.bank_source);
+        assert_eq!(row.bank_transaction_id, original.bank_transaction_id);
+    }
+    let version = db::data_version(&pool).await.unwrap();
+    let base = ops::transaction_draft(&snapshot::load(&pool).await.unwrap(), &ids[1]).unwrap();
+    let mut simple = base.clone();
+    simple.kind = TransactionType::Expense;
+    simple.account_id = source;
+    simple.to_account_id = None;
+    simple.category_id = "food".into();
+    let error = ops::save_transaction_with_base(&pool, simple, base).await.unwrap_err();
+    assert!(error.to_string().contains("deux identités bancaires distinctes"));
+    assert_eq!(repo::list_transactions(&pool).await.unwrap(), after);
+    assert_eq!(db::data_version(&pool).await.unwrap(), version);
+}

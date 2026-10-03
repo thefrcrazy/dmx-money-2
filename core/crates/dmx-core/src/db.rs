@@ -58,45 +58,112 @@ pub const SYNCED_SETTINGS_COLUMNS: [&str; 24] = [
 pub fn protect_data_directory(path: &Path) -> CoreResult<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path)?;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+        // A trailing slash or `/.` would otherwise turn a final symlink into a parent component.
+        let normalized: std::path::PathBuf = path.components().collect();
+        let path = normalized.as_path();
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) => validate_private_metadata(&metadata, true, effective_uid())?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path)?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+        // Only the final component is protected: macOS's /tmp -> /private/tmp remains valid.
+        let directory = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY | libc::O_NONBLOCK)
+            .open(path)?;
+        validate_private_metadata(&directory.metadata()?, true, effective_uid())?;
+        directory.set_permissions(std::fs::Permissions::from_mode(0o700))?;
     }
     #[cfg(not(unix))]
     std::fs::create_dir_all(path)?;
     Ok(())
 }
+
+#[cfg(unix)]
+fn effective_uid() -> u32 {
+    // SAFETY: geteuid has no preconditions and does not change process credentials.
+    unsafe { libc::geteuid() }
+}
+
+#[cfg(unix)]
+fn validate_private_metadata(metadata: &std::fs::Metadata, directory: bool, uid: u32) -> CoreResult<()> {
+    use std::os::unix::fs::MetadataExt;
+    if (directory && !metadata.is_dir()) || (!directory && !metadata.is_file()) {
+        return Err(crate::error::CoreError::Io(if directory {
+            "Le dossier des données doit être un répertoire ordinaire, sans lien symbolique.".into()
+        } else {
+            "La base et ses journaux doivent être des fichiers ordinaires, sans lien symbolique.".into()
+        }));
+    }
+    if metadata.uid() != uid {
+        return Err(crate::error::CoreError::Io(
+            "Le dossier des données, la base et ses journaux doivent appartenir à l’utilisateur courant.".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn open_private_database_file(path: &Path, create: bool) -> CoreResult<Option<std::fs::File>> {
+    use std::os::unix::fs::OpenOptionsExt;
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => validate_private_metadata(&metadata, false, effective_uid())?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    let open_existing = || {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)
+    };
+    let file = match open_existing() {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && create => {
+            match std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+                .open(path)
+            {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => open_existing()?,
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    // Validate the opened inode again; a path may have been replaced since symlink_metadata.
+    validate_private_metadata(&file.metadata()?, false, effective_uid())?;
+    Ok(Some(file))
+}
+
 fn protect_database_files(path: &Path) -> CoreResult<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)
-        {
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error.into()),
-        }
-        for file in [
+        use std::os::unix::fs::PermissionsExt;
+        let mut handles = Vec::new();
+        for (index, file) in [
             path.to_path_buf(),
             std::path::PathBuf::from(format!("{}-wal", path.display())),
             std::path::PathBuf::from(format!("{}-shm", path.display())),
-        ] {
-            match std::fs::symlink_metadata(&file) {
-                Ok(metadata) if metadata.is_file() => {
-                    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600))?
-                }
-                Ok(_) => {
-                    return Err(crate::error::CoreError::Io(
-                        "La base et ses journaux doivent être des fichiers ordinaires, sans lien symbolique.".into(),
-                    ))
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error.into()),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if let Some(handle) = open_private_database_file(&file, index == 0)? {
+                handles.push(handle);
             }
+        }
+        // fchmod the validated handles, never a possibly substituted pathname.
+        for handle in handles {
+            handle.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         }
     }
     Ok(())
@@ -746,6 +813,120 @@ pub async fn data_version<'e>(executor: impl sqlx::Executor<'e, Database = sqlx:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    struct PrivateFixture(std::path::PathBuf);
+
+    #[cfg(unix)]
+    impl PrivateFixture {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("dmx-private-guard-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for PrivateFixture {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_guard_refuses_final_directory_symlink_and_file_without_touching_target() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let fixture = PrivateFixture::new();
+        let target = fixture.0.join("target");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let link = fixture.0.join("linked-data");
+        symlink(&target, &link).unwrap();
+        assert!(protect_data_directory(&link)
+            .unwrap_err()
+            .to_string()
+            .contains("sans lien symbolique"));
+        assert!(protect_data_directory(&link.join("")).is_err());
+        assert!(protect_data_directory(&link.join(".")).is_err());
+        assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o755);
+        let file = fixture.0.join("not-a-directory");
+        std::fs::write(&file, b"fictif").unwrap();
+        assert!(protect_data_directory(&file).is_err());
+        assert_eq!(std::fs::read(&file).unwrap(), b"fictif");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_guard_allows_symlink_parent_but_secures_final_directory() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let fixture = PrivateFixture::new();
+        let target = fixture.0.join("parent");
+        std::fs::create_dir(&target).unwrap();
+        let link = fixture.0.join("parent-link");
+        symlink(&target, &link).unwrap();
+        protect_data_directory(&link.join("data")).unwrap();
+        assert_eq!(
+            std::fs::metadata(target.join("data")).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_guard_refuses_database_and_sidecar_symlinks_without_touching_target() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        for suffix in ["", "-wal", "-shm"] {
+            let fixture = PrivateFixture::new();
+            let target = fixture.0.join("target");
+            std::fs::write(&target, b"contenu fictif intact").unwrap();
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let database = fixture.0.join(DATABASE_FILE_NAME);
+            if !suffix.is_empty() {
+                std::fs::write(&database, []).unwrap();
+            }
+            symlink(&target, fixture.0.join(format!("{DATABASE_FILE_NAME}{suffix}"))).unwrap();
+            assert!(protect_database_files(&database)
+                .unwrap_err()
+                .to_string()
+                .contains("sans lien symbolique"));
+            assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o644);
+            assert_eq!(std::fs::read(&target).unwrap(), b"contenu fictif intact");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_guard_refuses_non_file_database_entry() {
+        let fixture = PrivateFixture::new();
+        let database = fixture.0.join(DATABASE_FILE_NAME);
+        std::fs::create_dir(&database).unwrap();
+        assert!(protect_database_files(&database)
+            .unwrap_err()
+            .to_string()
+            .contains("fichiers ordinaires"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_guard_owner_check_is_explicit_and_read_only() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let fixture = PrivateFixture::new();
+        let file = fixture.0.join("owned-file");
+        std::fs::write(&file, b"fictif").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        for (path, directory) in [(&fixture.0, true), (&file, false)] {
+            let metadata = std::fs::metadata(path).unwrap();
+            let before = metadata.permissions().mode();
+            let other_uid = metadata.uid().wrapping_add(1);
+            assert!(validate_private_metadata(&metadata, directory, other_uid)
+                .unwrap_err()
+                .to_string()
+                .contains("appartenir à l’utilisateur courant"));
+            assert_eq!(std::fs::metadata(path).unwrap().permissions().mode(), before);
+        }
+        assert_eq!(std::fs::read(&file).unwrap(), b"fictif");
+    }
 
     #[tokio::test]
     async fn schema_is_idempotent_and_versioned() {
