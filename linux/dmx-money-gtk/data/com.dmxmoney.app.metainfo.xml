@@ -56,6 +56,9 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="2.1.0~rc.2" date="2026-10-03" type="development">
+      <description><p>Pré-version RC2 : journal mobile virtualisé, cellules natives réutilisées et rechargements évités quand les données restent inchangées.</p></description>
+    </release>
     <release version="2.1.0~rc.1" date="2026-10-02" type="development">
       <description><p>Pré-version RC1 : compagnon Internet unique sur Cloudflare Pages, appairage QR/passkey et connexion mobile persistante, sans serveur local ni parcours de migration.</p></description>
     </release>

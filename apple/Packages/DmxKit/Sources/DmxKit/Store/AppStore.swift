@@ -42,6 +42,7 @@ public final class AppStore: ObservableObject {
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var processingDue = false
     private var lastDueCheck: (day: String, version: Int64)?
+    private var loadedSnapshot: (version: Int64, day: String)?
 
     /// Install once after the window exists; also refresh date-sensitive pages after midnight.
     public func startScheduledRefresh() {
@@ -119,15 +120,23 @@ public final class AppStore: ObservableObject {
     public func reload() {
         do {
             let version = try engine.dataVersion()
-            settings = try engine.settings()
-            accounts = try engine.accountsList()
-            categories = try engine.categories()
+            let day = today
+            // Les lectures de statut ne changent pas les données. Le jour reste dans la clé
+            // pour recalculer les pages sensibles à la date, même sans nouvelle échéance.
+            guard loadedSnapshot?.version != version || loadedSnapshot?.day != day else { return }
+            let nextSettings = try engine.settings()
+            let nextAccounts = try engine.accountsList()
+            let nextCategories = try engine.categories()
+            settings = nextSettings
+            accounts = nextAccounts
+            categories = nextCategories
             let known = Set(accounts.map { $0.id })
             let filtered = selectedAccountIds.filter { known.contains($0) }
             if filtered != selectedAccountIds {
                 selectedAccountIds = filtered
             }
             dataVersion = version
+            loadedSnapshot = (version, day)
             bumpRevision()
         } catch {
             errorMessage = AppStore.message(for: error)

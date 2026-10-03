@@ -30,6 +30,8 @@ public sealed partial class EngineStore : ObservableObject, IDisposable
     private CancellationTokenSource? toastCancellation;
     private bool processingDue;
     private (string Day, long Version)? lastDueCheck;
+    private string? lastReloadDay;
+    private readonly Func<string> todayProvider;
 
     public DmxEngine Engine { get; }
 
@@ -47,7 +49,7 @@ public sealed partial class EngineStore : ObservableObject, IDisposable
     /// </summary>
     public Func<string, string?>? AssistantRewriter { get; set; }
 
-    public string Today => DmxFfiMethods.Today();
+    public string Today => todayProvider();
 
     [ObservableProperty]
     private long dataVersion;
@@ -110,10 +112,11 @@ public sealed partial class EngineStore : ObservableObject, IDisposable
 
     public bool IsFiltering => SelectedAccountIds.Count > 0;
 
-    public EngineStore(DmxEngine engine, IPlatformServices? platform = null)
+    public EngineStore(DmxEngine engine, IPlatformServices? platform = null, Func<string>? todayProvider = null)
     {
         Engine = engine;
         Platform = platform ?? new NullPlatformServices();
+        this.todayProvider = todayProvider ?? DmxFfiMethods.Today;
         listener = new Listener(this);
         Engine.SetListener(listener);
         Reload();
@@ -142,11 +145,16 @@ public sealed partial class EngineStore : ObservableObject, IDisposable
 
     // --- Rechargement ---
 
-    public void Reload()
+    public void Reload(bool ifChanged = false)
     {
         try
         {
             var version = Engine.DataVersion();
+            var today = Today;
+            if (ifChanged && version == DataVersion && lastReloadDay == today)
+            {
+                return;
+            }
             Settings = Engine.Settings();
             Accounts = Engine.AccountsList();
             Categories = Engine.Categories();
@@ -159,6 +167,7 @@ public sealed partial class EngineStore : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(IsFiltering));
             }
             DataVersion = version;
+            lastReloadDay = today;
             BumpRevision();
         }
         catch (Exception error)
@@ -255,7 +264,10 @@ public sealed partial class EngineStore : ObservableObject, IDisposable
             var value = await Task.Run(() => work(engine)).ConfigureAwait(false);
             Dispatch(() =>
             {
-                Reload();
+                // Status reads and due-date checks must not replace a large journal
+                // while it is being scrolled. Settings and financial writes share
+                // the core's data version, so actual changes still reload normally.
+                Reload(ifChanged: true);
                 onSuccess?.Invoke(value);
             });
         }

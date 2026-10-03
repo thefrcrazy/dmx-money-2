@@ -77,10 +77,12 @@ public final class JournalModel: PageModel {
         )
         view = store.read { engine in try engine.journal(query: query) }
         rowsRevision &+= 1
-        let visible = Set(view?.rows.map { $0.transaction.id } ?? [])
-        let kept = selection.intersection(visible)
-        if kept != selection {
-            selection = kept
+        if !selection.isEmpty {
+            let visible = Set(view?.rows.map { $0.transaction.id } ?? [])
+            let kept = selection.intersection(visible)
+            if kept != selection {
+                selection = kept
+            }
         }
         onChange?()
     }

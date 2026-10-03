@@ -1,7 +1,7 @@
 //! Journal : tableau des opérations, édition en ligne, sélection multiple, filtres.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -466,30 +466,45 @@ fn multi_select_button(
 
 /// Colonnes du journal : compte, date, catégorie, description, montant, budget, état, solde, actions.
 fn add_columns(view: &gtk::ColumnView, store: &Rc<Store>) {
-    view.append_column(&text_column("Compte", 150, |row| {
+    view.append_column(&recycled_column("Compte", 150, |_| {
         let host = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         let bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         bar.set_size_request(4, 16);
         bar.add_css_class("dmx-badge");
-        bar.add_css_class(&icons::fill_class(&row.account_color));
         bar.set_valign(gtk::Align::Center);
         host.append(&bar);
-        let label = gtk::Label::new(Some(&row.account_name));
+        let label = gtk::Label::new(None);
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         label.set_xalign(0.0);
         host.append(&label);
-        host.upcast()
+        RecycledCell::new(host, move |row| {
+            bar.set_css_classes(&["dmx-badge", &icons::fill_class(&row.account_color)]);
+            label.set_text(&row.account_name);
+        })
     }));
 
-    view.append_column(&text_column("Date", 90, |row| {
-        let label = gtk::Label::new(Some(&format::day_short(&row.transaction.date)));
+    view.append_column(&recycled_column("Date", 90, |_| {
+        let label = gtk::Label::new(None);
         label.add_css_class("dim-label");
         label.set_xalign(0.0);
-        label.upcast()
+        RecycledCell::new(label.clone(), move |row| {
+            label.set_text(&format::day_short(&row.transaction.date))
+        })
     }));
 
-    view.append_column(&text_column("Catégorie", 160, |row| {
-        widgets::chip(&row.category.name, &row.category.color, Some(&row.category.icon)).upcast()
+    view.append_column(&recycled_column("Catégorie", 160, |_| {
+        let chip = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+        chip.set_halign(gtk::Align::Start);
+        let image = icons::image("Tag", 11);
+        let label = gtk::Label::new(None);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        chip.append(&image);
+        chip.append(&label);
+        RecycledCell::new(chip.clone(), move |row| {
+            chip.set_css_classes(&["dmx-chip", &icons::tint_class(&row.category.color)]);
+            image.set_icon_name(Some(&icons::icon_name(&row.category.icon)));
+            label.set_text(&row.category.name);
+        })
     }));
 
     // Description : modifiable au clic.
@@ -497,12 +512,12 @@ fn add_columns(view: &gtk::ColumnView, store: &Rc<Store>) {
     view.append_column(&editable_column(
         "Description",
         240,
-        move |row, text| {
+        move |id, original, text| {
             let text = text.trim().to_string();
-            if text.is_empty() || text == row.transaction.description {
+            if text.is_empty() || text == original {
                 return;
             }
-            let id = row.transaction.id.clone();
+            let id = id.to_string();
             description_store.run(Some("Transaction mise à jour"), move |engine| {
                 engine.update_transaction_inline(&id, dmx_core::ops::InlineEdit::Description(text))
             });
@@ -515,9 +530,9 @@ fn add_columns(view: &gtk::ColumnView, store: &Rc<Store>) {
     view.append_column(&editable_column(
         "Montant",
         130,
-        move |row, text| match format::parse_amount(&text).map(f64::abs) {
+        move |id, _, text| match format::parse_amount(&text).map(f64::abs) {
             Some(amount) if amount > 0.0 => {
-                let id = row.transaction.id.clone();
+                let id = id.to_string();
                 amount_store.run(Some("Transaction mise à jour"), move |engine| {
                     engine.update_transaction_inline(&id, dmx_core::ops::InlineEdit::Amount(amount))
                 });
@@ -527,58 +542,68 @@ fn add_columns(view: &gtk::ColumnView, store: &Rc<Store>) {
         |row| format::signed(row.transaction.amount, row.transaction.transaction_type),
     ));
 
-    view.append_column(&text_column("Budget restant", 130, |row| match &row.budget {
-        Some(budget) => {
-            let chip = widgets::chip(&format::money(budget.remaining), "#6366f1", None);
-            chip.set_tooltip_text(Some(&budget.budget_name));
-            chip.upcast()
-        }
-        None => gtk::Box::new(gtk::Orientation::Horizontal, 0).upcast(),
+    view.append_column(&recycled_column("Budget restant", 130, |_| {
+        let chip = widgets::chip("", "#6366f1", None);
+        let label = chip.first_child().and_downcast::<gtk::Label>().expect("budget label");
+        RecycledCell::new(chip.clone(), move |row| {
+            chip.set_visible(row.budget.is_some());
+            if let Some(budget) = &row.budget {
+                label.set_text(&format::money(budget.remaining));
+                chip.set_tooltip_text(Some(&budget.budget_name));
+            } else {
+                chip.set_tooltip_text(None);
+            }
+        })
     }));
 
     let status_store = store.clone();
-    view.append_column(&text_column("État", 70, move |row| {
+    view.append_column(&recycled_column("État", 70, move |cell| {
         let button = gtk::Button::new();
         button.add_css_class("flat");
-        let checked = row.transaction.checked;
-        let icon = icons::image(if checked { "CheckCircle2" } else { "Circle" }, 18);
-        if checked {
-            icon.add_css_class("dmx-income");
-        } else {
-            icon.add_css_class("dim-label");
-        }
+        let icon = icons::image("Circle", 18);
         button.set_child(Some(&icon));
-        button.set_tooltip_text(Some(if checked { "Dépointer" } else { "Pointer" }));
         let store = status_store.clone();
-        let id = row.transaction.id.clone();
+        let cell = cell.downgrade();
         button.connect_clicked(move |_| {
-            let ids = vec![id.clone()];
-            store.run(None, move |engine| engine.toggle_transactions_checked(&ids));
+            if let Some(id) = cell.upgrade().and_then(|cell| transaction_id_for_cell(&cell)) {
+                store.run(None, move |engine| engine.toggle_transactions_checked(&[id]));
+            }
         });
-        button.upcast()
+        RecycledCell::new(button.clone(), move |row| {
+            let checked = row.transaction.checked;
+            icon.set_icon_name(Some(&icons::icon_name(if checked { "CheckCircle2" } else { "Circle" })));
+            icon.set_css_classes(&[if checked { "dmx-income" } else { "dim-label" }]);
+            button.set_tooltip_text(Some(if checked { "Dépointer" } else { "Pointer" }));
+        })
     }));
 
-    view.append_column(&text_column("Solde", 120, |row| {
-        let label = widgets::amount(&format::money(row.balance), Some("dim-label"));
-        label.upcast()
+    view.append_column(&recycled_column("Solde", 120, |_| {
+        let label = widgets::amount("", Some("dim-label"));
+        RecycledCell::new(label.clone(), move |row| label.set_text(&format::money(row.balance)))
     }));
 
     let actions_store = store.clone();
-    view.append_column(&text_column("", 90, move |row| {
+    view.append_column(&recycled_column("", 90, move |cell| {
         let host = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         let edit = widgets::icon_button("Edit2", "Modifier");
         let store = actions_store.clone();
-        let id = row.transaction.id.clone();
-        edit.connect_clicked(move |_| store.present(FormRequest::Transaction(Some(id.clone()))));
+        let edit_cell = cell.downgrade();
+        edit.connect_clicked(move |_| {
+            if let Some(id) = edit_cell.upgrade().and_then(|cell| transaction_id_for_cell(&cell)) {
+                store.present(FormRequest::Transaction(Some(id)));
+            }
+        });
         host.append(&edit);
 
         let delete = widgets::icon_button("Trash2", "Supprimer");
         delete.add_css_class("dmx-expense");
         let store = actions_store.clone();
-        let id = row.transaction.id.clone();
+        let delete_cell = cell.downgrade();
         delete.connect_clicked(move |_| {
+            let Some(id) = delete_cell.upgrade().and_then(|cell| transaction_id_for_cell(&cell)) else {
+                return;
+            };
             let store_for_action = store.clone();
-            let id = id.clone();
             store.confirm(
                 "Supprimer",
                 "Voulez-vous vraiment supprimer cette transaction ?",
@@ -592,13 +617,51 @@ fn add_columns(view: &gtk::ColumnView, store: &Rc<Store>) {
             );
         });
         host.append(&delete);
-        host.upcast()
+        RecycledCell::new(host, |_| {})
     }));
 }
 
-/// Colonne dont chaque cellule est reconstruite à partir de la ligne.
-fn text_column(title: &str, width: i32, build: impl Fn(&JournalRow) -> gtk::Widget + 'static) -> gtk::ColumnViewColumn {
+fn transaction_id_for_cell(cell: &gtk::ColumnViewCell) -> Option<String> {
+    cell.item()
+        .and_downcast::<glib::BoxedAnyObject>()
+        .map(|object| object.borrow::<JournalRow>().transaction.id.clone())
+}
+
+struct RecycledCell {
+    widget: gtk::Widget,
+    update: Box<dyn Fn(&JournalRow)>,
+    unbind: Box<dyn Fn()>,
+}
+
+impl RecycledCell {
+    fn new(widget: impl IsA<gtk::Widget>, update: impl Fn(&JournalRow) + 'static) -> Self {
+        Self {
+            widget: widget.upcast(),
+            update: Box::new(update),
+            unbind: Box::new(|| {}),
+        }
+    }
+}
+
+/// GTK recycles the cell, its widgets and handlers; binding changes only presentation.
+fn recycled_column(
+    title: &str,
+    width: i32,
+    setup: impl Fn(&gtk::ColumnViewCell) -> RecycledCell + 'static,
+) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
+    let cells: Rc<RefCell<HashMap<usize, RecycledCell>>> = Rc::new(RefCell::new(HashMap::new()));
+    let setup_cells = cells.clone();
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ColumnViewCell>() else {
+            return;
+        };
+        let cell = setup(item);
+        cell.widget.set_valign(gtk::Align::Center);
+        item.set_child(Some(&cell.widget));
+        setup_cells.borrow_mut().insert(item.as_ptr() as usize, cell);
+    });
+    let bind_cells = cells.clone();
     factory.connect_bind(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ColumnViewCell>() else {
             return;
@@ -606,10 +669,21 @@ fn text_column(title: &str, width: i32, build: impl Fn(&JournalRow) -> gtk::Widg
         let Some(row) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
             return;
         };
-        let row = row.borrow::<JournalRow>().clone();
-        let child = build(&row);
-        child.set_valign(gtk::Align::Center);
-        item.set_child(Some(&child));
+        if let Some(cell) = bind_cells.borrow().get(&(item.as_ptr() as usize)) {
+            (cell.update)(&row.borrow::<JournalRow>());
+        }
+    });
+    let unbind_cells = cells.clone();
+    factory.connect_unbind(move |_, item| {
+        if let Some(cell) = unbind_cells.borrow().get(&(item.as_ptr() as usize)) {
+            (cell.unbind)();
+        }
+    });
+    factory.connect_teardown(move |_, item| {
+        let cell = cells.borrow_mut().remove(&(item.as_ptr() as usize));
+        if let Some(cell) = cell {
+            (cell.unbind)();
+        }
     });
     let column = gtk::ColumnViewColumn::new(Some(title), Some(factory));
     if width > 0 {
@@ -624,36 +698,39 @@ fn text_column(title: &str, width: i32, build: impl Fn(&JournalRow) -> gtk::Widg
 fn editable_column(
     title: &str,
     width: i32,
-    commit: impl Fn(&JournalRow, String) + Clone + 'static,
+    commit: impl Fn(&str, &str, String) + Clone + 'static,
     text: impl Fn(&JournalRow) -> String + Clone + 'static,
 ) -> gtk::ColumnViewColumn {
-    let factory = gtk::SignalListItemFactory::new();
-    factory.connect_bind(move |_, item| {
-        let Some(item) = item.downcast_ref::<gtk::ColumnViewCell>() else {
-            return;
-        };
-        let Some(object) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
-            return;
-        };
-        let row = object.borrow::<JournalRow>().clone();
-        let original = text(&row);
-        let label = gtk::EditableLabel::new(&original);
-        label.set_valign(gtk::Align::Center);
+    recycled_column(title, width, move |_| {
+        let label = gtk::EditableLabel::new("");
+        let current: Rc<RefCell<Option<(String, String)>>> = Rc::new(RefCell::new(None));
         let commit = commit.clone();
-        let row_for_commit = row.clone();
+        let edit_current = current.clone();
         label.connect_editing_notify(move |label| {
-            // Quitter une cellule sans rien changer ne doit rien écrire ni rien signaler.
-            if !label.is_editing() && label.text() != original {
-                commit(&row_for_commit, label.text().to_string());
+            if !label.is_editing() {
+                let binding = edit_current.borrow().clone();
+                if let Some((id, original)) = binding {
+                    if label.text() != original {
+                        commit(&id, &original, label.text().to_string());
+                    }
+                }
             }
         });
-        item.set_child(Some(&label));
-    });
-    let column = gtk::ColumnViewColumn::new(Some(title), Some(factory));
-    if width > 0 {
-        column.set_fixed_width(width);
-    } else {
-        column.set_expand(true);
-    }
-    column
+        let bind_current = current.clone();
+        let bind_label = label.clone();
+        let text = text.clone();
+        let mut cell = RecycledCell::new(label.clone(), move |row| {
+            bind_current.borrow_mut().take();
+            bind_label.stop_editing(false);
+            let original = text(row);
+            bind_label.set_text(&original);
+            *bind_current.borrow_mut() = Some((row.transaction.id.clone(), original));
+        });
+        cell.unbind = Box::new(move || {
+            // Recycling an editor must not write its draft to the next operation.
+            current.borrow_mut().take();
+            label.stop_editing(false);
+        });
+        cell
+    })
 }

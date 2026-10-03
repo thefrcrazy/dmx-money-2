@@ -1,14 +1,48 @@
 import Foundation
 
+/// Résultats exacts du noyau, conservés en mémoire avec une éviction FIFO bornée.
+final class BoundedFormatCache<Key: Hashable>: @unchecked Sendable {
+    private let capacity: Int
+    private let lock = NSLock()
+    private var values: [Key: String] = [:]
+    private var keys: [Key] = []
+    private var nextEviction = 0
+
+    init(capacity: Int) {
+        precondition(capacity > 0)
+        self.capacity = capacity
+    }
+
+    func value(for key: Key, create: () -> String) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        if let value = values[key] { return value }
+        let value = create()
+        if keys.count == capacity {
+            values.removeValue(forKey: keys[nextEviction])
+            keys[nextEviction] = key
+            nextEviction = (nextEviction + 1) % capacity
+        } else {
+            keys.append(key)
+        }
+        values[key] = value
+        return value
+    }
+}
+
 /// Formats fr-FR fournis par le noyau (espaces fines, abréviations de mois de 1.x).
 public enum Money {
+    private static let currency = BoundedFormatCache<UInt64>(capacity: 2048)
+    private static let roundedCurrency = BoundedFormatCache<UInt64>(capacity: 256)
+
     public static func format(_ amount: Double) -> String {
-        formatCurrency(amount: amount)
+        // La représentation binaire distingue notamment +0 et -0 sans modifier l'arrondi.
+        currency.value(for: amount.bitPattern) { formatCurrency(amount: amount) }
     }
 
     /// « 1 235 € » : montant arrondi à l'euro, comme les cartes de la vue d'ensemble.
     public static func rounded(_ amount: Double) -> String {
-        formatCurrencyRounded(amount: amount)
+        roundedCurrency.value(for: amount.bitPattern) { formatCurrencyRounded(amount: amount) }
     }
 
     /// Montant signé selon le type : « +12,00 € » pour un revenu, « -12,00 € » pour une dépense.
@@ -32,14 +66,27 @@ public enum Money {
 }
 
 public enum DayFormat {
+    private static let numericDates = BoundedFormatCache<String>(capacity: 512)
+    private static let shortDates = BoundedFormatCache<String>(capacity: 512)
+    private static let mediumDates = BoundedFormatCache<String>(capacity: 512)
+    private static let longDates = BoundedFormatCache<String>(capacity: 512)
+
     /// 14/09/2026
-    public static func numeric(_ date: String) -> String { formatDateNumeric(date: date) }
+    public static func numeric(_ date: String) -> String {
+        numericDates.value(for: date) { formatDateNumeric(date: date) }
+    }
     /// 14 sept.
-    public static func short(_ date: String) -> String { formatDateShort(date: date) }
+    public static func short(_ date: String) -> String {
+        shortDates.value(for: date) { formatDateShort(date: date) }
+    }
     /// 14 sept. 2026
-    public static func medium(_ date: String) -> String { formatDateMedium(date: date) }
+    public static func medium(_ date: String) -> String {
+        mediumDates.value(for: date) { formatDateMedium(date: date) }
+    }
     /// lundi 14 septembre 2026
-    public static func long(_ date: String) -> String { formatDateLong(date: date) }
+    public static func long(_ date: String) -> String {
+        longDates.value(for: date) { formatDateLong(date: date) }
+    }
 
     /// « Aujourd'hui », « Demain », « Dans 3 jours », « En retard de 2 jours ».
     public static func relative(days: Int64) -> String {
