@@ -60,7 +60,7 @@ Sources : `pwa/src/services`, `context`, `pages`, `features/import`, `components
 | A12 — Divergences modernes | Politique RC cohérente, synchronisation iCloud explicite ; brouillons chargés hors body et erreurs visibles. | Typecheck/build et régressions. |
 | H1 — AppIntents | Authentification locale requise ; notifications génériques. | Compilation ; Siri sur appareil verrouillé reste un test physique. |
 | H2 — Identité de l’updater | URLs épinglées au dépôt V2 ; signature et TeamID de l’installation exigés pour remplacement automatique ; ad hoc = téléchargement manuel. | Tests de provenance/signature et rollback. Pas de nouveau manifeste signé ni garantie contre une équipe de publication compromise. |
-| H3 — Accessibilité | Couleurs/icônes nommées et sélection accessible ; cibles 44 pt sur iOS, action Pointer/Dépointer nommée. | Source/build ; pas de parcours VoiceOver/Dynamic Type physique. |
+| H3 — Accessibilité | Couleurs/icônes nommées et sélection accessible ; cibles 44 pt sur iOS, action Pointer/Dépointer nommée. | Source/build ; modificateurs d’accessibilité typés pour Intel/Catalina 10.15 ; pas de parcours VoiceOver/Dynamic Type physique. |
 | H4 — Index AppKit obsolète | ID et révision capturés au début, édition invalidée lors d’un reload, APIs avec base. | Test métier noyau ; variante AppKit typée sur ARM, runtime Intel à confirmer en CI. |
 
 Sources : `apple/Packages/DmxKit`, variantes iOS/macOS, `scripts/build-macos.sh`, `scripts/tests/test-macos-updater.py`.
@@ -79,7 +79,7 @@ Sources : `apple/Packages/DmxKit`, variantes iOS/macOS, `scripts/build-macos.sh`
 | WL-08 | Événements de statut séparés des changements de données, canal borné et coalescence. | Revue/couverture événementielle et compilation. |
 | WL-09 | Graphiques réagissant à la publication de la vue plutôt qu’à chaque notification dérivée. | Tests ViewModels ; rendu WinUI final confié à CI. |
 | WL-10 | Préparation des imports hors UI, aperçu limité et formats/tailles contrôlés ; confirmation await et fermeture bloquée durant écriture. | 100 000 lignes fictives : constructeur ~0,03 ms/2 128 octets, préparation ~119–120 ms en worker. Baseline ~214,89 ms/~8,98 Mo dans le constructeur. Aucun gain FPS déduit. |
-| WL-11 | Windows App SDK 2.5.1 ; toolchain Rust alignée 1.94.0. | Tests .NET locaux ; compilation WinUI x64/ARM64 en CI requise. |
+| WL-11 | Windows App SDK 2.5.1 et BuildTools 10.0.26100.4654 compatibles ; toolchain Rust alignée 1.94.0. | Tests .NET locaux ; compilation WinUI x64/ARM64 en CI requise. |
 | WL-C01 | Identité d’édition capturée ; réaffectation/reload annule un brouillon périmé. | 11 scénarios utilisant EditableCell réel avec stubs d’événements WinUI ; test ajouté en CI. |
 | WL-O01 | Noms et états sélectionnés accessibles des boutons d’accent Windows. | Source ; Narrator/Orca physiques non exécutés. |
 
@@ -95,7 +95,7 @@ Sources : `windows/src`, `windows/tests`, `linux/dmx-money-gtk/src`, `linux/dmx-
 - GTK : quatre tests unitaires, 20 cycles de libération de contrôles réels ; vérification host du tray ksni 0.3.6.
 - Interface Mac pilotée avec `DMXMONEY_DATA_DIR` et bundle fictif distinct : édition concurrente, recherche, budget, échéancier, analyses. iCloud, compagnon et updater désactivés dans ce dossier. À la fermeture, l’outil a repris la fenêtre installée ; le pilotage a été arrêté sans modification de cette fenêtre.
 
-La CI complète vérifie les builds Windows x64/ARM64, Mac moderne/Intel et iOS, ainsi que Linux. Son état est publié sur la pull request ; les résultats locaux ci-dessus ne remplacent pas ces builds.
+La CI de cette pull request vérifie Windows x64, Mac moderne/Intel et iOS, ainsi que Linux. Windows ARM64 est construit par le workflow de release ; cette architecture n’est pas exécutée dans la CI de pull request. Son état est publié sur la pull request ; les résultats locaux ci-dessus ne remplacent pas ces builds.
 
 ## Limites de sécurité et compatibilité
 

@@ -445,7 +445,7 @@ public struct IconButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
-        .accessibilityLabel(Text(label))
+        .accessibility(label: Text(label))
     }
 }
 
@@ -651,8 +651,8 @@ public struct ColorGridPicker: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(PlainButtonStyle())
-                        .accessibilityLabel(Text("Couleur \(hex)"))
-                        .accessibilityValue(Text(selection.lowercased() == hex.lowercased() ? "Sélectionnée" : "Non sélectionnée"))
+                        .accessibility(label: Text("Couleur \(hex)"))
+                        .accessibility(value: Text(selection.lowercased() == hex.lowercased() ? "Sélectionnée" : "Non sélectionnée"))
                         .frame(minWidth: pickerTargetSize, minHeight: pickerTargetSize)
                         .contentShape(Rectangle())
                     }
@@ -696,8 +696,8 @@ public struct IconGridPicker: View {
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(PlainButtonStyle())
-                                .accessibilityLabel(Text("Icône \(name)"))
-                                .accessibilityValue(Text(selection == name ? "Sélectionnée" : "Non sélectionnée"))
+                                .accessibility(label: Text("Icône \(name)"))
+                                .accessibility(value: Text(selection == name ? "Sélectionnée" : "Non sélectionnée"))
                                 .frame(minWidth: pickerTargetSize, minHeight: pickerTargetSize)
                                 .contentShape(Rectangle())
                             }
