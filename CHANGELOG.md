@@ -3,7 +3,7 @@
 ## 2.1.0-rc.2 — 2026-10-03
 
 - Journal PWA mobile : virtualisation des opérations et des en-têtes de date avec une fenêtre de rendu bornée, même après un long défilement ou sur une journée très chargée ; conservation de la sélection et de la ligne focalisée.
-- Tableaux PWA : rendu limité à la fenêtre visible et réutilisation des cellules pendant le défilement, avec nettoyage des infobulles lorsque leur cellule quitte la fenêtre.
+- Tableaux PWA : mises à jour par ligne visible, infobulles natives sans mesures répétées et conservation du brouillon lorsque la ligne éditée quitte l’écran.
 - Journaux natifs SwiftUI/AppKit, WinUI et GTK : réutilisation des formats ou cellules et réduction des rechargements de listes pendant le défilement.
 - Les lectures du statut du compagnon et les vérifications d'échéances sans modification ne recalculent plus inutilement le journal ; le changement de jour continue d'actualiser les vues qui en dépendent.
 - Métadonnées alignées sur `2.1.0-rc.2`, build Apple 8 ; pré-version distincte de RC1, utilisant le flux `updates-rc.json` et conservant le canal stable séparé.
