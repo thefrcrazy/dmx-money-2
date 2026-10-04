@@ -3,27 +3,32 @@ import SwiftUI
 public final class ScheduledModel: PageModel {
     public var search = "" {
         willSet { objectWillChange.send() }
-        didSet { refresh() }
+        didSet { if oldValue != search { setNeedsRefresh(debounce: true) } }
     }
 
     public var categories: [String] = [] {
         willSet { objectWillChange.send() }
-        didSet { refresh() }
+        didSet { setNeedsRefresh() }
     }
 
     /// Clés de périodicité sélectionnées (voir `periodicityKey`).
     public var frequencies: [String] = [] {
         willSet { objectWillChange.send() }
-        didSet { refresh() }
+        didSet { setNeedsRefresh() }
     }
 
     public private(set) var view: ScheduledView? = nil {
         willSet { objectWillChange.send() }
     }
 
-    public override init(store: AppStore) {
+    public private(set) var rowsRevision: UInt64 = 0 {
+        willSet { objectWillChange.send() }
+    }
+
+    public init(store: AppStore, active: Bool = true) {
         super.init(store: store)
-        refresh()
+        isActive = active
+        if active { refresh() } else { setNeedsRefresh() }
     }
 
     public override func refresh() {
@@ -36,7 +41,11 @@ public final class ScheduledModel: PageModel {
             frequencies: allPeriodicities().filter { selected.contains(periodicityKey($0)) }
         )
         let today = store.today
-        view = store.read { engine in try engine.scheduled(query: query, today: today) }
+        load({ try $0.scheduled(query: query, today: today) }) { [weak self] value in
+            guard let self else { return }
+            self.view = value
+            self.rowsRevision &+= 1
+        }
     }
 }
 
@@ -97,7 +106,7 @@ public struct ScheduledPage: View {
                         )
                     }
                 } else if compact {
-                    VStack(spacing: 12) {
+                    AdaptiveStack(spacing: 12) {
                         ForEach(view.rows, id: \.scheduled.id) { row in
                             ScheduledCompactCard(row: row)
                         }
@@ -349,14 +358,22 @@ struct ScheduledSuggestionsView: View {
         self.onClose = onClose
     }
 
-    private var suggestions: [ScheduledSuggestion] {
+    @State private var items: [ScheduledSuggestion] = []
+    @State private var isLoading = true
+    @State private var loadError: String?
+    @State private var readTask: StoreReadTask?
+
+    private func loadSuggestions() {
+        readTask?.cancel()
+        isLoading = true
         let query = ScheduledQuery(accounts: store.selectedAccountIds, dueRange: .all, search: "", categories: [], frequencies: [])
         let today = store.today
-        return store.read { engine in try engine.scheduled(query: query, today: today).suggestions } ?? []
+        readTask = store.fetch({ try $0.scheduled(query: query, today: today).suggestions }, completion: {
+            items = $0; isLoading = false; loadError = nil
+        }, failure: { loadError = $0; isLoading = false })
     }
 
     var body: some View {
-        let items = suggestions
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Suggestions du journal").font(.system(size: 17, weight: .semibold))
@@ -367,8 +384,10 @@ struct ScheduledSuggestionsView: View {
             .padding(.vertical, 14)
             Divider()
             ScrollView {
-                VStack(spacing: 8) {
-                    if items.isEmpty {
+                AdaptiveStack(spacing: 8) {
+                    if isLoading { Text("Analyse du journal…").foregroundColor(.secondary) }
+                    if let error = loadError { Text(error).foregroundColor(DmxColors.expense) }
+                    if !isLoading && loadError == nil && items.isEmpty {
                         EmptyStateView(icon: "Sparkles", title: "Aucune suggestion pour le moment")
                     }
                     ForEach(items, id: \.key) { suggestion in
@@ -379,6 +398,9 @@ struct ScheduledSuggestionsView: View {
             }
             .frame(minHeight: 200, maxHeight: 480)
         }
+        .onAppear(perform: loadSuggestions)
+        .onReceive(store.$revision.dropFirst()) { _ in loadSuggestions() }
+        .onDisappear { readTask?.cancel() }
     }
 
     private func row(_ suggestion: ScheduledSuggestion) -> some View {

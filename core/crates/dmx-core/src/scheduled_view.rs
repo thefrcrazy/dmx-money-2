@@ -380,6 +380,8 @@ mod tests {
             checked: true,
             is_transfer: false,
             linked_transaction_id: None,
+            bank_source: None,
+            bank_transaction_id: None,
         }
     }
 

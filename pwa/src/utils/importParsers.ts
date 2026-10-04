@@ -1,3 +1,4 @@
+import { v5 as uuidv5 } from 'uuid';
 import type { Transaction } from '../types';
 
 export type ParsedStatementTransaction = {
@@ -5,6 +6,8 @@ export type ParsedStatementTransaction = {
     amount: number;
     description: string;
     category?: string;
+    bankSource?: string;
+    bankTransactionId?: string;
 };
 
 export type ImportTransactionInput = {
@@ -15,6 +18,8 @@ export type ImportTransactionInput = {
     category: string;
     accountId?: string;
     checked?: boolean;
+    bankSource?: string;
+    bankTransactionId?: string;
 };
 
 const decodeEntities = (value: string) => value
@@ -200,13 +205,21 @@ const parseOfxDate = (value: string) => {
 };
 
 export const parseOfxTransactions = (content: string): ParsedStatementTransaction[] => {
-    const blocks = content.split(/<STMTTRN>/i).slice(1);
+    const blocks = [...content.matchAll(/<STMTTRN>([\s\S]*?)(?=<STMTTRN>|$)/gi)];
+    const fid = getOfxTagValue(content, 'FID');
+    const org = getOfxTagValue(content, 'ORG');
 
     if (blocks.length === 0) {
         throw new Error('Aucune transaction trouvée dans le fichier OFX. Le format est peut-être incorrect.');
     }
 
-    return blocks.reduce<ParsedStatementTransaction[]>((transactions, block) => {
+    return blocks.reduce<ParsedStatementTransaction[]>((transactions, match) => {
+        const block = match[1];
+        const prefix = content.slice(0, match.index);
+        const statements = [...prefix.matchAll(/<(?:STMTRS|CCSTMTRS)>/gi)];
+        const statement = prefix.slice(statements[statements.length - 1]?.index ?? 0);
+        const acctId = getOfxTagValue(statement, 'ACCTID');
+        const fitId = getOfxTagValue(block, 'FITID');
         const date = parseOfxDate(getOfxTagValue(block, 'DTPOSTED'));
         const amount = parseBankAmount(getOfxTagValue(block, 'TRNAMT'));
         const name = normalizeText(getOfxTagValue(block, 'NAME'));
@@ -218,7 +231,11 @@ export const parseOfxTransactions = (content: string): ParsedStatementTransactio
             ? normalizeText([name, memo].filter(Boolean).join(' - '))
             : name || memo || 'Transaction OFX';
 
-        transactions.push({ date, amount, description });
+        const identity = acctId && fitId ? {
+            bankSource: 'ofx:' + JSON.stringify([fid, org, getOfxTagValue(statement, 'BANKID'), getOfxTagValue(statement, 'BRANCHID'), acctId, getOfxTagValue(statement, 'ACCTTYPE')]),
+            bankTransactionId: fitId,
+        } : {};
+        transactions.push({ date, amount, description, ...identity });
         return transactions;
     }, []);
 };
@@ -246,6 +263,10 @@ export const filterDuplicateTransactions = <T extends ImportTransactionInput>(
 ) => {
     // Match occurrences, not just values: two identical purchases on a statement
     // are legitimate. Re-importing the same statement must still add neither twice.
+    const identity = (transaction: T | Transaction) => transaction.bankSource && transaction.bankTransactionId
+        ? JSON.stringify([transaction.accountId || fallbackAccountId, transaction.bankSource, transaction.bankTransactionId]) : null;
+    const existingIds = new Set(existing.map(transaction => transaction.id));
+    const seenIdentities = new Set(existing.map(identity).filter((value): value is string => value !== null));
     const remaining = new Map<string, number>();
     existing.forEach(transaction => {
         const key = transactionFingerprint(transaction);
@@ -255,6 +276,12 @@ export const filterDuplicateTransactions = <T extends ImportTransactionInput>(
     let duplicateCount = 0;
 
     incoming.forEach(transaction => {
+        const bankIdentity = identity(transaction);
+        if (bankIdentity) {
+            if (seenIdentities.has(bankIdentity) || existingIds.has(uuidv5(bankIdentity, uuidv5.URL))) duplicateCount++;
+            else { unique.push(transaction); seenIdentities.add(bankIdentity); }
+            return;
+        }
         const key = transactionFingerprint(transaction, fallbackAccountId);
         const count = remaining.get(key) || 0;
         if (count > 0) {

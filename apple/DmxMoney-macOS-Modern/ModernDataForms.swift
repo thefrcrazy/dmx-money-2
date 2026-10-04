@@ -54,12 +54,14 @@ struct ModernRestoreBackup: View {
     @State private var mode: RestoreMode = .replace
     @State private var error: String?
     @State private var isWorking = false
+    @State private var readTask: StoreReadTask?
 
     var body: some View {
         FormSheet(
             title: "Importer une sauvegarde",
             submitTitle: mode == .replace ? "Remplacer mes données" : "Fusionner",
             submitDisabled: summary == nil || isWorking,
+            cancelDisabled: isWorking,
             error: error,
             onCancel: onClose,
             onSubmit: submit
@@ -87,11 +89,12 @@ struct ModernRestoreBackup: View {
                     Text("Fusionner").tag(RestoreMode.merge)
                 }
                 .pickerStyle(.segmented)
+                .disabled(isWorking)
             } footer: {
                 Label(
                     mode == .replace
                         ? "Toutes les données actuelles seront remplacées par celles de la sauvegarde."
-                        : "Les éléments de la sauvegarde sont ajoutés ; ceux déjà présents sont conservés.",
+                        : "Les éléments absents de la sauvegarde sont conservés. À identifiant identique, la sauvegarde remplace l’élément actuel.",
                     systemImage: mode == .replace ? "exclamationmark.triangle" : "info.circle"
                 )
                 .font(.caption)
@@ -100,24 +103,27 @@ struct ModernRestoreBackup: View {
             }
         }
         .onAppear(perform: inspect)
+        .onDisappear { readTask?.cancel() }
     }
 
     private func inspect() {
-        do {
-            summary = try store.engine.inspectBackup(content: content)
-        } catch {
-            self.error = "Le fichier de sauvegarde est illisible. (\(AppStore.message(for: error)))"
-        }
+        guard readTask == nil else { return }
+        let content = self.content
+        readTask = store.fetch({ try $0.inspectBackup(content: content) }, completion: { summary = $0 },
+                               failure: { error = "Le fichier de sauvegarde est illisible. (\($0))" })
     }
 
     private func submit() {
         isWorking = true
         let content = self.content
         let mode = self.mode
+        let generation = store.beginFormWork()
         store.perform({ engine in try engine.restoreBackup(content: content, mode: mode) }, completion: { [store] _ in
+            store.finishFormWork(generation: generation)
             store.showToast("Import réussi")
             onClose()
         }, failure: { message in
+            store.finishFormWork(generation: generation)
             error = message
             isWorking = false
         })
@@ -164,15 +170,25 @@ struct ModernBudgetSuggestions: View {
     @EnvironmentObject private var store: AppStore
     let onClose: () -> Void
 
-    private var suggestions: [BudgetSuggestion] {
+    @State private var items: [BudgetSuggestion] = []
+    @State private var isLoading = true
+    @State private var loadError: String?
+    @State private var readTask: StoreReadTask?
+
+    private func loadSuggestions() {
+        readTask?.cancel()
+        isLoading = true
         let query = BudgetQuery(accounts: store.selectedAccountIds, search: "", categories: [])
         let today = store.today
-        return store.peek { engine in try engine.budget(query: query, today: today).suggestions } ?? []
+        readTask = store.fetch({ try $0.budget(query: query, today: today).suggestions }, completion: {
+            items = $0; isLoading = false; loadError = nil
+        }, failure: { loadError = $0; isLoading = false })
     }
 
     var body: some View {
-        let items = suggestions
-        return SuggestionSheet(title: "Suggestions de budgets", isEmpty: items.isEmpty, onClose: onClose) {
+        return SuggestionSheet(title: "Suggestions de budgets", isEmpty: !isLoading && loadError == nil && items.isEmpty, onClose: onClose) {
+            if isLoading { ProgressView("Analyse du journal…") }
+            if let error = loadError { Text(error).foregroundStyle(.red) }
             ForEach(items, id: \.key) { suggestion in
                 HStack(spacing: 12) {
                     CategoryBadge(icon: suggestion.category.icon, colorHex: suggestion.category.color, size: 30)
@@ -189,6 +205,9 @@ struct ModernBudgetSuggestions: View {
                 .padding(.vertical, 4)
             }
         }
+        .onAppear(perform: loadSuggestions)
+        .onReceive(store.$revision.dropFirst()) { _ in loadSuggestions() }
+        .onDisappear { readTask?.cancel() }
     }
 
     private func meta(_ suggestion: BudgetSuggestion) -> String {
@@ -217,15 +236,25 @@ struct ModernScheduledSuggestions: View {
     @EnvironmentObject private var store: AppStore
     let onClose: () -> Void
 
-    private var suggestions: [ScheduledSuggestion] {
+    @State private var items: [ScheduledSuggestion] = []
+    @State private var isLoading = true
+    @State private var loadError: String?
+    @State private var readTask: StoreReadTask?
+
+    private func loadSuggestions() {
+        readTask?.cancel()
+        isLoading = true
         let query = ScheduledQuery(accounts: store.selectedAccountIds, dueRange: .all, search: "", categories: [], frequencies: [])
         let today = store.today
-        return store.peek { engine in try engine.scheduled(query: query, today: today).suggestions } ?? []
+        readTask = store.fetch({ try $0.scheduled(query: query, today: today).suggestions }, completion: {
+            items = $0; isLoading = false; loadError = nil
+        }, failure: { loadError = $0; isLoading = false })
     }
 
     var body: some View {
-        let items = suggestions
-        return SuggestionSheet(title: "Suggestions d'échéances", isEmpty: items.isEmpty, onClose: onClose) {
+        return SuggestionSheet(title: "Suggestions d'échéances", isEmpty: !isLoading && loadError == nil && items.isEmpty, onClose: onClose) {
+            if isLoading { ProgressView("Analyse du journal…") }
+            if let error = loadError { Text(error).foregroundStyle(.red) }
             ForEach(items, id: \.key) { suggestion in
                 HStack(spacing: 12) {
                     CategoryBadge(
@@ -246,6 +275,9 @@ struct ModernScheduledSuggestions: View {
                 .padding(.vertical, 4)
             }
         }
+        .onAppear(perform: loadSuggestions)
+        .onReceive(store.$revision.dropFirst()) { _ in loadSuggestions() }
+        .onDisappear { readTask?.cancel() }
     }
 
     private func meta(_ suggestion: ScheduledSuggestion) -> String {

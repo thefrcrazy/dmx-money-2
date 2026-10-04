@@ -75,7 +75,7 @@ final class JournalPerformanceTests: XCTestCase {
     }
 
     @MainActor
-    func testJournalKeepsVisibleSelectionAndDropsFilteredRows() throws {
+    func testJournalKeepsVisibleSelectionAndDropsFilteredRows() async throws {
         let engine = try DmxEngine.openInMemory()
         var account = try engine.accountDraft(id: nil)
         account.name = "Fixture"
@@ -88,15 +88,52 @@ final class JournalPerformanceTests: XCTestCase {
         draft.categoryId = "28"
         let transactionID = try XCTUnwrap(engine.saveTransaction(draft: draft).first)
         let journal = JournalModel(store: AppStore(engine: engine))
+        await waitForRefresh(journal) { journal.setNeedsRefresh() }
         journal.selection = [transactionID]
-        journal.search = "Fixture"
+        await waitForRefresh(journal) { journal.search = "Fixture" }
         XCTAssertEqual(journal.selection, [transactionID])
-        journal.search = "aucune correspondance"
+        await waitForRefresh(journal) { journal.search = "aucune correspondance" }
         XCTAssertTrue(journal.selection.isEmpty)
-        journal.clearFilters()
+        await waitForRefresh(journal) { journal.clearFilters() }
         XCTAssertFalse(journal.rows.isEmpty)
         XCTAssertTrue(journal.selection.isEmpty)
     }
+    @MainActor
+    func testScheduledPreparationRevisionAdvancesOnlyForVisibleQueryResults() async throws {
+        let model = ScheduledModel(store: AppStore(engine: try DmxEngine.openInMemory()), active: false)
+        XCTAssertEqual(model.rowsRevision, 0)
+        XCTAssertNil(model.view)
+        model.isActive = true
+        await waitForScheduledRevision(model, atLeast: 1)
+        XCTAssertNotNil(model.view)
+        let visibleRevision = model.rowsRevision
+        model.isActive = false
+        model.search = "Fictif"
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(model.rowsRevision, visibleRevision)
+        model.isActive = true
+        await waitForScheduledRevision(model, atLeast: visibleRevision + 1)
+        XCTAssertNotNil(model.view)
+    }
+
+    @MainActor
+    private func waitForScheduledRevision(_ model: ScheduledModel, atLeast revision: UInt64) async {
+        let deadline = Date().addingTimeInterval(3)
+        while model.rowsRevision < revision && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertGreaterThanOrEqual(model.rowsRevision, revision)
+    }
+
+    @MainActor
+    private func waitForRefresh(_ journal: JournalModel, change: () -> Void) async {
+        let loaded = expectation(description: "Journal background result")
+        journal.onChange = { loaded.fulfill() }
+        change()
+        await fulfillment(of: [loaded], timeout: 3)
+        journal.onChange = nil
+    }
+
 }
 
 private final class LockedCounter: @unchecked Sendable {

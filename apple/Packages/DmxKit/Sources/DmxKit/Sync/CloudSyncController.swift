@@ -6,14 +6,19 @@ import Foundation
 ///
 /// Le noyau tient le journal des changements (`sync_outbox`) ; ce contrôleur les pousse dans la base
 /// privée CloudKit via `CKSyncEngine` et applique les changements reçus (le plus récent l'emporte).
-public final class CloudSyncController {
+public final class CloudSyncController: ObservableObject {
     public static let enabledKey = "DmxICloudSyncEnabled"
 
     private let store: AppStore
     private var backend: AnyObject?
     private var cancellable: AnyCancellable?
-    fileprivate(set) var lastSync: Date?
-    fileprivate(set) var lastError: String?
+    private var backendGeneration: UInt64 = 0
+    private let isolated = ProcessInfo.processInfo.environment["DMXMONEY_DATA_DIR"] != nil
+    private lazy var defaults: UserDefaults = isolated
+        ? UserDefaults(suiteName: "DmxMoney.CloudKit.fixture.\(Bundle.main.bundleIdentifier ?? "audit")")!
+        : .standard
+    @Published fileprivate(set) var lastSync: Date?
+    @Published fileprivate(set) var lastError: String?
 
     public init(store: AppStore) {
         self.store = store
@@ -32,10 +37,11 @@ public final class CloudSyncController {
 
     public var isAvailable: Bool {
         guard #available(macOS 14.0, iOS 17.0, *) else { return false }
-        return containerIdentifier != nil && FileManager.default.ubiquityIdentityToken != nil
+        return !isolated && containerIdentifier != nil && FileManager.default.ubiquityIdentityToken != nil
     }
 
     public var unavailableReason: String {
+        if isolated { return "iCloud est désactivé dans ce dossier de données fictives." }
         guard #available(macOS 14.0, iOS 17.0, *) else {
             return "La synchronisation iCloud nécessite macOS 14 Sonoma ou plus récent. Le pont PWA reste disponible."
         }
@@ -46,11 +52,13 @@ public final class CloudSyncController {
     }
 
     public var isEnabled: Bool {
-        UserDefaults.standard.bool(forKey: Self.enabledKey)
+        !isolated && defaults.bool(forKey: Self.enabledKey)
     }
 
     public func setEnabled(_ enabled: Bool) {
-        UserDefaults.standard.set(enabled, forKey: Self.enabledKey)
+        guard !isolated else { return }
+        objectWillChange.send()
+        defaults.set(enabled, forKey: Self.enabledKey)
         if enabled {
             start(initial: true)
         } else {
@@ -88,24 +96,29 @@ public final class CloudSyncController {
             isEnabled: { [weak self] in self?.isEnabled ?? false },
             setEnabled: { [weak self] enabled in self?.setEnabled(enabled) },
             status: { [weak self] in self?.statusText ?? "" },
-            syncNow: { [weak self] in self?.syncNow() }
+            syncNow: { [weak self] in self?.syncNow() },
+            changes: objectWillChange.eraseToAnyPublisher()
         )
     }
 
     private func start(initial: Bool) {
-        guard #available(macOS 14.0, iOS 17.0, *), backend == nil, let container = containerIdentifier else { return }
+        guard !isolated, #available(macOS 14.0, iOS 17.0, *), backend == nil, let container = containerIdentifier else { return }
+        backendGeneration &+= 1
+        let generation = backendGeneration
         let stateURL = URL(fileURLWithPath: store.engine.openReport().databasePath)
             .deletingLastPathComponent()
             .appendingPathComponent("cloudkit-sync-state.json")
         let backend = CloudSyncBackend(store: store, containerIdentifier: container, stateURL: stateURL, report: { [weak self] date, error in
             DispatchQueue.main.async {
-                if let date = date { self?.lastSync = date }
-                self?.lastError = error
+                guard let self, self.backendGeneration == generation, self.isEnabled else { return }
+                if let date = date { self.lastSync = date }
+                self.lastError = error
             }
-        }, accountChanged: { [weak self] in
+        }, suspended: { [weak self] reason in
             DispatchQueue.main.async {
-                self?.setEnabled(false)
-                self?.lastError = "Compte iCloud modifié : vérifiez le compte connecté avant de réactiver la synchronisation."
+                guard let self, self.backendGeneration == generation else { return }
+                self.setEnabled(false)
+                self.lastError = reason
             }
         })
         self.backend = backend
@@ -117,6 +130,7 @@ public final class CloudSyncController {
     }
 
     private func stop() {
+        backendGeneration &+= 1
         cancellable = nil
         guard #available(macOS 14.0, iOS 17.0, *), let backend = backend as? CloudSyncBackend else { return }
         backend.stop()
@@ -134,7 +148,7 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
     private let engine: DmxEngine
     private let stateURL: URL
     private let report: (Date?, String?) -> Void
-    private let accountChanged: () -> Void
+    private let suspended: (String) -> Void
     private var syncEngine: CKSyncEngine!
     private let lock = NSLock()
     private var stopped = false
@@ -145,12 +159,12 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
     /// Enregistrements serveur connus (conservent l'étiquette de modification).
     private var serverRecords: [String: CKRecord] = [:]
 
-    init(store: AppStore, containerIdentifier: String, stateURL: URL, report: @escaping (Date?, String?) -> Void, accountChanged: @escaping () -> Void) {
+    init(store: AppStore, containerIdentifier: String, stateURL: URL, report: @escaping (Date?, String?) -> Void, suspended: @escaping (String) -> Void) {
         self.store = store
         engine = store.engine
         self.stateURL = stateURL
         self.report = report
-        self.accountChanged = accountChanged
+        self.suspended = suspended
         let container = CKContainer(identifier: containerIdentifier)
         var configuration = CKSyncEngine.Configuration(
             database: container.privateCloudDatabase,
@@ -162,6 +176,11 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
     }
 
     func bootstrap(initial: Bool) {
+        // Legacy queued physical deletes have no deletion clock and must never be sent.
+        let legacyDeletes = syncEngine.state.pendingRecordZoneChanges.filter {
+            if case .deleteRecord = $0 { return true }; return false
+        }
+        syncEngine.state.remove(pendingRecordZoneChanges: legacyDeletes)
         if initial {
             _ = try? engine.enqueueAllForSync()
             syncEngine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: Self.zoneID))])
@@ -220,21 +239,18 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
             if case let .saveRecord(id) = pending { return id.recordName }
             return nil
         })
-        let deletes = Set(queued.compactMap { pending -> String? in
-            if case let .deleteRecord(id) = pending { return id.recordName }
-            return nil
-        })
         var additions: [CKSyncEngine.PendingRecordZoneChange] = []
         var removals: [CKSyncEngine.PendingRecordZoneChange] = []
         lock.lock()
         for change in changes {
             let name = Self.recordName(change.entity, change.recordId)
-            let isQueued = change.deleted ? deletes.contains(name) : saves.contains(name)
+            let isQueued = saves.contains(name)
             if outgoing[name]?.seq == change.seq && isQueued { continue }
             outgoing[name] = change
             let id = CKRecord.ID(recordName: name, zoneID: Self.zoneID)
-            additions.append(change.deleted ? .deleteRecord(id) : .saveRecord(id))
-            removals.append(change.deleted ? .saveRecord(id) : .deleteRecord(id))
+            // A deletion is a versioned record, never a physical delete without its date.
+            additions.append(.saveRecord(id))
+            removals.append(.deleteRecord(id))
         }
         lock.unlock()
         guard !additions.isEmpty else { return }
@@ -245,22 +261,13 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
     func nextRecordZoneChangeBatch(_ context: CKSyncEngine.SendChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.RecordZoneChangeBatch? {
         guard isRunning else { return nil }
         let scope = context.options.scope
-        let changes = syncEngine.state.pendingRecordZoneChanges.filter { scope.contains($0) }
+        let changes = Array(syncEngine.state.pendingRecordZoneChanges.filter {
+            guard case .saveRecord = $0 else { return false }
+            return scope.contains($0)
+        }.prefix(200))
         guard !changes.isEmpty else { return nil }
-        markDeletionsSent(changes)
         return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: changes) { [weak self] recordID in
             self?.record(for: recordID)
-        }
-    }
-
-    private func markDeletionsSent(_ changes: [CKSyncEngine.PendingRecordZoneChange]) {
-        lock.lock()
-        defer { lock.unlock() }
-        for pending in changes {
-            if case let .deleteRecord(recordID) = pending,
-               let change = outgoing[recordID.recordName], change.deleted {
-                sent[recordID.recordName] = change
-            }
         }
     }
 
@@ -269,14 +276,37 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
         defer { lock.unlock() }
         let name = recordID.recordName
         guard !stopped else { return nil }
-        guard let change = outgoing[name], let payload = change.payload else { return nil }
+        guard let change = outgoing[name], change.deleted || change.payload != nil else { return nil }
         let record = serverRecords[name] ?? CKRecord(recordType: Self.recordType(change.entity), recordID: recordID)
+        Self.write(change, to: record)
+        sent[name] = change
+        return record
+    }
+
+    // Reuses the deployed payload String field: no production schema change is required.
+    static let tombstonePayload = "{\"$dmxTombstone\":1}"
+
+    /// Preserves the author's deletion clock for the same LWW comparison as an edit.
+    static func write(_ change: SyncChange, to record: CKRecord) {
         record["entity"] = change.entity
         record["recordId"] = change.recordId
         record["updatedAt"] = change.updatedAt
-        record["payload"] = payload
-        sent[name] = change
-        return record
+        if record["deleted"] != nil { record["deleted"] = nil }
+        record["payload"] = change.deleted ? tombstonePayload : change.payload
+    }
+
+    static func remoteChange(from record: CKRecord) -> RemoteChange? {
+        guard let entity = record["entity"] as? String,
+              let recordId = record["recordId"] as? String,
+              let updatedAt = record["updatedAt"] as? String,
+              !entity.isEmpty, !recordId.isEmpty, !updatedAt.isEmpty,
+              record.recordID.zoneID == zoneID,
+              record.recordID.recordName == recordName(entity, recordId) else { return nil }
+        let deleted = ((record["deleted"] as? NSNumber)?.boolValue ?? false)
+            || record["payload"] as? String == tombstonePayload
+        guard deleted || record["payload"] is String else { return nil }
+        return RemoteChange(entity: entity, recordId: recordId, deleted: deleted, updatedAt: updatedAt,
+                            payload: deleted ? nil : record["payload"] as? String)
     }
 
     // MARK: - Événements
@@ -290,11 +320,8 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
             handleAccountChange(change)
         case let .fetchedDatabaseChanges(changes):
             if changes.deletions.contains(where: { $0.zoneID == Self.zoneID }) {
-                // Données iCloud effacées depuis un autre appareil : on renvoie tout.
-                clearCaches()
-                _ = try? engine.enqueueAllForSync()
-                syncEngine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: Self.zoneID))])
-                enqueuePending()
+                stop()
+                suspended("Les données iCloud ont été effacées. Vos données locales sont conservées. Réactivez la synchronisation uniquement si vous souhaitez les republier dans iCloud.")
             }
         case let .fetchedRecordZoneChanges(changes):
             await applyFetched(
@@ -319,42 +346,38 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
         case .signOut, .switchAccounts:
             // Les données locales ne sont jamais envoyées automatiquement à un autre compte.
             stop()
-            accountChanged()
+            suspended("Compte iCloud modifié : vérifiez le compte connecté avant de réactiver la synchronisation.")
         @unknown default:
             break
         }
     }
 
     private func applyFetched(modifications: [CKRecord], deletions: [CKRecord.ID]) async {
-        await apply(ingest(modifications: modifications, deletions: deletions))
+        if deletions.contains(where: { $0.zoneID == Self.zoneID }) {
+            // Old clients physically deleted records; their original deletion time is lost.
+            stop()
+            suspended("Une suppression provenant d'une ancienne version iCloud a été détectée. Vos données locales sont conservées et la synchronisation est suspendue. Mettez tous vos appareils à jour avant de la réactiver.")
+            return
+        }
+        guard let changes = ingest(modifications: modifications) else {
+            stop()
+            suspended("Un enregistrement iCloud est illisible. Vos données locales et les changements en attente sont conservés ; la synchronisation est suspendue.")
+            return
+        }
+        await apply(changes)
     }
 
     /// Les sections critiques restent synchrones : un verrou ne se prend pas dans un contexte
     /// asynchrone (il bloquerait un fil du pool, et Swift 6 l'interdit).
-    private func clearCaches() {
-        lock.lock()
-        outgoing = [:]
-        serverRecords = [:]
-        lock.unlock()
-    }
-
-    private func ingest(modifications: [CKRecord], deletions: [CKRecord.ID]) -> [RemoteChange] {
+    private func ingest(modifications: [CKRecord]) -> [RemoteChange]? {
         var remote: [RemoteChange] = []
         lock.lock()
+        defer { lock.unlock() }
         for record in modifications where record.recordID.zoneID == Self.zoneID {
-            guard let entity = record["entity"] as? String,
-                  let recordId = record["recordId"] as? String,
-                  let updatedAt = record["updatedAt"] as? String
-            else { continue }
+            guard let change = Self.remoteChange(from: record) else { return nil }
             serverRecords[record.recordID.recordName] = record
-            remote.append(RemoteChange(entity: entity, recordId: recordId, deleted: false, updatedAt: updatedAt, payload: record["payload"] as? String))
+            remote.append(change)
         }
-        for recordID in deletions where recordID.zoneID == Self.zoneID {
-            guard let (entity, recordId) = Self.parse(recordID.recordName) else { continue }
-            serverRecords.removeValue(forKey: recordID.recordName)
-            remote.append(RemoteChange(entity: entity, recordId: recordId, deleted: true, updatedAt: Self.now(), payload: nil))
-        }
-        lock.unlock()
         return remote
     }
 
@@ -363,6 +386,7 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
         var retry: [CKSyncEngine.PendingRecordZoneChange] = []
         var serverWins: [RemoteChange] = []
         var needsZone = false
+        var invalidServerRecord = false
         var failure: String?
     }
 
@@ -370,16 +394,23 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
         let outcome = reconcileSent(result)
 
         if outcome.needsZone {
-            syncEngine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: Self.zoneID))])
+            stop()
+            suspended("La zone iCloud a disparu. Vos données locales sont conservées. Réactivez la synchronisation uniquement pour les republier.")
+            return
+        }
+        if outcome.invalidServerRecord {
+            stop()
+            suspended("Un conflit iCloud contient un enregistrement illisible. Vos données locales et les changements en attente sont conservés ; la synchronisation est suspendue.")
+            return
         }
         if !outcome.retry.isEmpty {
             syncEngine.state.add(pendingRecordZoneChanges: outcome.retry)
         }
+        guard await apply(outcome.serverWins) else { return }
         if !outcome.acknowledged.isEmpty {
             try? engine.acknowledgeSyncChanges(changes: outcome.acknowledged)
             enqueuePending()
         }
-        await apply(outcome.serverWins)
         report(outcome.failure == nil ? Date() : nil, outcome.failure)
     }
 
@@ -388,6 +419,7 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
         var retry: [CKSyncEngine.PendingRecordZoneChange] = []
         var serverWins: [RemoteChange] = []
         var needsZone = false
+        var invalidServerRecord = false
         var failure: String?
 
         lock.lock()
@@ -406,19 +438,13 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
             let name = recordID.recordName
             switch failed.error.code {
             case .serverRecordChanged:
-                guard let server = failed.error.serverRecord else { continue }
-                serverRecords[name] = server
-                let serverUpdatedAt = server["updatedAt"] as? String ?? ""
-                if let change = outgoing[name], change.updatedAt >= serverUpdatedAt {
-                    retry.append(.saveRecord(recordID))
-                } else {
-                    if let entity = server["entity"] as? String, let recordId = server["recordId"] as? String {
-                        serverWins.append(RemoteChange(entity: entity, recordId: recordId, deleted: false, updatedAt: serverUpdatedAt, payload: server["payload"] as? String))
-                    }
-                    if let change = outgoing.removeValue(forKey: name) {
-                        acknowledged.append(change)
-                    }
+                if !Self.reconcileServerConflict(failed.error.serverRecord, recordID: recordID,
+                                                outgoing: &outgoing, acknowledged: &acknowledged,
+                                                retry: &retry, serverWins: &serverWins) {
+                    invalidServerRecord = true
+                    break
                 }
+                serverRecords[name] = failed.error.serverRecord
             case .zoneNotFound:
                 needsZone = true
                 retry.append(.saveRecord(recordID))
@@ -437,7 +463,26 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
         }
         lock.unlock()
 
-        return SentOutcome(acknowledged: acknowledged, retry: retry, serverWins: serverWins, needsZone: needsZone, failure: failure)
+        return SentOutcome(acknowledged: acknowledged, retry: retry, serverWins: serverWins,
+                           needsZone: needsZone, invalidServerRecord: invalidServerRecord, failure: failure)
+    }
+
+    /// Une réponse serveur illisible ne doit jamais acquitter un changement local.
+    static func reconcileServerConflict(
+        _ server: CKRecord?, recordID: CKRecord.ID,
+        outgoing: inout [String: SyncChange], acknowledged: inout [SyncChange],
+        retry: inout [CKSyncEngine.PendingRecordZoneChange], serverWins: inout [RemoteChange]
+    ) -> Bool {
+        guard let server = server, server.recordID == recordID,
+              let remote = remoteChange(from: server) else { return false }
+        let name = recordID.recordName
+        if let change = outgoing[name], change.updatedAt >= remote.updatedAt {
+            retry.append(.saveRecord(recordID))
+        } else {
+            serverWins.append(remote)
+            if let change = outgoing.removeValue(forKey: name) { acknowledged.append(change) }
+        }
+        return true
     }
 
     /// Acquitte la version réellement envoyée et conserve une écriture arrivée pendant l'envoi.
@@ -453,18 +498,23 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
         acknowledged.append(change)
         if outgoing[name]?.seq == change.seq {
             outgoing.removeValue(forKey: name)
-        } else if let newer = outgoing[name] {
-            retry.append(newer.deleted ? .deleteRecord(recordID) : .saveRecord(recordID))
+        } else if outgoing[name] != nil {
+            retry.append(.saveRecord(recordID))
         }
     }
 
-    private func apply(_ changes: [RemoteChange]) async {
-        guard isRunning, !changes.isEmpty else { return }
+    @discardableResult
+    private func apply(_ changes: [RemoteChange]) async -> Bool {
+        guard isRunning else { return false }
+        guard !changes.isEmpty else { return true }
         do {
             _ = try engine.applyRemoteChanges(changes: changes)
             await MainActor.run { store.reload() }
+            return true
         } catch {
-            report(nil, AppStore.message(for: error))
+            stop()
+            suspended("Un changement iCloud n'a pas pu être appliqué : \(AppStore.message(for: error)). La copie locale est conservée.")
+            return false
         }
     }
 
@@ -472,11 +522,6 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
 
     private static func recordName(_ entity: String, _ recordId: String) -> String {
         entity + separator + recordId
-    }
-
-    private static func parse(_ recordName: String) -> (String, String)? {
-        guard let range = recordName.range(of: separator) else { return nil }
-        return (String(recordName[..<range.lowerBound]), String(recordName[range.upperBound...]))
     }
 
     private static func recordType(_ entity: String) -> String {
@@ -488,12 +533,6 @@ final class CloudSyncBackend: CKSyncEngineDelegate, @unchecked Sendable {
         case "transactions": return "Transaction"
         default: return "Settings"
         }
-    }
-
-    private static func now() -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: Date())
     }
 
     private static func loadState(_ url: URL) -> CKSyncEngine.State.Serialization? {

@@ -6,6 +6,7 @@ mod format;
 mod forms;
 mod icon_names;
 mod icons;
+mod import_file;
 mod pages;
 mod snapshot;
 mod store;
@@ -20,20 +21,28 @@ const APP_ID: &str = "com.dmxmoney.app";
 
 fn main() -> glib::ExitCode {
     env_logger::init();
-    let application = adw::Application::builder().application_id(APP_ID).build();
+    let application = adw::Application::builder()
+        .application_id(APP_ID)
+        .flags(gtk::gio::ApplicationFlags::HANDLES_OPEN)
+        .build();
+    let active_store = std::rc::Rc::new(std::cell::RefCell::new(None::<std::rc::Rc<store::Store>>));
     application.connect_startup(|_| {
         icons::install_search_paths();
         icons::load_stylesheet();
         icons::preload_palette();
     });
     application.connect_shutdown(|_| bridge::shutdown());
-    application.connect_activate(|application| {
+    let store_for_activate = active_store.clone();
+    application.connect_activate(move |application| {
         if let Some(existing) = application.active_window() {
             existing.present();
             return;
         }
         match store::Store::open() {
-            Ok(store) => window::present(application, store),
+            Ok(store) => {
+                *store_for_activate.borrow_mut() = Some(store.clone());
+                window::present(application, store);
+            }
             Err(error) => {
                 let dialog = adw::AlertDialog::new(Some("Impossible d'ouvrir la base DmxMoney"), Some(&error));
                 dialog.add_response("close", "Fermer");
@@ -44,6 +53,17 @@ fn main() -> glib::ExitCode {
                 dialog.present(Some(&window));
             }
         }
+    });
+    application.connect_open(move |application, files, _| {
+        application.activate();
+        let Some(store) = active_store.borrow().clone() else {
+            return;
+        };
+        if files.len() != 1 {
+            store.show_error("Ouvrez un seul fichier à la fois.");
+            return;
+        }
+        import_file::open(&store, files[0].clone());
     });
     application.run()
 }

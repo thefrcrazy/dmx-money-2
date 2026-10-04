@@ -89,7 +89,9 @@ struct JournalListPage: View {
             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
             .selectionDisabled()
 
-            if let view = model.view, !view.rows.isEmpty {
+            if model.isLoading && model.view == nil {
+                Section { ProgressView("Chargement du journal…") }
+            } else if let view = model.view, !view.rows.isEmpty {
                 ForEach(view.dayGroups, id: \.date) { group in
                     Section {
                         ForEach(rows(view, group), id: \.transaction.id) { row in
@@ -225,8 +227,12 @@ struct JournalListPage: View {
                 Button { model.toggleChecked(transaction.id) } label: {
                     DmxIcon(transaction.checked ? "CheckCircle2" : "Circle", size: 20)
                         .foregroundColor(transaction.checked ? DmxColors.income : .secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel(transaction.checked ? "Dépointer" : "Pointer")
             }
         }
         .padding(.vertical, 2)

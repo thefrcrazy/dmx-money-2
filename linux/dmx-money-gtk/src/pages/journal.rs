@@ -52,6 +52,7 @@ pub struct Page {
     table: gtk::Widget,
     filters: Rc<RefCell<Filters>>,
     category_button: gtk::MenuButton,
+    category_choices: RefCell<Vec<(String, String)>>,
     syncing: Rc<Cell<bool>>,
     selected_ids: Rc<RefCell<Vec<String>>>,
 }
@@ -245,6 +246,7 @@ impl Page {
             table: table_card.clone().upcast(),
             filters: filters.clone(),
             category_button: category_button.clone(),
+            category_choices: RefCell::new(Vec::new()),
             syncing: syncing.clone(),
             selected_ids: Rc::new(RefCell::new(Vec::new())),
         };
@@ -316,41 +318,6 @@ impl Page {
             });
         }
 
-        // Filtre de catégories
-        let popover = gtk::Popover::new();
-        let list = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        list.set_margin_top(8);
-        list.set_margin_bottom(8);
-        list.set_margin_start(8);
-        list.set_margin_end(8);
-        let scroll_categories = gtk::ScrolledWindow::new();
-        scroll_categories.set_max_content_height(360);
-        scroll_categories.set_propagate_natural_height(true);
-        scroll_categories.set_child(Some(&list));
-        popover.set_child(Some(&scroll_categories));
-        category_button.set_popover(Some(&popover));
-        for category in store.categories() {
-            let check = gtk::CheckButton::with_label(&category.name);
-            let filters = filters.clone();
-            let store_for_check = store.clone();
-            let syncing_for_check = syncing.clone();
-            let id = category.id.clone();
-            check.connect_toggled(move |check| {
-                if syncing_for_check.get() {
-                    return;
-                }
-                let mut filters = filters.borrow_mut();
-                if check.is_active() {
-                    filters.categories.push(id.clone());
-                } else {
-                    filters.categories.retain(|candidate| candidate != &id);
-                }
-                drop(filters);
-                store_for_check.navigate(Route::Transactions);
-            });
-            list.append(&check);
-        }
-
         page
     }
 
@@ -359,6 +326,39 @@ impl Page {
     }
 
     pub fn refresh(&self) {
+        let choices = self.store.categories();
+        let valid = choices
+            .iter()
+            .map(|category| category.id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        self.filters
+            .borrow_mut()
+            .categories
+            .retain(|id| valid.contains(id.as_str()));
+        let signature = choices
+            .iter()
+            .map(|category| (category.id.clone(), category.name.clone()))
+            .collect::<Vec<_>>();
+        if *self.category_choices.borrow() != signature {
+            *self.category_choices.borrow_mut() = signature;
+            let selected = self.filters.borrow().categories.clone();
+            let filters = self.filters.clone();
+            let store = self.store.clone();
+            widgets::category_filter(&self.category_button, &choices, &selected, move |id, active| {
+                {
+                    let mut filters = filters.borrow_mut();
+                    let selected = &mut filters.categories;
+                    if active {
+                        if !selected.contains(&id) {
+                            selected.push(id);
+                        }
+                    } else {
+                        selected.retain(|candidate| candidate != &id);
+                    }
+                }
+                store.navigate(Route::Transactions);
+            });
+        }
         let filters = self.filters.borrow();
         let query = JournalQuery {
             accounts: self.store.selected_accounts(),
@@ -518,10 +518,16 @@ fn add_columns(view: &gtk::ColumnView, store: &Rc<Store>) {
                 return;
             }
             let id = id.to_string();
+            let original = original.to_string();
             description_store.run(Some("Transaction mise à jour"), move |engine| {
-                engine.update_transaction_inline(&id, dmx_core::ops::InlineEdit::Description(text))
+                engine.update_transaction_inline_with_base(
+                    &id,
+                    dmx_core::ops::InlineEdit::Description(text),
+                    dmx_core::ops::InlineEdit::Description(original.to_string()),
+                )
             });
         },
+        |row| row.transaction.description.clone(),
         |row| row.transaction.description.clone(),
     ));
 
@@ -530,16 +536,24 @@ fn add_columns(view: &gtk::ColumnView, store: &Rc<Store>) {
     view.append_column(&editable_column(
         "Montant",
         130,
-        move |id, _, text| match format::parse_amount(&text).map(f64::abs) {
+        move |id, original, text| match format::parse_amount(&text).map(f64::abs) {
             Some(amount) if amount > 0.0 => {
                 let id = id.to_string();
+                let Some(base) = format::parse_amount(original) else {
+                    return;
+                };
                 amount_store.run(Some("Transaction mise à jour"), move |engine| {
-                    engine.update_transaction_inline(&id, dmx_core::ops::InlineEdit::Amount(amount))
+                    engine.update_transaction_inline_with_base(
+                        &id,
+                        dmx_core::ops::InlineEdit::Amount(amount),
+                        dmx_core::ops::InlineEdit::Amount(base),
+                    )
                 });
             }
             _ => amount_store.show_error("Saisissez un montant valide"),
         },
         |row| format::signed(row.transaction.amount, row.transaction.transaction_type),
+        |row| row.transaction.amount.to_string(),
     ));
 
     view.append_column(&recycled_column("Budget restant", 130, |_| {
@@ -700,18 +714,19 @@ fn editable_column(
     width: i32,
     commit: impl Fn(&str, &str, String) + Clone + 'static,
     text: impl Fn(&JournalRow) -> String + Clone + 'static,
+    base: impl Fn(&JournalRow) -> String + Clone + 'static,
 ) -> gtk::ColumnViewColumn {
     recycled_column(title, width, move |_| {
         let label = gtk::EditableLabel::new("");
-        let current: Rc<RefCell<Option<(String, String)>>> = Rc::new(RefCell::new(None));
+        let current: Rc<RefCell<Option<(String, String, String)>>> = Rc::new(RefCell::new(None));
         let commit = commit.clone();
         let edit_current = current.clone();
         label.connect_editing_notify(move |label| {
             if !label.is_editing() {
                 let binding = edit_current.borrow().clone();
-                if let Some((id, original)) = binding {
+                if let Some((id, original, base)) = binding {
                     if label.text() != original {
-                        commit(&id, &original, label.text().to_string());
+                        commit(&id, &base, label.text().to_string());
                     }
                 }
             }
@@ -719,12 +734,13 @@ fn editable_column(
         let bind_current = current.clone();
         let bind_label = label.clone();
         let text = text.clone();
+        let base = base.clone();
         let mut cell = RecycledCell::new(label.clone(), move |row| {
             bind_current.borrow_mut().take();
             bind_label.stop_editing(false);
             let original = text(row);
             bind_label.set_text(&original);
-            *bind_current.borrow_mut() = Some((row.transaction.id.clone(), original));
+            *bind_current.borrow_mut() = Some((row.transaction.id.clone(), original, base(row)));
         });
         cell.unbind = Box::new(move || {
             // Recycling an editor must not write its draft to the next operation.

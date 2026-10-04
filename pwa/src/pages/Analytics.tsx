@@ -1,3 +1,4 @@
+import { buildBalanceHistory, chartRangeError, parseBankDate } from '../utils/chartData';
 import { useLocalToday } from '../hooks/useLocalToday';
 import React, { useMemo, useState } from 'react';
 import Button from '../components/ui/Button';
@@ -133,15 +134,16 @@ const Analytics: React.FC = () => {
                 start = monthStartsOnFirst ? startOfMonth(subYears(today, 1)) : subYears(today, 1);
                 break;
             case 'custom':
-                start = new Date(customStartDate);
-                end = new Date(customEndDate);
+                start = parseBankDate(customStartDate);
+                end = parseBankDate(customEndDate);
                 end.setHours(23, 59, 59, 999);
                 break;
         }
-        return { start, end };
-    }, [timeRange, customStartDate, customEndDate, monthStartsOnFirst, localToday]);
+        return { start, end, error: chartRangeError(start, end, accounts.length) };
+    }, [timeRange, customStartDate, customEndDate, monthStartsOnFirst, localToday, accounts.length]);
 
     const filteredTransactions = useMemo(() => {
+        if (dateRange.error) return [];
         return transactions.filter(t => {
             return isWithinInterval(new Date(t.date + 'T00:00:00'), { start: dateRange.start, end: dateRange.end });
         });
@@ -188,6 +190,7 @@ const Analytics: React.FC = () => {
     }, [filteredTransactions, categories]);
 
     const monthlyData = useMemo(() => {
+        if (dateRange.error) return [];
         const diffTime = Math.abs(dateRange.end.getTime() - dateRange.start.getTime());
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         const isShortRange = diffDays <= 31;
@@ -231,61 +234,7 @@ const Analytics: React.FC = () => {
         });
     }, [filteredTransactions, dateRange]);
 
-    const balanceHistory = useMemo(() => {
-        const days = [];
-        let current = new Date(dateRange.start);
-        const end = new Date(dateRange.end);
-
-        while (current <= end) {
-            days.push(new Date(current));
-            current.setDate(current.getDate() + 1);
-        }
-
-        const initialBalances: Record<string, number> = {};
-        accounts.forEach(acc => {
-            const transactionsBeforeStart = transactions.filter(t =>
-                t.accountId === acc.id && new Date(t.date) < dateRange.start
-            );
-            initialBalances[acc.id] = acc.initialBalance + transactionsBeforeStart.reduce((sum, t) =>
-                sum + (t.type === 'income' ? t.amount : -t.amount), 0
-            );
-        });
-
-        // Group ALL transactions by day once
-        const txByDay = transactions.reduce((acc, t) => {
-            const key = t.date; // already yyyy-MM-dd
-            if (!acc[key]) acc[key] = [];
-            acc[key].push(t);
-            return acc;
-        }, {} as Record<string, typeof transactions>);
-
-        const points = [];
-        const currentBalances = { ...initialBalances };
-
-        for (const day of days) {
-            const dayKey = format(day, 'yyyy-MM-dd');
-            const dayTransactions = txByDay[dayKey] || [];
-
-            dayTransactions.forEach(t => {
-                if (currentBalances[t.accountId] !== undefined) {
-                    currentBalances[t.accountId] += (t.type === 'income' ? t.amount : -t.amount);
-                }
-            });
-
-            const dataPoint: any = {
-                date: format(day, 'dd MMM', { locale: fr }),
-                fullDate: format(day, 'd MMMM yyyy', { locale: fr })
-            };
-
-            accounts.forEach(acc => {
-                dataPoint[acc.name] = currentBalances[acc.id];
-            });
-
-            points.push(dataPoint);
-        }
-
-        return points;
-    }, [transactions, accounts, dateRange]);
+    const balanceHistory = useMemo(() => buildBalanceHistory(accounts, transactions, dateRange.start, dateRange.end), [transactions, accounts, dateRange]);
 
     const toggleExpenseCategory = (id: string) => {
         setHiddenExpenseCategories(prev =>
@@ -386,6 +335,7 @@ const Analytics: React.FC = () => {
                 </div>
             </div>
 
+            {dateRange.error && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:bg-amber-950 dark:text-amber-100">{dateRange.error}</p>}
             {/* Balance History Area Chart */}
             <div className="app-card p-6">
                 <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -422,7 +372,8 @@ const Analytics: React.FC = () => {
                                 <Area
                                     key={acc.id}
                                     type="monotone"
-                                    dataKey={acc.name}
+                                    dataKey={(point) => point.balances[acc.id]}
+                                    name={acc.name}
                                     stroke={acc.color || COLORS[index % COLORS.length]}
                                     strokeWidth={3}
                                     fillOpacity={1}

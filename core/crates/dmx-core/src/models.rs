@@ -343,6 +343,20 @@ pub struct Transaction {
     pub is_transfer: bool,
     #[serde(rename = "linkedTransactionId", default, deserialize_with = "empty_to_none")]
     pub linked_transaction_id: Option<String>,
+    #[serde(
+        rename = "bankSource",
+        default,
+        deserialize_with = "empty_to_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub bank_source: Option<String>,
+    #[serde(
+        rename = "bankTransactionId",
+        default,
+        deserialize_with = "empty_to_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub bank_transaction_id: Option<String>,
 }
 
 impl Transaction {

@@ -102,6 +102,9 @@ pub async fn export_backup(pool: &DbPool) -> CoreResult<String> {
 }
 
 pub fn decode_backup(content: &str) -> CoreResult<BackupFile> {
+    if content.len() > 64 * 1024 * 1024 {
+        return Err(CoreError::import("La sauvegarde dépasse la limite de 64 Mio."));
+    }
     let invalid_format = || CoreError::import("Format de sauvegarde invalide.");
     let corrupted = || CoreError::import("Le fichier de sauvegarde est corrompu.");
 

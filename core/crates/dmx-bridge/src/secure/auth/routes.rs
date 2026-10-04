@@ -31,6 +31,7 @@ struct LoginVerifyPayload {
 
 /// Crée un jeton d'appairage à usage unique. Renvoie (jeton brut, expiration).
 pub async fn regenerate_pairing_token(pool: &DbPool) -> Result<(String, String), String> {
+    housekeeping(pool).await;
     let raw = generate_token(32);
     let expires_at = (Utc::now() + ChronoDuration::minutes(PAIRING_TTL_MINUTES)).to_rfc3339();
     let now = Utc::now().to_rfc3339();
@@ -81,6 +82,7 @@ pub async fn authorize_api_request(
     path: &str,
     headers: &HashMap<String, String>,
 ) -> Result<(), String> {
+    housekeeping(pool).await;
     let session = extract_cookie(headers, SESSION_COOKIE).ok_or_else(|| "Session mobile manquante.".to_string())?;
     let row = sqlx::query(
         "SELECT s.id, s.csrf_hash, s.passkey_id, s.expires_at, s.revoked_at, s.created_at
@@ -143,6 +145,7 @@ pub async fn handle_auth_request(
     headers: &HashMap<String, String>,
     body: &[u8],
 ) -> Result<AuthRouteOutput, String> {
+    housekeeping(pool).await;
     match (method, path) {
         ("POST", "/auth/session") => resume_session(pool, headers).await,
         ("POST", "/auth/pairing/start") => pairing_start(pool, body).await,
@@ -234,11 +237,33 @@ async fn register_verify(
         .finish_registration(&state, &payload.response)
         .map_err(|error| format!("Passkey refusée: {error}"))?;
     let label = payload.device_label.unwrap_or_else(|| "Mobile".to_string());
-    let passkey_id = insert_passkey(pool, &credential, Some(&label)).await?;
-    revoke_session(pool, &session.id).await?;
-    delete_challenge(pool, &payload.challenge_id).await?;
-    let new_session = create_session(pool, Some(passkey_id), Some(label)).await?;
+    let new_session = finalize_registration(pool, &session.id, &payload.challenge_id, &credential, &label).await?;
     Ok(session_response(new_session, false))
+}
+
+/// Called only after cryptographic verification. Claiming the pending session, challenge,
+/// credential and final session in one transaction prevents parallel enrollment or partial state.
+async fn finalize_registration(
+    pool: &DbPool,
+    pending_session: &str,
+    challenge: &str,
+    credential: &PasskeyCredential,
+    label: &str,
+) -> Result<sessions::SessionTokens, String> {
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|error| error.to_string())?;
+    let claimed = sqlx::query("UPDATE mobile_sessions SET revoked_at=? WHERE id=? AND passkey_id IS NULL AND revoked_at IS NULL AND julianday(expires_at)>julianday('now')")
+        .bind(Utc::now().to_rfc3339()).bind(pending_session).execute(&mut *tx).await.map_err(|error| error.to_string())?;
+    if claimed.rows_affected() != 1 {
+        return Err("Session de pairing expirée ou déjà finalisée.".into());
+    }
+    delete_challenge(&mut *tx, challenge).await?;
+    let id = insert_passkey(&mut *tx, credential, Some(label)).await?;
+    let session = create_session(&mut *tx, Some(id), Some(label.to_string())).await?;
+    tx.commit().await.map_err(|error| error.to_string())?;
+    Ok(session)
 }
 
 async fn login_options(pool: &DbPool, headers: &HashMap<String, String>) -> Result<AuthRouteOutput, String> {
@@ -271,15 +296,20 @@ async fn login_verify(
         .finish_authentication(&state, &payload.response, &credential.passkey)
         .map_err(|error| format!("Passkey refusée: {error}"))?;
     let device_label = payload.device_label.clone();
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|error| error.to_string())?;
+    delete_challenge(&mut *tx, &payload.challenge_id).await?;
     update_passkey_usage(
-        pool,
+        &mut *tx,
         &credential.id,
         i64::from(outcome.new_counter),
         device_label.as_deref(),
     )
     .await?;
-    delete_challenge(pool, &payload.challenge_id).await?;
-    let session = create_session(pool, Some(credential.id), device_label).await?;
+    let session = create_session(&mut *tx, Some(credential.id), device_label).await?;
+    tx.commit().await.map_err(|error| error.to_string())?;
     Ok(session_response(session, false))
 }
 
@@ -345,6 +375,94 @@ mod tests {
     use super::*;
 
     const PUBLIC_ORIGIN: &str = "https://dmxmoney-companion.pages.dev";
+
+    fn verified_credential(id: u8) -> PasskeyCredential {
+        // These tests exercise the atomic persistence after WebAuthn verification,
+        // not the authenticator's cryptographic verification itself.
+        PasskeyCredential {
+            id: CredentialId(vec![id]),
+            public_key_cose: passkey_auth::CosePublicKey(vec![0xa0]),
+            counter: 0,
+            transports: vec![],
+            aaguid: [0; 16],
+        }
+    }
+
+    async fn pending_session(pool: &DbPool) -> String {
+        create_session(pool, None, None).await.unwrap();
+        sqlx::query_scalar("SELECT id FROM mobile_sessions WHERE passkey_id IS NULL AND revoked_at IS NULL")
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_pending_pairing_session_can_finalize_only_one_credential() {
+        let pool = dmx_core::db::open_memory_pool().await.unwrap();
+        let session = pending_session(&pool).await;
+        let mut challenges = Vec::new();
+        for _ in 0..2 {
+            challenges.push(
+                store_challenge(&pool, "register", &json!({}), Some(&session), None)
+                    .await
+                    .unwrap(),
+            );
+        }
+        let first_key = verified_credential(1);
+        let second_key = verified_credential(2);
+        let (first, second) = tokio::join!(
+            finalize_registration(&pool, &session, &challenges[0], &first_key, "Phone"),
+            finalize_registration(&pool, &session, &challenges[1], &second_key, "Phone")
+        );
+        assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+        let passkeys: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mobile_passkeys")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let finalized: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mobile_sessions WHERE passkey_id IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let revoked: Option<String> = sqlx::query_scalar("SELECT revoked_at FROM mobile_sessions WHERE id=?")
+            .bind(&session)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!((passkeys, finalized), (1, 1));
+        assert!(revoked.is_some());
+    }
+
+    #[tokio::test]
+    async fn failed_credential_insert_rolls_back_pairing_claim_and_challenge_consumption() {
+        let pool = dmx_core::db::open_memory_pool().await.unwrap();
+        let session = pending_session(&pool).await;
+        let challenge = store_challenge(&pool, "register", &json!({}), Some(&session), None)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TRIGGER fixture_fail_passkey BEFORE INSERT ON mobile_passkeys BEGIN SELECT RAISE(ABORT, 'fixture'); END")
+            .execute(&pool).await.unwrap();
+        assert!(
+            finalize_registration(&pool, &session, &challenge, &verified_credential(1), "Phone")
+                .await
+                .is_err()
+        );
+        let revoked: Option<String> = sqlx::query_scalar("SELECT revoked_at FROM mobile_sessions WHERE id=?")
+            .bind(&session)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(revoked.is_none());
+        assert!(
+            load_challenge::<serde_json::Value>(&pool, &challenge, "register", Some(&session))
+                .await
+                .is_ok()
+        );
+        let passkeys: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mobile_passkeys")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(passkeys, 0);
+    }
 
     fn settings() -> SecureBridgeSettings {
         SecureBridgeSettings {

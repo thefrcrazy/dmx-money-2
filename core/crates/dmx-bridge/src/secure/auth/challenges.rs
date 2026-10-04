@@ -62,11 +62,41 @@ pub(super) async fn load_challenge<T: for<'de> Deserialize<'de>>(
     serde_json::from_str(&state_json).map_err(|error| error.to_string())
 }
 
-pub(super) async fn delete_challenge(pool: &DbPool, id: &str) -> Result<(), String> {
-    sqlx::query("DELETE FROM mobile_auth_challenges WHERE id = $1")
-        .bind(id)
-        .execute(pool)
-        .await
-        .map_err(|error| map_db_error(error, "suppression du challenge passkey"))?;
+pub(super) async fn delete_challenge<'e>(
+    pool: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    id: &str,
+) -> Result<(), String> {
+    let result =
+        sqlx::query("DELETE FROM mobile_auth_challenges WHERE id = $1 AND julianday(expires_at)>julianday('now')")
+            .bind(id)
+            .execute(pool)
+            .await
+            .map_err(|error| map_db_error(error, "suppression du challenge passkey"))?;
+    if result.rows_affected() != 1 {
+        return Err("Challenge passkey expiré ou déjà consommé.".into());
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn concurrent_verified_requests_can_consume_a_challenge_only_once() {
+        let pool = dmx_core::db::open_memory_pool().await.unwrap();
+        let id = store_challenge(&pool, "login", &serde_json::json!({"fixture":true}), None, None)
+            .await
+            .unwrap();
+        let (first, second) = tokio::join!(delete_challenge(&pool, &id), delete_challenge(&pool, &id));
+        assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+        let expired = store_challenge(&pool, "login", &serde_json::json!({}), None, None)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE mobile_auth_challenges SET expires_at='2000-01-01T00:00:00Z' WHERE id=?")
+            .bind(&expired)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(delete_challenge(&pool, &expired).await.is_err());
+    }
 }

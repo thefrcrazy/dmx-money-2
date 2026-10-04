@@ -5,34 +5,32 @@ import UniformTypeIdentifiers
 /// Modèles des pages, créés une fois ; seule la page visible se recalcule.
 @MainActor
 final class PageModels: ObservableObject {
-    let dashboard: DashboardModel
-    let accounts: AccountsModel
-    let journal: JournalModel
-    let budget: BudgetModel
-    let scheduled: ScheduledModel
-    let analytics: AnalyticsModel
-    let predictions: PredictionsModel
+    private let store: AppStore
+    private var activeRoute: AppRoute? = .dashboard
+    private var created: [AppRoute: PageModel] = [:]
+    var dashboard: DashboardModel { cached(.dashboard) { DashboardModel(store: store, active: activeRoute == .dashboard) } }
+    var accounts: AccountsModel { cached(.accounts) { AccountsModel(store: store, active: activeRoute == .accounts) } }
+    var journal: JournalModel { cached(.transactions) { JournalModel(store: store, active: activeRoute == .transactions) } }
+    var budget: BudgetModel { cached(.budget) { BudgetModel(store: store, active: activeRoute == .budget) } }
+    var scheduled: ScheduledModel { cached(.scheduled) { ScheduledModel(store: store, active: activeRoute == .scheduled) } }
+    var analytics: AnalyticsModel { cached(.analytics) { AnalyticsModel(store: store, active: activeRoute == .analytics) } }
+    var predictions: PredictionsModel { cached(.predictions) { PredictionsModel(store: store, active: activeRoute == .predictions) } }
 
-    init(store: AppStore) {
-        dashboard = DashboardModel(store: store)
-        accounts = AccountsModel(store: store)
-        journal = JournalModel(store: store)
-        budget = BudgetModel(store: store)
-        scheduled = ScheduledModel(store: store)
-        analytics = AnalyticsModel(store: store)
-        predictions = PredictionsModel(store: store)
-        activate(.dashboard)
+    init(store: AppStore) { self.store = store }
+
+    private func cached<T: PageModel>(_ route: AppRoute, make: () -> T) -> T {
+        if let existing = created[route] as? T { return existing }
+        let model = make()
+        model.isActive = route == activeRoute
+        created[route] = model
+        return model
     }
 
     func activate(_ route: AppRoute?) {
-        let all: [(AppRoute, PageModel)] = [
-            (.dashboard, dashboard), (.accounts, accounts), (.transactions, journal), (.budget, budget),
-            (.scheduled, scheduled), (.analytics, analytics), (.predictions, predictions),
-        ]
-        for (candidate, model) in all {
-            model.isActive = candidate == route
-        }
+        activeRoute = route
+        for (candidate, model) in created { model.isActive = candidate == route }
     }
+
 }
 
 struct RootView: View {
@@ -61,12 +59,14 @@ struct RootView: View {
         }
         .modifier(StorePresentation(store: store))
         .preferredColorScheme(colorScheme)
-        .sheet(item: Binding(get: { store.form }, set: { store.form = $0 })) { request in
-            FormHost(request: request, onClose: { store.form = nil })
+        .sheet(item: Binding(get: { store.form }, set: { if !store.formBusy { store.form = $0 } })) { request in
+            let generation = store.formGeneration
+            FormHost(request: request, onClose: { store.closeForm(generation: generation) })
                 .modifier(StorePresentation(store: store))
                 .environment(\.dmxCompact, sizeClass == .compact)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled(store.formBusy)
         }
         .fileExporter(isPresented: $isExporting, document: exportDocument, contentType: .dmxBackup, defaultFilename: backupFileName(today: store.today)) { result in
             switch result {
@@ -113,20 +113,7 @@ struct RootView: View {
     }
 
     private func openImport(_ url: URL) {
-        let access = url.startAccessingSecurityScopedResource()
-        defer {
-            if access { url.stopAccessingSecurityScopedResource() }
-        }
-        guard let content = FileText.read(url) else {
-            store.errorMessage = "Le fichier n'a pas pu être lu."
-            return
-        }
-        let name = url.lastPathComponent
-        if ["dmx", "json"].contains(url.pathExtension.lowercased()) {
-            store.present(.restoreBackup(content: content, fileName: name))
-        } else {
-            store.present(.statementImport(content: content, fileName: name))
-        }
+        store.openImport(url)
     }
 }
 

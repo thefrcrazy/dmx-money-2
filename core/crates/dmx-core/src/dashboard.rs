@@ -5,8 +5,8 @@
 
 use crate::dates::{days_between, parse_date, same_month};
 use crate::metrics::{
-    balance_summary, cents, euros, is_internal_transfer, monthly_summary, relevant_transactions, signed_cents,
-    BalanceSummary, MonthlySummary,
+    balance_summary, euros, is_internal_transfer, monthly_summary, relevant_transactions, wide_cents as cents,
+    wide_signed_cents as signed_cents, BalanceSummary, MonthlySummary,
 };
 use crate::models::{Account, Budget, Transaction, TransactionType, TRANSFER_CATEGORY_ID};
 use crate::snapshot::{is_selected, CategoryDisplay, Snapshot};
@@ -106,7 +106,7 @@ pub fn dashboard(snapshot: &Snapshot, filter: &[String], today: NaiveDate) -> Da
     upcoming.truncate(3);
 
     let monthly_expense_cents = cents(month.expenses);
-    let mut expenses_by_category: Vec<(String, i64)> = Vec::new();
+    let mut expenses_by_category: Vec<(String, i128)> = Vec::new();
     for transaction in relevant_transactions(snapshot, filter) {
         if is_internal_transfer(transaction)
             || transaction.transaction_type != TransactionType::Expense
@@ -136,7 +136,7 @@ pub fn dashboard(snapshot: &Snapshot, filter: &[String], today: NaiveDate) -> Da
         .collect();
     top_categories.sort_by(|left, right| right.amount.total_cmp(&left.amount));
 
-    let mut deltas: HashMap<&str, i64> = HashMap::new();
+    let mut deltas: HashMap<&str, i128> = HashMap::new();
     for transaction in relevant_transactions(snapshot, filter) {
         *deltas.entry(transaction.account_id.as_str()).or_default() += signed_cents(transaction);
     }
@@ -158,10 +158,10 @@ pub fn dashboard(snapshot: &Snapshot, filter: &[String], today: NaiveDate) -> Da
         })
         .collect();
 
-    let total_budgeted: i64 = visible_budgets(snapshot, filter)
+    let total_budgeted: i128 = visible_budgets(snapshot, filter)
         .map(|budget| cents(budget.amount))
         .sum();
-    let spent: i64 = relevant_transactions(snapshot, filter)
+    let spent: i128 = relevant_transactions(snapshot, filter)
         .filter(|transaction| {
             transaction.transaction_type == TransactionType::Expense
                 && transaction.category != TRANSFER_CATEGORY_ID

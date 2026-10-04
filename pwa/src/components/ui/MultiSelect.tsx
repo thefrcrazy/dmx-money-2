@@ -1,3 +1,5 @@
+import { popoverContainer } from './DialogSurface';
+import { dismissPopoverOnEscape } from '../../utils/popoverKeyboard';
 import React, { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, Search, Check, X, Tag } from "lucide-react";
@@ -34,6 +36,7 @@ const MultiSelect: React.FC<MultiSelectProps> = ({
     const [isOpen, setIsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const wrapperRef = useRef<HTMLDivElement>(null);
+    const triggerRef = useRef<HTMLButtonElement>(null);
     const popupRef = useRef<HTMLDivElement>(null);
     const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({});
 
@@ -123,7 +126,8 @@ const MultiSelect: React.FC<MultiSelectProps> = ({
     const selectedOptions = options.filter(opt => value.includes(opt.id));
 
     return (
-        <div className={`space-y-1.5 ${className} app-multiselect`} ref={wrapperRef}>
+        <div className={`space-y-1.5 ${className} app-multiselect`} ref={wrapperRef}
+            onKeyDown={event => dismissPopoverOnEscape(event, isOpen, () => setIsOpen(false), triggerRef.current)}>
             {label && (
                 <label className="block text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider ml-1">
                     {label}
@@ -131,7 +135,9 @@ const MultiSelect: React.FC<MultiSelectProps> = ({
             )}
             <div className="relative">
                 <button
+                    ref={triggerRef}
                     type="button"
+                    aria-expanded={isOpen}
                     onClick={() => !disabled && setIsOpen(!isOpen)}
                     disabled={disabled}
                     className={`w-full ${sizes[size]} app-input flex items-center justify-between transition-shadow app-multiselect-button ${disabled
@@ -234,7 +240,7 @@ const MultiSelect: React.FC<MultiSelectProps> = ({
                         </div>
                     </div>
                 </div>,
-                document.body
+                popoverContainer(wrapperRef.current)
             )}
             </div>
         </div>

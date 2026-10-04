@@ -106,6 +106,48 @@ fn api_requires_a_finalized_session() {
 }
 
 #[test]
+fn unpaired_transfer_category_is_refused_before_companion_writes() {
+    let harness = Harness::start();
+    let account = json!({"id":"simple-account","name":"Compte fictif","type":"Courant","initialBalance":100});
+    assert_eq!(
+        harness
+            .request("POST", "/api/accounts", Some(&account.to_string()), true)
+            .0,
+        201
+    );
+    let simple = json!({"id":"simple-row","date":"2026-10-03","accountId":"simple-account","type":"expense","amount":10,"category":"food","description":"Fictif","checked":false,"isTransfer":false});
+    assert_eq!(
+        harness
+            .request("POST", "/api/transactions", Some(&simple.to_string()), true)
+            .0,
+        201
+    );
+    let before = harness.engine.snapshot().unwrap();
+    let version = harness.engine.data_version().unwrap();
+    let mut unpaired = simple.clone();
+    unpaired["category"] = json!("transfer");
+    unpaired["_base"] = simple;
+    unpaired["_mutationId"] = json!("unpaired-existing");
+    for method in ["PATCH", "PUT"] {
+        let (status, _, body) = harness.request(method, "/api/transactions", Some(&unpaired.to_string()), true);
+        assert_eq!(status, 400, "{method}: {body}");
+    }
+    unpaired["id"] = json!("new-unpaired");
+    unpaired["_mutationId"] = json!("unpaired-new");
+    let (status, _, body) = harness.request("POST", "/api/transactions", Some(&unpaired.to_string()), true);
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(harness.engine.snapshot().unwrap().transactions, before.transactions);
+    assert_eq!(harness.engine.data_version().unwrap(), version);
+    let receipts: i64 = harness.engine.block_on(async {
+        sqlx::query_scalar("SELECT count(*) FROM mobile_mutation_receipts WHERE id LIKE 'unpaired-%'")
+            .fetch_one(harness.engine.pool())
+            .await
+            .unwrap()
+    });
+    assert_eq!(receipts, 0);
+}
+
+#[test]
 fn revoking_a_mobile_invalidates_its_existing_sessions_immediately() {
     let harness = Harness::start();
     assert_eq!(harness.request("GET", "/api/accounts", None, true).0, 200);
@@ -602,4 +644,88 @@ fn an_acknowledgement_lost_after_a_once_occurrence_cannot_recreate_it() {
     let snapshot = harness.engine.snapshot().unwrap();
     assert_eq!(snapshot.transactions.len(), 1);
     assert!(snapshot.scheduled.is_empty());
+}
+
+#[test]
+fn mobile_transfer_patch_merges_both_accounts_once_and_rolls_back_on_conflict_or_second_write_failure() {
+    let harness = Harness::start();
+    for id in ["a", "b", "c", "d"] {
+        let account =
+            json!({"id":id,"name":id,"type":"Courant","initialBalance":100,"color":"#3b82f6","icon":"Wallet"})
+                .to_string();
+        assert_eq!(harness.request("POST", "/api/accounts", Some(&account), true).0, 201);
+    }
+    let from = json!({"id":"from", "date":"2026-10-03", "accountId":"a", "type":"expense", "amount":10, "category":"transfer", "description":"test", "checked":false,"isTransfer":true,"linkedTransactionId":"to"});
+    let to = json!({"id":"to", "date":"2026-10-03", "accountId":"b", "type":"income", "amount":10, "category":"transfer", "description":"test", "checked":false,"isTransfer":true,"linkedTransactionId":"from"});
+    let initial = json!({"fromTransaction":from,"toTransaction":to});
+    assert_eq!(
+        harness
+            .request("POST", "/api/transfers", Some(&initial.to_string()), true)
+            .0,
+        201
+    );
+    let mut remote = from.clone();
+    remote["amount"] = json!(25);
+    assert_eq!(
+        harness
+            .request("PUT", "/api/transactions", Some(&remote.to_string()), true)
+            .0,
+        200
+    );
+    let mut desired_from = from.clone();
+    let mut desired_to = to.clone();
+    desired_from["accountId"] = json!("c");
+    desired_to["accountId"] = json!("d");
+    let patch = json!({"fromTransaction":desired_from,"toTransaction":desired_to,"_base":initial,"_mutationId":"pair-edit","_mutationCreatedAt":chrono::Utc::now().to_rfc3339()});
+    assert_eq!(
+        harness
+            .request("PATCH", "/api/transfers", Some(&patch.to_string()), true)
+            .0,
+        200
+    );
+    let rows = harness.engine.snapshot().unwrap().transactions.clone();
+    assert_eq!(rows.iter().find(|row| row.id == "from").unwrap().account_id, "c");
+    assert_eq!(rows.iter().find(|row| row.id == "to").unwrap().account_id, "d");
+    assert!(rows.iter().all(|row| row.amount == 25.0));
+    let version = harness.engine.data_version().unwrap();
+    assert_eq!(
+        harness
+            .request("PATCH", "/api/transfers", Some(&patch.to_string()), true)
+            .0,
+        200
+    );
+    assert_eq!(harness.engine.data_version().unwrap(), version);
+    let mut conflicting = patch.clone();
+    conflicting["_mutationId"] = json!("conflict");
+    conflicting["fromTransaction"]["amount"] = json!(30);
+    conflicting["toTransaction"]["amount"] = json!(30);
+    assert_eq!(
+        harness
+            .request("PATCH", "/api/transfers", Some(&conflicting.to_string()), true)
+            .0,
+        409
+    );
+    assert_eq!(harness.engine.snapshot().unwrap().transactions, rows);
+    let base_from = rows.iter().find(|row| row.id == "from").unwrap();
+    let base_to = rows.iter().find(|row| row.id == "to").unwrap();
+    let mut final_patch = json!({"fromTransaction":base_from,"toTransaction":base_to,"_base":{"fromTransaction":base_from,"toTransaction":base_to},"_mutationId":"second-failure"});
+    final_patch["fromTransaction"]["description"] = json!("changed");
+    final_patch["toTransaction"]["description"] = json!("changed");
+    harness.engine.block_on(async { sqlx::query("CREATE TRIGGER fail_second_side BEFORE UPDATE ON transactions WHEN NEW.id='to' BEGIN SELECT RAISE(ABORT,'fixture second-side failure'); END").execute(harness.engine.pool()).await.unwrap(); });
+    assert_eq!(
+        harness
+            .request("PATCH", "/api/transfers", Some(&final_patch.to_string()), true)
+            .0,
+        500
+    );
+    assert_eq!(harness.engine.snapshot().unwrap().transactions, rows);
+    assert_eq!(harness.engine.data_version().unwrap(), version);
+    let receipts: i64 = harness
+        .engine
+        .block_on(
+            sqlx::query_scalar("SELECT count(*) FROM mobile_mutation_receipts WHERE id='second-failure'")
+                .fetch_one(harness.engine.pool()),
+        )
+        .unwrap();
+    assert_eq!(receipts, 0);
 }

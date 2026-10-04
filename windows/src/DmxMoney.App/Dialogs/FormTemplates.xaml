@@ -476,10 +476,10 @@
                 </Border>
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="{x:Bind FileName}" FontSize="13" FontWeight="SemiBold" />
-                    <TextBlock Text="{x:Bind local:Format.BackupDate(BackupDate)}" Style="{StaticResource DmxCaption}" />
+                    <TextBlock Text="{x:Bind local:Format.BackupDate(BackupDate), Mode=OneWay}" Style="{StaticResource DmxCaption}" />
                 </StackPanel>
             </StackPanel>
-            <local:BackupSummaryView Summary="{x:Bind Summary}" />
+            <local:BackupSummaryView Summary="{x:Bind Summary, Mode=OneWay}" />
             <StackPanel Spacing="6">
                 <TextBlock Text="Mode d'import" Style="{StaticResource DmxCaption}" />
                 <StackPanel Orientation="Horizontal" Spacing="12">

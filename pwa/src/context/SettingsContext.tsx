@@ -465,12 +465,16 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }, []);
 
     useEffect(() => {
+        let refreshGeneration = 0;
         const refreshSyncedSettings = () => {
+            const generation = ++refreshGeneration;
+            const localRevision = nextMutationIdRef.current;
             dbService.getSettings()
                 .then(savedSettings => {
-                    if (!savedSettings) return;
+                    if (!savedSettings || generation !== refreshGeneration || localRevision !== nextMutationIdRef.current) return;
                     const next = normalizeSettings(savedSettings);
                     setSettings(current => {
+                        if (generation !== refreshGeneration || localRevision !== nextMutationIdRef.current) return current;
                         const serverMerged = {
                             ...next,
                             lastSeenVersion: selectNewestVersion(
@@ -489,7 +493,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         };
 
         window.addEventListener('dmxmoney-settings-refresh', refreshSyncedSettings);
-        return () => window.removeEventListener('dmxmoney-settings-refresh', refreshSyncedSettings);
+        return () => { refreshGeneration++; window.removeEventListener('dmxmoney-settings-refresh', refreshSyncedSettings); };
     }, []);
 
     useEffect(() => {

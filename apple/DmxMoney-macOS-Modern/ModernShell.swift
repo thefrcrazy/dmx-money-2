@@ -224,10 +224,12 @@ struct ModernPresentation: ViewModifier {
         content
             .environmentObject(store)
             .tint(DmxColors.accent(store.settings.accentColor))
-            .sheet(item: Binding(get: { store.form }, set: { store.form = $0 })) { request in
-                ModernFormHost(request: request, onClose: { store.form = nil })
+            .sheet(item: Binding(get: { store.form }, set: { if !store.formBusy { store.form = $0 } })) { request in
+                let generation = store.formGeneration
+                ModernFormHost(request: request, onClose: { store.closeForm(generation: generation) })
                     .environmentObject(store)
                     .tint(DmxColors.accent(store.settings.accentColor))
+                    .interactiveDismissDisabled(store.formBusy)
             }
             .alert(
                 store.confirmation?.title ?? "",

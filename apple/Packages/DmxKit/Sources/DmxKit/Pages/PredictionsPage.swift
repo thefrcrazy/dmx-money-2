@@ -19,18 +19,24 @@ public final class PredictionsModel: PageModel {
         willSet { objectWillChange.send() }
     }
 
-    public override init(store: AppStore) {
+    public init(store: AppStore, active: Bool = true) {
         super.init(store: store)
-        refresh()
+        isActive = active
+        if active { refresh() } else { setNeedsRefresh() }
     }
 
     public override func refresh() {
         let accounts = store.selectedAccountIds
         let today = store.today
-        guard let query = store.read({ engine in try engine.predictionQuery(accounts: accounts) }) else { return }
-        self.query = query
-        view = store.read { engine in try engine.predictions(query: query, today: today) }
-        thresholdText = AmountInput.text(query.alertThreshold)
+        load({ engine in
+            let query = try engine.predictionQuery(accounts: accounts)
+            return (query, try engine.predictions(query: query, today: today))
+        }) { [weak self] result in
+            let (query, view) = result
+            self?.query = query
+            self?.view = view
+            self?.thresholdText = AmountInput.text(query.alertThreshold)
+        }
     }
 
     public func setRange(_ range: TimeRange) {

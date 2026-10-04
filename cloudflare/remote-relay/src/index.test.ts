@@ -1,4 +1,4 @@
-import { SELF } from 'cloudflare:test';
+import { SELF, env, runInDurableObject } from 'cloudflare:test';
 import { expect, test } from 'vitest';
 
 const base = 'https://relay.test';
@@ -100,3 +100,76 @@ test('only the desktop owner can remove the relay credentials', async () => {
   expect((await enrollment(url)).status).toBe(201);
   expect((await SELF.fetch(`${url}/request`, { method: 'POST', headers: { authorization: `Bearer ${mobile}` }, body: '{}' })).status).toBe(503);
 });
+
+test('unknown authenticated IDs do not create application SQL tables', async () => {
+  const url = endpoint();
+  expect((await SELF.fetch(`${url}/request`, { method: 'POST', headers: { authorization: `Bearer ${mobile}` }, body: '{}' })).status).toBe(404);
+  const name = new URL(url).pathname.split('/')[2];
+  const tables = await runInDurableObject(env.RELAYS.getByName(name), (_instance, state) =>
+    state.storage.sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name='rate_window'").toArray());
+  expect(tables).toEqual([]);
+});
+
+test('rejects unsupported methods and malformed relay credentials before forwarding', async () => {
+  expect((await SELF.fetch(`${endpoint()}/request`, { method: 'GET' })).status).toBe(405);
+  expect((await SELF.fetch(`${endpoint()}/request`, { method: 'POST', body: '{}' })).status).toBe(401);
+});
+
+test('two small requests reserve full replies and a third receives a retryable Pages CORS response', async () => {
+  const url = endpoint();
+  const origin = 'https://dmxmoney-companion.pages.dev';
+  expect((await enrollment(url)).status).toBe(201);
+  const connected = await SELF.fetch(`${url}/connect`, { headers: { authorization: `Bearer ${token}`, upgrade: 'websocket' } });
+  const socket = connected.webSocket!;
+  socket.accept();
+  const packets: { id: string; nonce: string; ciphertext: string }[] = [];
+  const received = new Promise<void>(resolve => socket.addEventListener('message', event => {
+    packets.push(JSON.parse(event.data as string));
+    if (packets.length === 2) resolve();
+  }));
+  const send = () => SELF.fetch(`${url}/request`, {
+    method: 'POST', headers: { origin, authorization: `Bearer ${mobile}`, 'cf-connecting-ip': crypto.randomUUID() },
+    body: JSON.stringify({ id: crypto.randomUUID(), nonce: 'A'.repeat(16), ciphertext: 'B'.repeat(32) }),
+  });
+  const replies = [send(), send()];
+  try {
+    await received;
+    const busy = await send();
+    expect(busy.status).toBe(503);
+    expect(busy.headers.get('retry-after')).toBe('1');
+    expect(busy.headers.get('access-control-allow-origin')).toBe(origin);
+    expect(await busy.json()).toEqual({ error: 'relay_busy' });
+    const answers = packets.map(packet => `\n${JSON.stringify({ ...packet, ciphertext: 'C'.repeat(32) })}\n`);
+    answers.forEach(answer => socket.send(answer));
+    const texts = await Promise.all(replies.map(async reply => (await reply).text()));
+    expect(new Set(texts)).toEqual(new Set(answers));
+  } finally {
+    socket.close();
+  }
+});
+
+test('a desktop reply timeout clears the pending request and returns a CORS-readable 504', async () => {
+  const url = endpoint();
+  const origin = 'https://dmxmoney-companion.pages.dev';
+  expect((await enrollment(url)).status).toBe(201);
+  const connected = await SELF.fetch(`${url}/connect`, { headers: { authorization: `Bearer ${token}`, upgrade: 'websocket' } });
+  const socket = connected.webSocket!;
+  socket.accept();
+  try {
+    const response = await SELF.fetch(`${url}/request`, {
+      method: 'POST', headers: { origin, authorization: `Bearer ${mobile}`, 'cf-connecting-ip': crypto.randomUUID() },
+      body: JSON.stringify({ id: crypto.randomUUID(), nonce: 'A'.repeat(16), ciphertext: 'B'.repeat(32) }),
+    });
+    expect(response.status).toBe(504);
+    expect(response.headers.get('access-control-allow-origin')).toBe(origin);
+    expect(await response.json()).toEqual({ error: 'desktop_timeout' });
+    const packet = { id: crypto.randomUUID(), nonce: 'A'.repeat(16), ciphertext: 'B'.repeat(32) };
+    socket.addEventListener('message', event => socket.send(event.data as string), { once: true });
+    const next = await SELF.fetch(`${url}/request`, {
+      method: 'POST', headers: { authorization: `Bearer ${mobile}` }, body: JSON.stringify(packet),
+    });
+    expect(await next.json()).toEqual(packet);
+  } finally {
+    socket.close();
+  }
+}, 30_000);

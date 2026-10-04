@@ -43,7 +43,10 @@ public sealed partial class PredictionsPage : Page
         UpdateVisuals();
     }
 
-    private void OnViewModelChanged(object? sender, PropertyChangedEventArgs args) => UpdateVisuals();
+    private void OnViewModelChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(PredictionsViewModel.View)) UpdateVisuals();
+    }
 
     private void UpdateVisuals()
     {

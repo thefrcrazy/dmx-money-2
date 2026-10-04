@@ -4,6 +4,7 @@
 //! les changements en attente, les acquitte, puis applique les changements distants : le plus
 //! récent `updated_at` l'emporte par enregistrement. Pendant l'application, les déclencheurs
 //! sont suspendus (`sync_control.applying`) pour ne pas renvoyer ce qui vient d'être reçu.
+//! Dynamic SQL uses only internal whitelisted identifiers; all external values are bound.
 
 use crate::db::{DbPool, SYNCED_SETTINGS_COLUMNS, SYNC_ENTITY_TABLES};
 use crate::error::{CoreError, CoreResult, DbContext};
@@ -13,6 +14,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::{Row, SqliteConnection};
+use std::collections::HashMap;
 
 pub const SETTINGS_ENTITY: &str = "settings";
 pub const SETTINGS_RECORD_ID: &str = "1";
@@ -95,7 +97,7 @@ async fn record_payload(
     let Some(table) = table_for(entity) else {
         return Ok(None);
     };
-    let Some(row) = sqlx::query(&format!("SELECT * FROM {table} WHERE id = $1"))
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT * FROM {table} WHERE id = $1")))
         .bind(record_id)
         .fetch_optional(&mut *connection)
         .await
@@ -187,17 +189,17 @@ pub async fn enqueue_all(pool: &DbPool) -> CoreResult<i64> {
         .map(|(entity, table)| (*entity, *table))
         .chain(std::iter::once((SETTINGS_ENTITY, "settings")))
     {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT OR IGNORE INTO sync_meta (entity, record_id, updated_at, deleted)
              SELECT '{entity}', CAST(id AS TEXT), {now}, 0 FROM {table}"
-        ))
+        )))
         .execute(&mut *tx)
         .await
         .ctx("préparation de la synchronisation")?;
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO sync_outbox (entity, record_id, deleted, created_at)
              SELECT '{entity}', CAST(id AS TEXT), 0, {now} FROM {table}"
-        ))
+        )))
         .execute(&mut *tx)
         .await
         .ctx("préparation de la synchronisation")?;
@@ -207,11 +209,13 @@ pub async fn enqueue_all(pool: &DbPool) -> CoreResult<i64> {
 }
 
 async fn record_exists(connection: &mut SqliteConnection, table: &str, id: &str) -> CoreResult<bool> {
-    let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table} WHERE id = $1"))
-        .bind(id)
-        .fetch_one(&mut *connection)
-        .await
-        .ctx("application des changements")?;
+    let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT count(*) FROM {table} WHERE id = $1"
+    )))
+    .bind(id)
+    .fetch_one(&mut *connection)
+    .await
+    .ctx("application des changements")?;
     Ok(count > 0)
 }
 
@@ -245,6 +249,38 @@ async fn apply_upsert(connection: &mut SqliteConnection, change: &RemoteChange) 
     match change.entity.as_str() {
         SETTINGS_ENTITY => {
             let object: Map<String, Value> = parse_payload(change)?;
+            // SQLite sync snapshots encode flags as integers; range validation needs only dates.
+            let date = |name: &str| -> CoreResult<Option<String>> {
+                match object.get(name) {
+                    None | Some(Value::Null) => Ok(None),
+                    Some(Value::String(value)) => Ok(Some(value.clone())),
+                    _ => Err(CoreError::validation("Date distante invalide.")),
+                }
+            };
+            let values = crate::settings::SettingsValuesPatch {
+                prediction_custom_end_date: date("predictionCustomEndDate")?,
+                analytics_custom_start_date: date("analyticsCustomStartDate")?,
+                analytics_custom_end_date: date("analyticsCustomEndDate")?,
+                ..Default::default()
+            };
+            if let Some(row) = sqlx::query("SELECT * FROM settings WHERE id=1")
+                .fetch_optional(&mut *connection)
+                .await
+                .ctx("validation des paramètres distants")?
+            {
+                crate::settings::validate_custom_ranges(&row, &values)?;
+            } else {
+                // Seed the singleton inside the caller's savepoint before validating its defaults.
+                sqlx::query("INSERT OR IGNORE INTO settings (id) VALUES (1)")
+                    .execute(&mut *connection)
+                    .await
+                    .ctx("application des paramètres")?;
+                let row = sqlx::query("SELECT * FROM settings WHERE id=1")
+                    .fetch_one(&mut *connection)
+                    .await
+                    .ctx("validation des paramètres distants")?;
+                crate::settings::validate_custom_ranges(&row, &values)?;
+            }
             sqlx::query("INSERT OR IGNORE INTO settings (id) VALUES (1)")
                 .execute(&mut *connection)
                 .await
@@ -254,7 +290,7 @@ async fn apply_upsert(connection: &mut SqliteConnection, change: &RemoteChange) 
                     continue;
                 }
                 let statement = format!("UPDATE settings SET \"{column}\" = $1 WHERE id = 1");
-                let query = sqlx::query(&statement);
+                let query = sqlx::query(sqlx::AssertSqlSafe(statement));
                 let query = match value {
                     Value::String(text) => query.bind(text),
                     Value::Bool(flag) => query.bind(flag),
@@ -265,9 +301,10 @@ async fn apply_upsert(connection: &mut SqliteConnection, change: &RemoteChange) 
                     Value::Null => query.bind(Option::<String>::None),
                     other => query.bind(other.to_string()),
                 };
-                if let Err(error) = query.execute(&mut *connection).await {
-                    log::warn!("Paramètre distant {column} ignoré : {error}");
-                }
+                query
+                    .execute(&mut *connection)
+                    .await
+                    .ctx("application du paramètre distant")?;
             }
         }
         "accounts" => {
@@ -329,7 +366,150 @@ async fn apply_upsert(connection: &mut SqliteConnection, change: &RemoteChange) 
     Ok(())
 }
 
-async fn apply_locked(connection: &mut SqliteConnection, mut changes: Vec<RemoteChange>) -> CoreResult<ApplyReport> {
+/// The old partner must be removed or detach in the same batch before a link can change.
+async fn old_partner_detaches(
+    connection: &mut SqliteConnection,
+    id: &str,
+    linked: &str,
+    candidates: &[RemoteChange],
+) -> CoreResult<bool> {
+    if !record_exists(connection, "transactions", linked).await? {
+        return Ok(true);
+    }
+    let Some(change) = candidates
+        .iter()
+        .find(|other| other.entity == "transactions" && other.record_id == linked)
+    else {
+        return Ok(false);
+    };
+    if change.deleted {
+        return Ok(true);
+    }
+    let partner: Transaction = parse_payload(change)?;
+    crate::limits::transaction(&partner)?;
+    validate_positive_money(partner.amount)?;
+    if !valid_remote_date(&partner.date) {
+        return Err(CoreError::validation("Date de la contrepartie distante invalide."));
+    }
+    Ok(partner.linked_transaction_id.as_deref() != Some(id))
+}
+
+async fn transfer_dependency_ready(
+    connection: &mut SqliteConnection,
+    change: &RemoteChange,
+    candidates: &[RemoteChange],
+) -> CoreResult<bool> {
+    if change.entity != "transactions" {
+        return Ok(true);
+    }
+    let existing = repo::get_transaction(connection, &change.record_id).await?;
+    if change.deleted {
+        // Never expose one surviving half while a tombstone for its counterpart is delayed.
+        if let Some(linked) = existing.and_then(|item| item.linked_transaction_id) {
+            return old_partner_detaches(connection, &change.record_id, &linked, candidates).await;
+        }
+        return Ok(true);
+    }
+    let item: Transaction = parse_payload(change)?;
+    if let Some(linked) = existing.and_then(|item| item.linked_transaction_id) {
+        if item.linked_transaction_id.as_deref() != Some(linked.as_str())
+            && !old_partner_detaches(connection, &item.id, &linked, candidates).await?
+        {
+            return Ok(false);
+        }
+    }
+    if !item.is_transfer && item.category != crate::models::TRANSFER_CATEGORY_ID {
+        return Ok(item.linked_transaction_id.is_none());
+    }
+    let Some(linked) = item.linked_transaction_id.as_deref() else {
+        return Ok(false);
+    };
+    let counterpart = match candidates
+        .iter()
+        .find(|other| other.entity == "transactions" && other.record_id == linked)
+    {
+        Some(other) if !other.deleted => Some(parse_payload::<Transaction>(other)?),
+        Some(_) => None,
+        None => repo::get_transaction(connection, linked).await?,
+    };
+    let Some(counterpart) = counterpart else {
+        return Ok(false);
+    };
+    crate::limits::transaction(&item)?;
+    crate::limits::transaction(&counterpart)?;
+    validate_positive_money(item.amount)?;
+    validate_positive_money(counterpart.amount)?;
+    Ok(repo::are_transfer_counterparts(&item, &counterpart)
+        && crate::metrics::cents(item.amount) == crate::metrics::cents(counterpart.amount)
+        && item.date == counterpart.date
+        && valid_remote_date(&counterpart.date)
+        && crate::metrics::is_valid_money(counterpart.amount)
+        && record_exists(connection, "accounts", &item.account_id).await?
+        && record_exists(connection, "accounts", &counterpart.account_id).await?)
+}
+
+async fn apply_locked(connection: &mut SqliteConnection, incoming: Vec<RemoteChange>) -> CoreResult<ApplyReport> {
+    let stored: Vec<String> = sqlx::query_scalar("SELECT change_json FROM sync_pending_remote")
+        .fetch_all(&mut *connection)
+        .await
+        .ctx("lecture des changements différés")?;
+    let mut changes: Vec<RemoteChange> = stored
+        .into_iter()
+        .map(|value| {
+            serde_json::from_str(&value)
+                .map_err(|error| CoreError::Database(format!("Changement différé illisible : {error}")))
+        })
+        .collect::<CoreResult<_>>()?;
+    changes.extend(incoming);
+    let mut report = ApplyReport::default();
+    let mut newest: HashMap<(String, String), RemoteChange> = HashMap::new();
+    for mut change in changes {
+        let valid_entity = table_for(&change.entity).is_some()
+            || (change.entity == SETTINGS_ENTITY && change.record_id == SETTINGS_RECORD_ID);
+        let Ok(timestamp) = DateTime::parse_from_rfc3339(&change.updated_at) else {
+            report.skipped += 1;
+            continue;
+        };
+        if !valid_entity || change.record_id.is_empty() {
+            report.skipped += 1;
+            continue;
+        }
+        change.updated_at = timestamp
+            .with_timezone(&Utc)
+            .to_rfc3339_opts(SecondsFormat::Millis, true);
+        let key = (change.entity.clone(), change.record_id.clone());
+        if newest.get(&key).is_none_or(|old| {
+            old.updated_at < change.updated_at
+                || (old.updated_at == change.updated_at && (change.deleted || !old.deleted))
+        }) {
+            newest.insert(key, change);
+        }
+    }
+    let mut changes = Vec::new();
+    for (_, change) in newest {
+        let local = sqlx::query("SELECT updated_at, deleted FROM sync_meta WHERE entity = $1 AND record_id = $2")
+            .bind(&change.entity)
+            .bind(&change.record_id)
+            .fetch_optional(&mut *connection)
+            .await
+            .ctx("application des changements")?;
+        let stale = local.as_ref().is_some_and(|row| {
+            let timestamp = repo::row_string(row, "updated_at");
+            timestamp > change.updated_at
+                || (timestamp == change.updated_at && repo::row_bool(row, "deleted") && !change.deleted)
+        });
+        if stale {
+            sqlx::query("DELETE FROM sync_pending_remote WHERE entity = $1 AND record_id = $2")
+                .bind(&change.entity)
+                .bind(&change.record_id)
+                .execute(&mut *connection)
+                .await
+                .ctx("suppression du changement différé obsolète")?;
+            report.skipped += 1;
+        } else {
+            changes.push(change);
+        }
+    }
     changes.sort_by_key(|change| {
         let rank = entity_rank(&change.entity);
         if change.deleted {
@@ -338,72 +518,143 @@ async fn apply_locked(connection: &mut SqliteConnection, mut changes: Vec<Remote
             (0, rank)
         }
     });
-
+    let mut touched = std::collections::HashSet::new();
+    for change in changes.iter().filter(|change| change.entity == "transactions") {
+        touched.insert(change.record_id.clone());
+        if let Some(existing) = repo::get_transaction(connection, &change.record_id).await? {
+            if let Some(linked) = existing.linked_transaction_id {
+                touched.insert(linked);
+            }
+        }
+        if !change.deleted {
+            if let Ok(item) = parse_payload::<Transaction>(change) {
+                if let Some(linked) = item.linked_transaction_id {
+                    touched.insert(linked);
+                }
+            }
+        }
+    }
     sqlx::query("UPDATE sync_control SET applying = 1 WHERE id = 1")
         .execute(&mut *connection)
         .await
         .ctx("application des changements")?;
-
-    let mut report = ApplyReport::default();
-    changes.retain_mut(|change| {
-        let valid_entity = table_for(&change.entity).is_some()
-            || (change.entity == SETTINGS_ENTITY && change.record_id == SETTINGS_RECORD_ID);
-        let timestamp = DateTime::parse_from_rfc3339(&change.updated_at);
-        if !valid_entity || change.record_id.is_empty() || timestamp.is_err() {
-            report.skipped += 1;
-            return false;
-        }
-        change.updated_at = timestamp
-            .unwrap()
-            .with_timezone(&Utc)
-            .to_rfc3339_opts(SecondsFormat::Millis, true);
-        true
-    });
     for change in &changes {
-        let local: Option<String> =
-            sqlx::query_scalar("SELECT updated_at FROM sync_meta WHERE entity = $1 AND record_id = $2")
-                .bind(&change.entity)
-                .bind(&change.record_id)
-                .fetch_optional(&mut *connection)
-                .await
-                .ctx("application des changements")?;
-        if local.as_deref().is_some_and(|local| local > change.updated_at.as_str()) {
-            report.skipped += 1;
-            continue;
-        }
-
-        if change.deleted {
-            if let Some(table) = table_for(&change.entity) {
-                sqlx::query(&format!("DELETE FROM {table} WHERE id = $1"))
+        sqlx::query("INSERT INTO sync_pending_remote(entity, record_id, change_json) VALUES ($1,$2,$3) ON CONFLICT(entity,record_id) DO UPDATE SET change_json=excluded.change_json")
+            .bind(&change.entity).bind(&change.record_id).bind(to_json(change)?)
+            .execute(&mut *connection).await.ctx("conservation du changement distant")?;
+        match transfer_dependency_ready(connection, change, &changes).await {
+            Ok(false) => {
+                report.skipped += 1;
+                continue;
+            }
+            Err(CoreError::Validation(_)) => {
+                sqlx::query("DELETE FROM sync_pending_remote WHERE entity=$1 AND record_id=$2")
+                    .bind(&change.entity)
                     .bind(&change.record_id)
                     .execute(&mut *connection)
                     .await
-                    .ctx("application des suppressions")?;
+                    .ctx("rejet du changement distant invalide")?;
+                report.skipped += 1;
+                continue;
             }
-        } else if let Err(error) = apply_upsert(connection, change).await {
-            log::warn!(
-                "Changement distant {}:{} ignoré : {error}",
-                change.entity,
-                change.record_id
-            );
+            Err(error) => return Err(error),
+            Ok(true) => {}
+        }
+        sqlx::query("SAVEPOINT remote_record")
+            .execute(&mut *connection)
+            .await
+            .ctx("application atomique du changement")?;
+        let result = if change.deleted {
+            if let Some(table) = table_for(&change.entity) {
+                sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE id = $1")))
+                    .bind(&change.record_id)
+                    .execute(&mut *connection)
+                    .await
+                    .map(|_| ())
+                    .ctx("application des suppressions")
+            } else {
+                Ok(())
+            }
+        } else {
+            apply_upsert(connection, change).await
+        };
+        if let Err(error) = result {
+            sqlx::query("ROLLBACK TO remote_record")
+                .execute(&mut *connection)
+                .await
+                .ctx("annulation du changement distant")?;
+            sqlx::query("RELEASE remote_record")
+                .execute(&mut *connection)
+                .await
+                .ctx("annulation du changement distant")?;
+            // FK failures retain the exact change durably: a future batch may provide its parent.
+            // Invalid payloads are rejected; I/O/busy errors abort the batch rather than being hidden.
+            match error {
+                CoreError::Database(ref message)
+                    if message == "Impossible de supprimer cet élément car il est utilisé ailleurs." => {}
+                CoreError::Validation(_) => {
+                    sqlx::query("DELETE FROM sync_pending_remote WHERE entity=$1 AND record_id=$2")
+                        .bind(&change.entity)
+                        .bind(&change.record_id)
+                        .execute(&mut *connection)
+                        .await
+                        .ctx("rejet du changement distant invalide")?;
+                }
+                _ => return Err(error),
+            }
             report.skipped += 1;
             continue;
         }
-
-        sqlx::query(
-            "INSERT INTO sync_meta (entity, record_id, updated_at, deleted) VALUES ($1, $2, $3, $4)
-             ON CONFLICT(entity, record_id) DO UPDATE SET updated_at = excluded.updated_at, deleted = excluded.deleted",
-        )
-        .bind(&change.entity)
-        .bind(&change.record_id)
-        .bind(&change.updated_at)
-        .bind(change.deleted)
-        .execute(&mut *connection)
-        .await
-        .ctx("application des changements")?;
+        sqlx::query("RELEASE remote_record")
+            .execute(&mut *connection)
+            .await
+            .ctx("application atomique du changement")?;
+        sqlx::query("INSERT INTO sync_meta (entity, record_id, updated_at, deleted) VALUES ($1,$2,$3,$4) ON CONFLICT(entity,record_id) DO UPDATE SET updated_at=excluded.updated_at, deleted=excluded.deleted")
+            .bind(&change.entity).bind(&change.record_id).bind(&change.updated_at).bind(change.deleted)
+            .execute(&mut *connection).await.ctx("application des changements")?;
+        sqlx::query("DELETE FROM sync_pending_remote WHERE entity=$1 AND record_id=$2")
+            .bind(&change.entity)
+            .bind(&change.record_id)
+            .execute(&mut *connection)
+            .await
+            .ctx("acquittement du changement différé")?;
         report.applied += 1;
     }
-
+    // A rejected record must never leave a successful planned partner with a broken link.
+    // Validate only affected pairs, preserving unrelated legacy rows while refusing partial writes.
+    for id in touched {
+        let Some(item) = repo::get_transaction(connection, &id).await? else {
+            continue;
+        };
+        if item.is_transfer || item.category == crate::models::TRANSFER_CATEGORY_ID {
+            let partner = match item.linked_transaction_id.as_deref() {
+                Some(linked) => repo::get_transaction(connection, linked).await?,
+                None => None,
+            };
+            if partner.as_ref().is_none_or(|partner| {
+                !repo::are_transfer_counterparts(&item, partner)
+                    || crate::metrics::cents(item.amount) != crate::metrics::cents(partner.amount)
+                    || item.date != partner.date
+            }) {
+                return Err(CoreError::validation(
+                    "Le lot distant laisserait un virement incomplet. Aucun changement n’a été enregistré.",
+                ));
+            }
+        } else if item.linked_transaction_id.is_some() {
+            return Err(CoreError::validation(
+                "Le lot distant laisserait une liaison de virement invalide. Aucun changement n’a été enregistré.",
+            ));
+        }
+    }
+    let violation = sqlx::query("PRAGMA foreign_key_check")
+        .fetch_optional(&mut *connection)
+        .await
+        .ctx("vérification de l’intégrité synchronisée")?;
+    if violation.is_some() {
+        return Err(CoreError::validation(
+            "La base contient une référence à un compte absent. La synchronisation a été annulée.",
+        ));
+    }
     sqlx::query("UPDATE sync_control SET applying = 0 WHERE id = 1")
         .execute(&mut *connection)
         .await
@@ -411,30 +662,16 @@ async fn apply_locked(connection: &mut SqliteConnection, mut changes: Vec<Remote
     Ok(report)
 }
 
-/// Applique les changements reçus d'un autre appareil.
+/// Applies valid records atomically while retaining out-of-order dependencies for the next batch.
+/// Foreign keys stay enabled throughout; a failed transaction cannot leak its control flag.
 pub async fn apply_remote_changes(pool: &DbPool, changes: Vec<RemoteChange>) -> CoreResult<ApplyReport> {
-    if changes.is_empty() {
-        return Ok(ApplyReport::default());
-    }
-
-    let mut connection = pool.acquire().await.ctx("application des changements")?;
-    sqlx::query("PRAGMA foreign_keys = OFF")
-        .execute(&mut *connection)
+    let mut transaction = pool
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .ctx("application des changements")?;
-    if let Err(error) = sqlx::query("BEGIN IMMEDIATE").execute(&mut *connection).await {
-        let _ = sqlx::query("PRAGMA foreign_keys = ON").execute(&mut *connection).await;
-        return Err(CoreError::Database(format!("Application des changements : {error}")));
-    }
-
-    let result = apply_locked(&mut connection, changes).await;
-    let finish = match &result {
-        Ok(_) => sqlx::query("COMMIT").execute(&mut *connection).await,
-        Err(_) => sqlx::query("ROLLBACK").execute(&mut *connection).await,
-    };
-    let _ = sqlx::query("PRAGMA foreign_keys = ON").execute(&mut *connection).await;
-    finish.ctx("application des changements")?;
-    result
+    let report = apply_locked(&mut transaction, changes).await?;
+    transaction.commit().await.ctx("application des changements")?;
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -649,6 +886,8 @@ mod tests {
                 checked: false,
                 is_transfer: false,
                 linked_transaction_id: None,
+                bank_source: None,
+                bank_transaction_id: None,
             };
             let change = RemoteChange {
                 entity: "transactions".into(),

@@ -21,6 +21,7 @@ pub struct Page {
     empty_title: gtk::Label,
     empty_message: gtk::Label,
     category_button: gtk::MenuButton,
+    category_choices: RefCell<Vec<(String, String)>>,
     frequency_button: gtk::MenuButton,
     search: Rc<RefCell<String>>,
     categories: Rc<RefCell<Vec<String>>>,
@@ -108,6 +109,7 @@ impl Page {
             empty_title,
             empty_message,
             category_button: category_button.clone(),
+            category_choices: RefCell::new(Vec::new()),
             frequency_button: frequency_button.clone(),
             search: Rc::new(RefCell::new(String::new())),
             categories: Rc::new(RefCell::new(Vec::new())),
@@ -135,29 +137,6 @@ impl Page {
                 store.navigate(Route::Scheduled);
             });
         }
-
-        fill_check_popover(
-            &category_button,
-            store
-                .categories()
-                .iter()
-                .map(|category| (category.id.clone(), category.name.clone()))
-                .collect(),
-            {
-                let categories = page.categories.clone();
-                let store = store.clone();
-                move |id, active| {
-                    let mut categories = categories.borrow_mut();
-                    if active {
-                        categories.push(id);
-                    } else {
-                        categories.retain(|candidate| candidate != &id);
-                    }
-                    drop(categories);
-                    store.navigate(Route::Scheduled);
-                }
-            },
-        );
 
         fill_check_popover(
             &frequency_button,
@@ -192,6 +171,35 @@ impl Page {
     }
 
     pub fn refresh(&self) {
+        let choices = self.store.categories();
+        let valid = choices
+            .iter()
+            .map(|category| category.id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        self.categories.borrow_mut().retain(|id| valid.contains(id.as_str()));
+        let signature = choices
+            .iter()
+            .map(|category| (category.id.clone(), category.name.clone()))
+            .collect::<Vec<_>>();
+        if *self.category_choices.borrow() != signature {
+            *self.category_choices.borrow_mut() = signature;
+            let selected = self.categories.borrow().clone();
+            let categories = self.categories.clone();
+            let store = self.store.clone();
+            widgets::category_filter(&self.category_button, &choices, &selected, move |id, active| {
+                {
+                    let mut selected = categories.borrow_mut();
+                    if active {
+                        if !selected.contains(&id) {
+                            selected.push(id);
+                        }
+                    } else {
+                        selected.retain(|candidate| candidate != &id);
+                    }
+                }
+                store.navigate(Route::Scheduled);
+            });
+        }
         let settings = self.store.settings();
         let query = ScheduledQuery {
             accounts: self.store.selected_accounts(),

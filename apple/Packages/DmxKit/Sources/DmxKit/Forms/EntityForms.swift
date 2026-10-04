@@ -28,40 +28,45 @@ public struct FormHost: View {
 
     @ViewBuilder
     private var content: some View {
+        let accounts = store.selectedAccountIds
+        let today = store.today
         switch request {
         case let .account(id):
-            if let draft = store.read({ try $0.accountDraft(id: id) }) {
-                AccountForm(draft: draft, onClose: onClose)
+            DraftLoader(load: { try $0.accountDraft(id: id) }, onClose: onClose) {
+                AccountForm(draft: $0, onClose: onClose)
             }
         case .accountGroups:
             AccountGroupsForm(onClose: onClose)
         case let .category(id):
-            if let draft = store.read({ try $0.categoryDraft(id: id) }) {
-                CategoryForm(draft: draft, onClose: onClose)
+            DraftLoader(load: { try $0.categoryDraft(id: id) }, onClose: onClose) {
+                CategoryForm(draft: $0, onClose: onClose)
             }
         case let .transaction(id):
-            if let draft = store.read({ try $0.transactionDraft(id: id, accounts: store.selectedAccountIds, today: store.today) }) {
-                TransactionForm(draft: draft, onClose: onClose)
+            DraftLoader(load: { try $0.transactionDraft(id: id, accounts: accounts, today: today) }, onClose: onClose) {
+                TransactionForm(draft: $0, onClose: onClose)
             }
         case let .budget(id):
-            if let draft = store.read({ try $0.budgetDraft(id: id, accounts: store.selectedAccountIds) }) {
-                BudgetForm(draft: draft, onClose: onClose)
+            DraftLoader(load: { try $0.budgetDraft(id: id, accounts: accounts) }, onClose: onClose) {
+                BudgetForm(draft: $0, onClose: onClose)
             }
         case let .newBudget(categoryId):
-            if let draft = newBudgetDraft(categoryId) {
-                BudgetForm(draft: draft, onClose: onClose)
-            }
+            DraftLoader(load: { engine in
+                var draft = try engine.budgetDraft(id: nil, accounts: accounts)
+                draft.categoryId = categoryId
+                if draft.name.isEmpty { draft.name = try engine.categories().first { $0.id == categoryId }?.name ?? "" }
+                return draft
+            }, onClose: onClose) { BudgetForm(draft: $0, onClose: onClose) }
         case .budgetSuggestions:
             BudgetSuggestionsView(onClose: onClose)
         case .scheduledSuggestions:
             ScheduledSuggestionsView(onClose: onClose)
         case let .scheduled(id):
-            if let draft = store.read({ try $0.scheduledDraft(id: id, today: store.today) }) {
-                ScheduledForm(draft: draft, onClose: onClose)
+            DraftLoader(load: { try $0.scheduledDraft(id: id, today: today) }, onClose: onClose) {
+                ScheduledForm(draft: $0, onClose: onClose)
             }
         case let .fakeTransaction(id):
-            if let draft = store.read({ try $0.fakeTransactionDraft(id: id, accounts: store.selectedAccountIds, today: store.today) }) {
-                FakeTransactionForm(draft: draft, onClose: onClose)
+            DraftLoader(load: { try $0.fakeTransactionDraft(id: id, accounts: accounts, today: today) }, onClose: onClose) {
+                FakeTransactionForm(draft: $0, onClose: onClose)
             }
         case let .restoreBackup(content, fileName):
             RestoreBackupForm(content: content, fileName: fileName, onClose: onClose)
@@ -72,14 +77,7 @@ public struct FormHost: View {
         }
     }
 
-    private func newBudgetDraft(_ categoryId: String) -> BudgetDraft? {
-        guard var draft = store.read({ try $0.budgetDraft(id: nil, accounts: store.selectedAccountIds) }) else { return nil }
-        draft.categoryId = categoryId
-        if draft.name.isEmpty, let name = store.category(id: categoryId)?.name {
-            draft.name = name
-        }
-        return draft
-    }
+
 }
 
 // MARK: - Compte
@@ -322,12 +320,14 @@ struct CategoryForm: View {
 struct TransactionForm: View {
     @EnvironmentObject private var store: AppStore
     @State private var draft: TransactionDraft
+    private let base: TransactionDraft
     @State private var amount: String
     @State private var error: String?
     private let onClose: () -> Void
 
     init(draft: TransactionDraft, onClose: @escaping () -> Void) {
         _draft = State(initialValue: draft)
+        self.base = draft
         _amount = State(initialValue: AmountInput.text(draft.amount))
         self.onClose = onClose
     }
@@ -374,7 +374,11 @@ struct TransactionForm: View {
         }
         var draft = self.draft
         draft.amount = value
-        error = store.attempt { engine in _ = try engine.saveTransaction(draft: draft) }
+        let base = self.base
+        error = store.attempt { engine in
+            if draft.id != nil { _ = try engine.saveTransactionWithBase(draft: draft, base: base) }
+            else { _ = try engine.saveTransaction(draft: draft) }
+        }
         if error == nil {
             store.showToast(isEditing ? "Transaction mise à jour" : (draft.kind == .transfer ? "Virement ajouté" : "Transaction ajoutée"))
             onClose()

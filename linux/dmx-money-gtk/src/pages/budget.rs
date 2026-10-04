@@ -22,6 +22,7 @@ pub struct Page {
     empty_message: gtk::Label,
     count_label: gtk::Label,
     category_button: gtk::MenuButton,
+    category_choices: RefCell<Vec<(String, String)>>,
     search: Rc<RefCell<String>>,
     categories: Rc<RefCell<Vec<String>>>,
 }
@@ -96,6 +97,7 @@ impl Page {
             empty_message,
             count_label,
             category_button: category_button.clone(),
+            category_choices: RefCell::new(Vec::new()),
             search: Rc::new(RefCell::new(String::new())),
             categories: Rc::new(RefCell::new(Vec::new())),
         };
@@ -109,36 +111,6 @@ impl Page {
             });
         }
 
-        let popover = gtk::Popover::new();
-        let list = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        list.set_margin_top(8);
-        list.set_margin_bottom(8);
-        list.set_margin_start(8);
-        list.set_margin_end(8);
-        let scroll = gtk::ScrolledWindow::new();
-        scroll.set_max_content_height(360);
-        scroll.set_propagate_natural_height(true);
-        scroll.set_child(Some(&list));
-        popover.set_child(Some(&scroll));
-        category_button.set_popover(Some(&popover));
-        for category in store.selectable_categories() {
-            let check = gtk::CheckButton::with_label(&category.name);
-            let categories = page.categories.clone();
-            let store_for_check = store.clone();
-            let id = category.id.clone();
-            check.connect_toggled(move |check| {
-                let mut categories = categories.borrow_mut();
-                if check.is_active() {
-                    categories.push(id.clone());
-                } else {
-                    categories.retain(|candidate| candidate != &id);
-                }
-                drop(categories);
-                store_for_check.navigate(Route::Budget);
-            });
-            list.append(&check);
-        }
-
         page
     }
 
@@ -147,6 +119,35 @@ impl Page {
     }
 
     pub fn refresh(&self) {
+        let choices = self.store.selectable_categories();
+        let valid = choices
+            .iter()
+            .map(|category| category.id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        self.categories.borrow_mut().retain(|id| valid.contains(id.as_str()));
+        let signature = choices
+            .iter()
+            .map(|category| (category.id.clone(), category.name.clone()))
+            .collect::<Vec<_>>();
+        if *self.category_choices.borrow() != signature {
+            *self.category_choices.borrow_mut() = signature;
+            let selected = self.categories.borrow().clone();
+            let categories = self.categories.clone();
+            let store = self.store.clone();
+            widgets::category_filter(&self.category_button, &choices, &selected, move |id, active| {
+                {
+                    let mut selected = categories.borrow_mut();
+                    if active {
+                        if !selected.contains(&id) {
+                            selected.push(id);
+                        }
+                    } else {
+                        selected.retain(|candidate| candidate != &id);
+                    }
+                }
+                store.navigate(Route::Budget);
+            });
+        }
         let query = BudgetQuery {
             accounts: self.store.selected_accounts(),
             search: self.search.borrow().clone(),

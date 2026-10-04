@@ -86,6 +86,55 @@ pub fn next_occurrence(date: NaiveDate, frequency: Periodicity) -> Option<NaiveD
     })
 }
 
+/// Advance a recurrence without walking every missed day. Monthly schedules first settle
+/// their day-of-month clamp over a complete pattern (48 steps covers every supported period).
+pub fn first_occurrence_on_or_after(
+    mut next: NaiveDate,
+    frequency: Periodicity,
+    floor: NaiveDate,
+) -> Option<NaiveDate> {
+    if next >= floor {
+        return Some(next);
+    }
+    let days = match frequency {
+        Periodicity::Once => return None,
+        Periodicity::Daily => Some(1),
+        Periodicity::Weekly => Some(7),
+        Periodicity::Biweekly => Some(14),
+        Periodicity::Bimonthly => Some(15),
+        Periodicity::Fourweekly => Some(28),
+        _ => None,
+    };
+    if let Some(step) = days {
+        let gap = (floor - next).num_days();
+        return next.checked_add_signed(chrono::Duration::days(((gap + step - 1) / step) * step));
+    }
+    for _ in 0..48 {
+        if next >= floor {
+            return Some(next);
+        }
+        next = next_occurrence(next, frequency)?;
+    }
+    let step = match frequency {
+        Periodicity::Monthly => 1,
+        Periodicity::Bimestrial => 2,
+        Periodicity::Quarterly => 3,
+        Periodicity::Fourmonthly => 4,
+        Periodicity::Semiannual => 6,
+        Periodicity::Annual => 12,
+        Periodicity::Biennial => 24,
+        _ => return None,
+    };
+    let gap = (floor.year() - next.year()) * 12 + floor.month() as i32 - next.month() as i32;
+    if gap > 0 {
+        next = add_months(next, (gap / step) * step);
+    }
+    if next < floor {
+        next = next_occurrence(next, frequency)?;
+    }
+    Some(next)
+}
+
 /// Itère les jours de `start` à `end` inclus.
 pub fn each_day(start: NaiveDate, end: NaiveDate) -> impl Iterator<Item = NaiveDate> {
     let mut current = Some(start);

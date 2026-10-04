@@ -419,6 +419,14 @@ impl DmxEngine {
         Ok(self.engine.save_transaction(draft)?)
     }
 
+    pub fn save_transaction_with_base(
+        &self,
+        draft: TransactionDraft,
+        base: TransactionDraft,
+    ) -> FfiResult<Vec<String>> {
+        Ok(self.engine.save_transaction_with_base(draft, base)?)
+    }
+
     pub fn delete_transactions(&self, ids: Vec<String>) -> FfiResult<()> {
         Ok(self.engine.delete_transactions(&ids)?)
     }
@@ -430,6 +438,27 @@ impl DmxEngine {
     /// Pointage groupé ; renvoie le nouvel état.
     pub fn toggle_transactions_checked(&self, ids: Vec<String>) -> FfiResult<bool> {
         Ok(self.engine.toggle_transactions_checked(&ids)?)
+    }
+
+    pub fn update_transaction_description_with_base(
+        &self,
+        id: String,
+        description: String,
+        base_description: String,
+    ) -> FfiResult<()> {
+        Ok(self.engine.update_transaction_inline_with_base(
+            &id,
+            InlineEdit::Description(description),
+            InlineEdit::Description(base_description),
+        )?)
+    }
+
+    pub fn update_transaction_amount_with_base(&self, id: String, amount: f64, base_amount: f64) -> FfiResult<()> {
+        Ok(self.engine.update_transaction_inline_with_base(
+            &id,
+            InlineEdit::Amount(amount),
+            InlineEdit::Amount(base_amount),
+        )?)
     }
 
     pub fn update_transaction_description(&self, id: String, description: String) -> FfiResult<()> {

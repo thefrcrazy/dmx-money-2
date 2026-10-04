@@ -707,34 +707,6 @@ fn import_file(store: &Rc<Store>, widget: &impl IsA<gtk::Widget>) {
         let Ok(file) = result else {
             return;
         };
-        let Some(path) = file.path() else {
-            return;
-        };
-        let Some(content) = read_text(&path) else {
-            store.show_error("Le fichier n'a pas pu être lu.");
-            return;
-        };
-        let file_name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| "import".to_string());
-        let extension = path
-            .extension()
-            .map(|extension| extension.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        if extension == "dmx" || extension == "json" {
-            store.present(FormRequest::RestoreBackup { content, file_name });
-        } else {
-            store.present(FormRequest::StatementImport { content, file_name });
-        }
+        crate::import_file::open(&store, file);
     });
-}
-
-/// Les relevés bancaires sont souvent encodés en Windows-1252.
-fn read_text(path: &std::path::Path) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
-    match String::from_utf8(bytes.clone()) {
-        Ok(text) => Some(text.trim_start_matches('\u{feff}').to_string()),
-        Err(_) => Some(bytes.iter().map(|byte| *byte as char).collect()),
-    }
 }

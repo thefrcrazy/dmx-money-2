@@ -2,7 +2,7 @@
 name = "dmx-money-gtk"
 version.workspace = true
 edition = "2021"
-rust-version = "1.88"
+rust-version.workspace = true
 description = "DmxMoney pour Linux (GTK4 / libadwaita)"
 license = "MIT"
 
@@ -21,4 +21,13 @@ dirs = { workspace = true }
 
 # L'icône de zone de notification suit le protocole SNI, propre à Linux.
 [target.'cfg(target_os = "linux")'.dependencies]
-ksni = "0.2"
+ksni = "0.3.6"
+
+[features]
+ui-tests = []
+
+[[test]]
+name = "ui-lifecycle"
+path = "tests/ui_lifecycle.rs"
+harness = false
+required-features = ["ui-tests"]

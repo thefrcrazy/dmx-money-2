@@ -7,6 +7,8 @@ struct ModernScheduled: View {
     @EnvironmentObject private var store: AppStore
     @State private var sort: [KeyPathComparator<ScheduledRow>] = []
     @State private var selection: Set<String> = []
+    @State private var rows: [ScheduledRow] = []
+    @State private var preparation: TablePreparationToken?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -111,6 +113,10 @@ struct ModernScheduled: View {
                 }
             }
         }
+        .onAppear(perform: prepareRows)
+        .onChange(of: model.rowsRevision) { _, _ in prepareRows() }
+        .onChange(of: sort) { _, _ in prepareRows() }
+        .onDisappear { preparation?.cancel(); preparation = nil }
     }
 
     private var filters: some View {
@@ -194,9 +200,21 @@ struct ModernScheduled: View {
         )
     }
 
-    private var rows: [ScheduledRow] {
-        let rows = model.view?.rows ?? []
-        return sort.isEmpty ? rows : rows.sorted(using: sort)
+    private func prepareRows() {
+        preparation?.cancel()
+        let token = TablePreparationToken()
+        preparation = token
+        let source = model.view?.rows ?? [], order = sort
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard !token.isCancelled else { return }
+            let sorted = order.isEmpty ? source : source.sorted(using: order)
+            let ids = Set(sorted.map { $0.scheduled.id })
+            DispatchQueue.main.async {
+                guard !token.isCancelled, model.isActive else { return }
+                rows = sorted
+                selection.formIntersection(ids)
+            }
+        }
     }
 
     private func delete(_ row: ScheduledRow) {

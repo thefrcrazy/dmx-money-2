@@ -41,6 +41,15 @@ Les tests des modèles de vue tournent sur n'importe quel système, avec la bibl
 dotnet test windows/tests/DmxMoney.Tests/DmxMoney.Tests.csproj
 ```
 
+Le harnais de cellule utilise la classe de production avec des événements WinUI simulés :
+
+```bash
+dotnet run --project windows/tests/EditableCellHarness/EditableCellHarness.csproj
+```
+
+Il vérifie les gardes d'identifiant, l'annulation et les valeurs initiales d'une édition.
+Le focus et le recyclage visuel restent à vérifier dans le runtime WinUI sur Windows.
+
 ## Données
 
 * Base : `%APPDATA%\com.dmxmoney.app\dmxmoney2025.db`

@@ -5,15 +5,16 @@ public final class DashboardModel: PageModel {
         willSet { objectWillChange.send() }
     }
 
-    public override init(store: AppStore) {
+    public init(store: AppStore, active: Bool = true) {
         super.init(store: store)
-        refresh()
+        isActive = active
+        if active { refresh() } else { setNeedsRefresh() }
     }
 
     public override func refresh() {
         let accounts = store.selectedAccountIds
         let today = store.today
-        view = store.read { engine in try engine.dashboard(accounts: accounts, today: today) }
+        load({ try $0.dashboard(accounts: accounts, today: today) }) { [weak self] in self?.view = $0 }
     }
 }
 

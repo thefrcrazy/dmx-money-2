@@ -46,7 +46,7 @@ public sealed partial class JournalPage : Page
 
     private void OnViewModelChanged(object? sender, PropertyChangedEventArgs args)
     {
-        if (args.PropertyName is nameof(JournalViewModel.Rows) or nameof(JournalViewModel.SelectionCount))
+        if (args.PropertyName is nameof(JournalViewModel.Rows) or nameof(JournalViewModel.SelectionCount) or nameof(JournalViewModel.CategoryChoices))
         {
             UpdateVisuals();
         }
@@ -54,6 +54,9 @@ public sealed partial class JournalPage : Page
 
     private void UpdateVisuals()
     {
+        syncing = true;
+        CategoryFilter.Update(CategoriesList, ViewModel.CategoryChoices, ViewModel.Categories);
+        syncing = false;
         var view = ViewModel.View;
         if (!ReferenceEquals(Rows.ItemsSource, ViewModel.Rows))
         {

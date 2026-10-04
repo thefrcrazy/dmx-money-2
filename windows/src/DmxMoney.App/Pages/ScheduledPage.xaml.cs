@@ -56,6 +56,9 @@ public sealed partial class ScheduledPage : Page
     private void UpdateVisuals()
     {
         syncing = true;
+        CategoryFilter.Update(CategoriesList, ViewModel.CategoryChoices, ViewModel.Categories);
+        syncing = false;
+        syncing = true;
         var selected = rangeOptions.FirstOrDefault(option => option.Value == ViewModel.DueRange);
         if (!ReferenceEquals(RangeBox.SelectedItem, selected))
         {

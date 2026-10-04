@@ -22,8 +22,16 @@ pub fn cents(value: f64) -> i64 {
     }
 }
 
-pub fn euros(value: i64) -> f64 {
-    value as f64 / 100.0
+pub fn euros(value: impl Into<i128>) -> f64 {
+    value.into() as f64 / 100.0
+}
+
+/// Aggregate in i128: every accepted individual value fits i64, but their sum need not.
+pub fn wide_cents(value: f64) -> i128 {
+    i128::from(cents(value))
+}
+pub fn wide_signed_cents(transaction: &Transaction) -> i128 {
+    i128::from(signed_cents(transaction))
 }
 
 /// Montant signé : un revenu augmente le solde, tout le reste le diminue.
@@ -66,16 +74,16 @@ pub fn relevant_transactions<'a>(
 }
 
 pub fn balance_summary(snapshot: &Snapshot, filter: &[String]) -> BalanceSummary {
-    let initial: i64 = snapshot
+    let initial: i128 = snapshot
         .accounts
         .iter()
         .filter(|account| is_selected(filter, &account.id))
-        .map(|account| cents(account.initial_balance))
+        .map(|account| wide_cents(account.initial_balance))
         .sum();
 
     let (mut current, mut checked) = (initial, initial);
     for transaction in relevant_transactions(snapshot, filter) {
-        let amount = signed_cents(transaction);
+        let amount = wide_signed_cents(transaction);
         current += amount;
         if transaction.checked {
             checked += amount;
@@ -95,7 +103,7 @@ pub fn is_internal_transfer(transaction: &Transaction) -> bool {
 }
 
 pub fn monthly_summary(snapshot: &Snapshot, filter: &[String], today: NaiveDate) -> MonthlySummary {
-    let (mut income, mut expenses) = (0_i64, 0_i64);
+    let (mut income, mut expenses) = (0_i128, 0_i128);
     for transaction in relevant_transactions(snapshot, filter) {
         if is_internal_transfer(transaction)
             || !parse_date(&transaction.date).is_some_and(|date| same_month(date, today))
@@ -103,9 +111,9 @@ pub fn monthly_summary(snapshot: &Snapshot, filter: &[String], today: NaiveDate)
             continue;
         }
         if transaction.transaction_type == TransactionType::Income {
-            income += cents(transaction.amount);
+            income += wide_cents(transaction.amount);
         } else {
-            expenses += cents(transaction.amount);
+            expenses += wide_cents(transaction.amount);
         }
     }
 
@@ -118,10 +126,10 @@ pub fn monthly_summary(snapshot: &Snapshot, filter: &[String], today: NaiveDate)
 
 /// Soldes actuel et pointé de chaque compte, dans l'ordre des comptes.
 pub fn account_balances(snapshot: &Snapshot) -> Vec<AccountBalance> {
-    let mut deltas: HashMap<&str, (i64, i64)> = HashMap::new();
+    let mut deltas: HashMap<&str, (i128, i128)> = HashMap::new();
     for transaction in &snapshot.transactions {
         let entry = deltas.entry(transaction.account_id.as_str()).or_default();
-        let amount = signed_cents(transaction);
+        let amount = wide_signed_cents(transaction);
         entry.0 += amount;
         if transaction.checked {
             entry.1 += amount;
@@ -132,7 +140,7 @@ pub fn account_balances(snapshot: &Snapshot) -> Vec<AccountBalance> {
         .accounts
         .iter()
         .map(|account| {
-            let initial = cents(account.initial_balance);
+            let initial = wide_cents(account.initial_balance);
             let (current, checked) = deltas.get(account.id.as_str()).copied().unwrap_or_default();
             AccountBalance {
                 account_id: account.id.clone(),

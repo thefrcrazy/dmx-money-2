@@ -34,6 +34,8 @@ public sealed partial class JournalViewModel : PageViewModel
     [ObservableProperty]
     private string search = string.Empty;
 
+    private bool reconcilingCategories;
+
     [ObservableProperty]
     private IReadOnlyList<string> categories = [];
 
@@ -56,8 +58,14 @@ public sealed partial class JournalViewModel : PageViewModel
 
     public int SelectionCount => selection.Count;
 
+    public IReadOnlyList<Category> CategoryChoices => Store.Categories;
+
     public override void Refresh()
     {
+        var validIds = CategoryChoices.Select(category => category.Id).ToHashSet();
+        var filtered = Categories.Where(validIds.Contains).ToArray();
+        if (!Categories.SequenceEqual(filtered)) { reconcilingCategories = true; Categories = filtered; reconcilingCategories = false; }
+        OnPropertyChanged(nameof(CategoryChoices));
         var query = new JournalQuery(
             [.. Store.SelectedAccountIds],
             Search,
@@ -85,7 +93,7 @@ public sealed partial class JournalViewModel : PageViewModel
 
     partial void OnSearchChanged(string value) => FiltersChanged();
 
-    partial void OnCategoriesChanged(IReadOnlyList<string> value) => FiltersChanged();
+    partial void OnCategoriesChanged(IReadOnlyList<string> value) { if (!reconcilingCategories) FiltersChanged(); }
 
     partial void OnTypesChanged(IReadOnlyList<string> value) => FiltersChanged();
 
@@ -181,11 +189,11 @@ public sealed partial class JournalViewModel : PageViewModel
             confirmTitle: "Tout supprimer");
     }
 
-    public void UpdateDescription(string id, string description)
-        => Store.Run(engine => engine.UpdateTransactionDescription(id, description), "Transaction mise à jour");
+    public void UpdateDescription(string id, string description, string? baseDescription = null)
+        => Store.Run(engine => { if (baseDescription is null) engine.UpdateTransactionDescription(id, description); else engine.UpdateTransactionDescriptionWithBase(id, description, baseDescription); }, "Transaction mise à jour");
 
     /// <summary>Renvoie <c>false</c> si le montant saisi est invalide.</summary>
-    public bool UpdateAmount(string id, string text)
+    public bool UpdateAmount(string id, string text, double? baseAmount = null)
     {
         var amount = AmountInput.Parse(text);
         if (amount is null or <= 0)
@@ -193,7 +201,9 @@ public sealed partial class JournalViewModel : PageViewModel
             Store.ErrorMessage = "Saisissez un montant valide";
             return false;
         }
-        Store.Run(engine => engine.UpdateTransactionAmount(id, amount.Value), "Transaction mise à jour");
+        var error = Store.Attempt(engine => { if (baseAmount is null) engine.UpdateTransactionAmount(id, amount.Value); else engine.UpdateTransactionAmountWithBase(id, amount.Value, baseAmount.Value); });
+        if (error is not null) { Store.ErrorMessage = error; return false; }
+        Store.ShowToast("Transaction mise à jour");
         return true;
     }
 }

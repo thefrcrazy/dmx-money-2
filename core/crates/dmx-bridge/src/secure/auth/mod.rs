@@ -14,3 +14,21 @@ use self::passkeys::{
     update_passkey_usage,
 };
 use self::sessions::{authorize_session_for_auth, create_session, resume_session, revoke_session, session_response};
+
+async fn housekeeping(pool: &DbPool) {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    static LAST_CLEANUP: AtomicI64 = AtomicI64::new(0);
+    let now = Utc::now().timestamp();
+    let previous = LAST_CLEANUP.load(Ordering::Relaxed);
+    if now - previous < 60
+        || LAST_CLEANUP
+            .compare_exchange(previous, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
+    {
+        return;
+    }
+    if let Err(error) = dmx_core::db::purge_expired_companion_records(pool).await {
+        log::warn!("Nettoyage des sessions du compagnon différé : {error}");
+        LAST_CLEANUP.store(previous, Ordering::Relaxed);
+    }
+}

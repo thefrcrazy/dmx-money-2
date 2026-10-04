@@ -42,7 +42,10 @@ public sealed partial class AnalyticsPage : Page
         UpdateVisuals();
     }
 
-    private void OnViewModelChanged(object? sender, PropertyChangedEventArgs args) => UpdateVisuals();
+    private void OnViewModelChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(AnalyticsViewModel.View)) UpdateVisuals();
+    }
 
     private void UpdateVisuals()
     {

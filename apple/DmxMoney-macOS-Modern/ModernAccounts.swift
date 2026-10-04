@@ -10,8 +10,9 @@ struct ModernAccounts: View {
 
     var body: some View {
         PageBody {
-            VStack(alignment: .leading, spacing: 18) {
+            LazyVStack(alignment: .leading, spacing: 18) {
                 header
+                if model.isLoading && model.view == nil { ProgressView("Chargement des comptes…") }
                 if let view = model.view {
                     if view.groups.isEmpty {
                         ContentUnavailableView {

@@ -7,6 +7,7 @@ use crate::store::Store;
 #[cfg(target_os = "linux")]
 pub fn start(store: &Rc<Store>, window: &adw::ApplicationWindow) {
     use adw::prelude::*;
+    use ksni::TrayMethods;
 
     use crate::format;
     use crate::store::Route;
@@ -29,6 +30,9 @@ pub fn start(store: &Rc<Store>, window: &adw::ApplicationWindow) {
     }
 
     impl ksni::Tray for Tray {
+        fn id(&self) -> String {
+            "com.dmxmoney.app".into()
+        }
         fn icon_name(&self) -> String {
             "com.dmxmoney.app".into()
         }
@@ -151,14 +155,59 @@ pub fn start(store: &Rc<Store>, window: &adw::ApplicationWindow) {
         total: summary.map(|summary| summary.total).unwrap_or_default(),
         sender,
     };
-    let service = ksni::TrayService::new(tray);
-    let handle = service.handle();
-    service.spawn();
+    let runtime = store.engine().handle();
+    let (started, ready) = async_channel::bounded(1);
+    // D-Bus startup runs on the core's existing Tokio runtime, never on GTK.
+    runtime.spawn(async move {
+        let result = tray
+            .disable_dbus_name(std::path::Path::new("/.flatpak-info").exists())
+            .spawn()
+            .await;
+        let _ = started.send(result).await;
+    });
+    let weak_store = Rc::downgrade(store);
+    glib::spawn_future_local(async move {
+        let Ok(result) = ready.recv().await else {
+            return;
+        };
+        let handle = match result {
+            Ok(handle) => handle,
+            Err(error) => {
+                log::debug!("Icône de notification indisponible : {error}");
+                return;
+            }
+        };
+        let Some(store) = weak_store.upgrade() else {
+            return;
+        };
+        store.subscribe(move |store| {
+            if let Some(summary) = store.read(|engine| engine.tray_summary()) {
+                let handle = handle.clone();
+                store.engine().handle().spawn(async move {
+                    handle
+                        .update(move |tray: &mut Tray| {
+                            tray.accounts = summary
+                                .accounts
+                                .iter()
+                                .map(|account| (account.account_id.clone(), account.name.clone(), account.balance))
+                                .collect();
+                            tray.total = summary.total;
+                        })
+                        .await;
+                });
+            }
+        });
+    });
 
-    let store_for_actions = store.clone();
-    let window_for_actions = window.clone();
+    let store_for_actions = Rc::downgrade(store);
+    let window_for_actions = window.downgrade();
     glib::spawn_future_local(async move {
         while let Ok(action) = receiver.recv().await {
+            let (Some(store_for_actions), Some(window_for_actions)) =
+                (store_for_actions.upgrade(), window_for_actions.upgrade())
+            else {
+                break;
+            };
             match action {
                 TrayAction::Open => window_for_actions.present(),
                 TrayAction::Account(id) => {
@@ -178,21 +227,6 @@ pub fn start(store: &Rc<Store>, window: &adw::ApplicationWindow) {
                 }
                 TrayAction::Quit => std::process::exit(0),
             }
-        }
-    });
-
-    // Le menu suit les soldes.
-    let store_for_tray = store.clone();
-    store.subscribe(move |_| {
-        if let Some(summary) = store_for_tray.read(|engine| engine.tray_summary()) {
-            handle.update(|tray: &mut Tray| {
-                tray.accounts = summary
-                    .accounts
-                    .iter()
-                    .map(|account| (account.account_id.clone(), account.name.clone(), account.balance))
-                    .collect();
-                tray.total = summary.total;
-            });
         }
     });
 }

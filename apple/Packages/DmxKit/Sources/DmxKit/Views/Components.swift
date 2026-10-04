@@ -35,6 +35,24 @@ extension EnvironmentValues {
 
 // MARK: - Mise en page
 
+/// Recent systems create off-screen rows lazily; Catalina keeps its supported stack.
+public struct AdaptiveStack<Content: View>: View {
+    private let alignment: HorizontalAlignment
+    private let spacing: CGFloat?
+    private let content: Content
+    public init(alignment: HorizontalAlignment = .center, spacing: CGFloat? = nil,
+                @ViewBuilder content: () -> Content) {
+        self.alignment = alignment; self.spacing = spacing; self.content = content()
+    }
+    public var body: some View {
+        Group {
+            if #available(macOS 11.0, iOS 14.0, *) {
+                LazyVStack(alignment: alignment, spacing: spacing) { content }
+            } else { VStack(alignment: alignment, spacing: spacing) { content } }
+        }
+    }
+}
+
 public struct PageScroll<Content: View>: View {
     @Environment(\.dmxCompact) private var compact
     private let content: Content
@@ -45,7 +63,7 @@ public struct PageScroll<Content: View>: View {
 
     public var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: compact ? 16 : 20) {
+            AdaptiveStack(alignment: .leading, spacing: compact ? 16 : 20) {
                 content
             }
             .padding(compact ? 16 : 24)
@@ -409,22 +427,25 @@ public struct IconButton: View {
     private let color: Color
     private let size: CGFloat
     private let action: () -> Void
+    private let label: String
 
-    public init(_ icon: String, color: Color = .secondary, size: CGFloat = 14, action: @escaping () -> Void) {
+    public init(_ icon: String, color: Color = .secondary, size: CGFloat = 14, label: String? = nil, action: @escaping () -> Void) {
         self.icon = icon
         self.color = color
         self.size = size
         self.action = action
+        self.label = label ?? ["Plus": "Ajouter", "X": "Fermer", "Trash2": "Supprimer", "Trash": "Supprimer", "Pencil": "Modifier", "Edit": "Modifier", "Edit2": "Modifier", "Check": "Valider", "ChevronUp": "Monter", "ChevronDown": "Descendre"][icon] ?? icon
     }
 
     public var body: some View {
         Button(action: action) {
             DmxIcon(icon, size: size)
                 .foregroundColor(color)
-                .frame(width: size + 14, height: size + 14)
+                .frame(width: max(size + 14, pickerTargetSize), height: max(size + 14, pickerTargetSize))
                 .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibility(label: Text(label))
     }
 }
 
@@ -584,7 +605,24 @@ public struct AccountFilterButton: View {
 
 // MARK: - Sélecteurs de couleur et d'icône
 
+private var pickerTargetSize: CGFloat {
+    #if os(iOS)
+    return 44
+    #else
+    return 32
+    #endif
+}
+
+private func pickerColumnCount(_ requested: Int, compact: Bool) -> Int {
+    #if os(iOS)
+    return max(1, min(requested, compact ? 5 : 8))
+    #else
+    return max(1, min(requested, 10))
+    #endif
+}
+
 public struct ColorGridPicker: View {
+    @Environment(\.dmxCompact) private var compact
     private let colors: [String]
     @Binding private var selection: String
     private let columns: Int
@@ -597,10 +635,11 @@ public struct ColorGridPicker: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            ForEach(Array(colors.chunked(columns).enumerated()), id: \.offset) { row in
+            ForEach(Array(colors.chunked(pickerColumnCount(columns, compact: compact)).enumerated()), id: \.offset) { row in
                 HStack(spacing: 7) {
                     ForEach(row.element, id: \.self) { hex in
-                        Circle()
+                        Button(action: { selection = hex }) {
+                            Circle()
                             .fill(Color(hex: hex))
                             .frame(width: 20, height: 20)
                             .overlay(
@@ -608,8 +647,14 @@ public struct ColorGridPicker: View {
                                     .stroke(Color.primary.opacity(0.85), lineWidth: selection.lowercased() == hex.lowercased() ? 2 : 0)
                                     .padding(-3)
                             )
-                            .contentShape(Circle())
-                            .onTapGesture { selection = hex }
+                            .frame(width: pickerTargetSize, height: pickerTargetSize)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .accessibility(label: Text("Couleur \(hex)"))
+                        .accessibility(value: Text(selection.lowercased() == hex.lowercased() ? "Sélectionnée" : "Non sélectionnée"))
+                        .frame(minWidth: pickerTargetSize, minHeight: pickerTargetSize)
+                        .contentShape(Rectangle())
                     }
                 }
             }
@@ -619,6 +664,7 @@ public struct ColorGridPicker: View {
 }
 
 public struct IconGridPicker: View {
+    @Environment(\.dmxCompact) private var compact
     private let icons: [String]
     @Binding private var selection: String
     private let color: Color
@@ -636,18 +682,24 @@ public struct IconGridPicker: View {
         VStack(alignment: .leading, spacing: 8) {
             SearchField("Rechercher une icône...", text: $search)
             ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(filtered.chunked(columns).enumerated()), id: \.offset) { row in
+                AdaptiveStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(filtered.chunked(pickerColumnCount(columns, compact: compact)).enumerated()), id: \.offset) { row in
                         HStack(spacing: 6) {
                             ForEach(row.element, id: \.self) { name in
-                                ZStack {
+                                Button(action: { selection = name }) {
+                                    ZStack {
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                                         .fill(selection == name ? color.opacity(0.2) : Color.primary.opacity(0.04))
                                     DmxIcon(name, size: 16).foregroundColor(selection == name ? color : .primary)
                                 }
-                                .frame(width: 32, height: 32)
+                                    .frame(width: pickerTargetSize, height: pickerTargetSize)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .accessibility(label: Text("Icône \(name)"))
+                                .accessibility(value: Text(selection == name ? "Sélectionnée" : "Non sélectionnée"))
+                                .frame(minWidth: pickerTargetSize, minHeight: pickerTargetSize)
                                 .contentShape(Rectangle())
-                                .onTapGesture { selection = name }
                             }
                         }
                     }

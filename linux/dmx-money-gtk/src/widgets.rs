@@ -205,3 +205,33 @@ pub fn cell(child: &impl IsA<gtk::Widget>, width: i32, align: gtk::Align) -> gtk
     host.append(child);
     host.upcast()
 }
+
+/// Réconcilie les catégories avec le menu sans perdre les identifiants sélectionnés.
+pub fn category_filter(
+    button: &gtk::MenuButton,
+    options: &[dmx_core::models::Category],
+    selected: &[String],
+    on_toggle: impl Fn(String, bool) + 'static,
+) {
+    let popover = gtk::Popover::new();
+    let list = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    list.set_margin_top(8);
+    list.set_margin_bottom(8);
+    list.set_margin_start(8);
+    list.set_margin_end(8);
+    let on_toggle = std::rc::Rc::new(on_toggle);
+    for option in options {
+        let check = gtk::CheckButton::with_label(&option.name);
+        check.set_active(selected.contains(&option.id));
+        let id = option.id.clone();
+        let on_toggle = on_toggle.clone();
+        check.connect_toggled(move |check| on_toggle(id.clone(), check.is_active()));
+        list.append(&check);
+    }
+    let scroll = gtk::ScrolledWindow::new();
+    scroll.set_max_content_height(360);
+    scroll.set_propagate_natural_height(true);
+    scroll.set_child(Some(&list));
+    popover.set_child(Some(&scroll));
+    button.set_popover(Some(&popover));
+}

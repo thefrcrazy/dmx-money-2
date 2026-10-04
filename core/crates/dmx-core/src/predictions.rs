@@ -8,7 +8,7 @@ use crate::dates::{
 };
 use crate::error::{CoreError, CoreResult};
 use crate::format::{date_day_month, date_day_month_year, date_long};
-use crate::metrics::{cents, euros, signed_cents};
+use crate::metrics::{euros, wide_cents as cents, wide_signed_cents as signed_cents};
 use crate::models::{string_enum, PredictionFakeTransaction, TimeRange, TransactionType, TRANSFER_CATEGORY_ID};
 use crate::settings::AppSettings;
 use crate::snapshot::{is_selected, Snapshot};
@@ -25,13 +25,13 @@ string_enum!(Severity, default = Warning, {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DayFlow {
     /// Somme des retraits du jour en centimes (négative ou nulle).
-    pub debits: i64,
+    pub debits: i128,
     /// Somme des revenus du jour en centimes (positive ou nulle).
-    pub credits: i64,
+    pub credits: i128,
 }
 
 impl DayFlow {
-    pub fn add(&mut self, amount_cents: i64) {
+    pub fn add(&mut self, amount_cents: i128) {
         if amount_cents < 0 {
             self.debits += amount_cents;
         } else {
@@ -42,11 +42,11 @@ impl DayFlow {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DayBalances {
-    pub low: i64,
-    pub close: i64,
+    pub low: i128,
+    pub close: i128,
 }
 
-pub fn apply_day_flow(opening: i64, flow: Option<&DayFlow>) -> DayBalances {
+pub fn apply_day_flow(opening: i128, flow: Option<&DayFlow>) -> DayBalances {
     let low = opening + flow.map(|flow| flow.debits).unwrap_or(0);
     DayBalances {
         low,
@@ -55,7 +55,7 @@ pub fn apply_day_flow(opening: i64, flow: Option<&DayFlow>) -> DayBalances {
 }
 
 /// La courbe de fin de journée passe sous zéro (danger) ou sous le seuil (avertissement).
-pub fn detect_closing_crossing(value: i64, previous: i64, threshold: i64) -> Option<Severity> {
+pub fn detect_closing_crossing(value: i128, previous: i128, threshold: i128) -> Option<Severity> {
     if value < 0 && previous >= 0 {
         return Some(Severity::Danger);
     }
@@ -66,7 +66,7 @@ pub fn detect_closing_crossing(value: i64, previous: i64, threshold: i64) -> Opt
 }
 
 /// La journée ne finit bien que grâce à un revenu arrivé après les retraits.
-pub fn detect_intraday_risk(low: i64, value: i64, threshold: i64) -> Option<Severity> {
+pub fn detect_intraday_risk(low: i128, value: i128, threshold: i128) -> Option<Severity> {
     if low < 0 && value >= 0 {
         return Some(Severity::Danger);
     }
@@ -188,7 +188,7 @@ fn marker_color(severity: Option<Severity>, intraday: Option<Severity>) -> &'sta
 }
 
 /// Bornes de la projection, jour de début et jour de fin inclus.
-pub fn projection_range(
+pub(crate) fn requested_range(
     range: TimeRange,
     custom_end: Option<&str>,
     month_starts_on_first: bool,
@@ -209,6 +209,16 @@ pub fn projection_range(
         other => add_months(today, other.months().unwrap_or(12) as i32),
     };
     (start, end)
+}
+
+pub fn projection_range(
+    range: TimeRange,
+    custom_end: Option<&str>,
+    month_starts_on_first: bool,
+    today: NaiveDate,
+) -> (NaiveDate, NaiveDate) {
+    let (start, end) = requested_range(range, custom_end, month_starts_on_first, today);
+    (start, crate::limits::bounded_end(start, end))
 }
 
 /// Une opération s'applique au filtre si son compte, ou la destination d'un virement, est sélectionné.
@@ -243,9 +253,9 @@ pub fn predictions(snapshot: &Snapshot, query: &PredictionQuery, today: NaiveDat
         .map(|(index, account)| (account.id.as_str(), index))
         .collect();
 
-    let mut balances: Vec<i64> = accounts.iter().map(|account| cents(account.initial_balance)).collect();
+    let mut balances: Vec<i128> = accounts.iter().map(|account| cents(account.initial_balance)).collect();
     let mut flows: Vec<Vec<DayFlow>> = vec![vec![DayFlow::default(); days + 1]; accounts.len()];
-    let mut add_impact = |account_id: &str, date: NaiveDate, amount: i64, balances: &mut Vec<i64>| {
+    let mut add_impact = |account_id: &str, date: NaiveDate, amount: i128, balances: &mut Vec<i128>| {
         let Some(index) = index_of.get(account_id) else {
             return;
         };
@@ -259,7 +269,7 @@ pub fn predictions(snapshot: &Snapshot, query: &PredictionQuery, today: NaiveDat
     let mut current_total = accounts
         .iter()
         .map(|account| cents(account.initial_balance))
-        .sum::<i64>();
+        .sum::<i128>();
     for transaction in &snapshot.transactions {
         if !index_of.contains_key(transaction.account_id.as_str()) {
             continue;
@@ -284,7 +294,7 @@ pub fn predictions(snapshot: &Snapshot, query: &PredictionQuery, today: NaiveDat
         })
         .collect();
 
-    let mut fake_impact = 0_i64;
+    let mut fake_impact = 0_i128;
     for fake in applied_fakes.iter().filter(|fake| fake.enabled) {
         let Some(date) = parse_date(&fake.date).filter(|date| *date >= start && *date <= end) else {
             continue;
@@ -326,7 +336,9 @@ pub fn predictions(snapshot: &Snapshot, query: &PredictionQuery, today: NaiveDat
             item.to_account_id.as_deref(),
         )
     }) {
-        let Some(mut next) = parse_date(&item.next_date) else {
+        let Some(mut next) = parse_date(&item.next_date)
+            .and_then(|next| crate::dates::first_occurrence_on_or_after(next, item.frequency, today))
+        else {
             continue;
         };
         let item_end = item.end_date.as_deref().and_then(parse_date);
@@ -378,8 +390,8 @@ pub fn predictions(snapshot: &Snapshot, query: &PredictionQuery, today: NaiveDat
     let mut dates = Vec::with_capacity(days + 1);
     let mut labels = Vec::with_capacity(days + 1);
     let mut full_labels = Vec::with_capacity(days + 1);
-    let mut closes_cents: Vec<Vec<i64>> = vec![Vec::with_capacity(days + 1); accounts.len() + 1];
-    let mut lows_cents: Vec<Vec<i64>> = vec![Vec::with_capacity(days + 1); accounts.len() + 1];
+    let mut closes_cents: Vec<Vec<i128>> = vec![Vec::with_capacity(days + 1); accounts.len() + 1];
+    let mut lows_cents: Vec<Vec<i128>> = vec![Vec::with_capacity(days + 1); accounts.len() + 1];
 
     for day in 0..=days {
         let date = add_days(start, day as i64);
@@ -387,7 +399,7 @@ pub fn predictions(snapshot: &Snapshot, query: &PredictionQuery, today: NaiveDat
         labels.push(date_day_month(date));
         full_labels.push(date_long(date));
 
-        let (mut total_close, mut total_low) = (0_i64, 0_i64);
+        let (mut total_close, mut total_low) = (0_i128, 0_i128);
         for (index, balance) in balances.iter_mut().enumerate() {
             let DayBalances { low, close } = apply_day_flow(*balance, flows[index].get(day));
             *balance = close;

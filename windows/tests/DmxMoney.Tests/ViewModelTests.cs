@@ -281,33 +281,152 @@ public class ViewModelTests
         const string csv = "date;montant;libelle;categorie\n01/09/2026;-12,50;Boulangerie;Alimentation\n02/09/2026;1500,00;Salaire;Salaire\n";
         var wizard = new StatementImportViewModel(store, csv, "releve.csv");
 
+        await wizard.PreparationTask;
         Assert.Equal(StatementFormat.Csv, wizard.Format);
         Assert.NotNull(wizard.Preview);
         wizard.SetRole(2, "description");
         wizard.SetRole(3, "category");
         Assert.True(wizard.CanContinue);
 
-        wizard.NextCommand.Execute(null);
+        await wizard.NextCommand.ExecuteAsync(null);
         Assert.Equal(StatementImportViewModel.Step.Account, wizard.CurrentStep);
         Assert.Equal(2, wizard.Transactions.Count);
 
         wizard.AccountChoice = StatementImportViewModel.NewAccountId;
         wizard.NewAccountName = "Compte importé";
         wizard.FinalBalanceText = "1 487,50";
-        wizard.NextCommand.Execute(null);
+        await wizard.NextCommand.ExecuteAsync(null);
         Assert.Equal(StatementImportViewModel.Step.Categories, wizard.CurrentStep);
         Assert.Equal(2, wizard.Sources.Count);
 
-        wizard.NextCommand.Execute(null);
+        await wizard.NextCommand.ExecuteAsync(null);
         Assert.Equal(StatementImportViewModel.Step.Confirm, wizard.CurrentStep);
         Assert.Equal(0, wizard.ComputedInitialBalance!.Value, 3);
 
-        Assert.True(wizard.Submit());
+        Assert.True(await wizard.SubmitAsync());
         await wizard.ImportTask!;
 
         var account = Assert.Single(store.Accounts);
         Assert.Equal("Compte importé", account.Name);
         Assert.Equal(1487.5, store.Balances.CurrentBalance, 3);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("bad")]
+    [InlineData("2026-13-50")]
+    public void BackupDateHandlesMissingAndMalformedTimestamp(string? timestamp)
+        => Assert.Null(RestoreBackupViewModel.FormatBackupDate(timestamp));
+
+    [Fact]
+    public async Task BackupWithoutTimestampCanBeInspectedWithoutCrashingTheForm()
+    {
+        using var store = NewStore();
+        var form = new RestoreBackupViewModel(store, "{\"version\":1,\"data\":{}}", "fixture.dmx");
+        await form.PreparationTask;
+        Assert.NotNull(form.Summary);
+        Assert.Null(form.BackupDate);
+        Assert.Null(form.Error);
+        Assert.NotNull(RestoreBackupViewModel.FormatBackupDate("2026-10-03T00:00:00Z"));
+    }
+
+    [Fact]
+    public async Task FailedImportKeepsDraftAndVisibleErrorAndCanBeRetried()
+    {
+        using var store = NewStore();
+        var id = AddAccount(store);
+        store.Reload();
+        var form = new StatementImportViewModel(store, "date;montant;libelle\n01/09/2026;-12,50;Fixture\n", "fixture.csv");
+        await form.PreparationTask;
+        form.SetRole(2, "description");
+        await form.SubmitAsync();
+        form.AccountChoice = "removed-account";
+        await form.SubmitAsync();
+        Assert.Equal(StatementImportViewModel.Step.Confirm, form.CurrentStep);
+        Assert.False(await form.SubmitAsync());
+        Assert.NotNull(form.Error);
+        Assert.False(form.Importing);
+        Assert.Single(form.Transactions);
+        Assert.Equal("removed-account", form.AccountChoice);
+        form.AccountChoice = id;
+        Assert.True(await form.SubmitAsync());
+        Assert.Null(form.Error);
+    }
+
+    [Fact]
+    public async Task FailedRestoreLeavesTheDialogOpenWithTheError()
+    {
+        using var store = NewStore();
+        const string invalid = "{\"version\":1,\"timestamp\":\"2026-10-03T00:00:00Z\",\"data\":{\"accounts\":[{\"id\":\"duplicate\",\"name\":\"A\"},{\"id\":\"duplicate\",\"name\":\"B\"}]}}";
+        var form = new RestoreBackupViewModel(store, invalid, "invalid.dmx");
+        await form.PreparationTask;
+        Assert.False(await form.SubmitAsync());
+        Assert.NotNull(form.Error);
+        Assert.False(form.Working);
+    }
+
+    [Fact]
+    public async Task PerformAsyncWaitsUntilTheUiReceivesItsResult()
+    {
+        using var store = NewStore();
+        var ui = new System.Collections.Concurrent.ConcurrentQueue<Action>();
+        store.Dispatch = ui.Enqueue;
+        var applied = false;
+        var work = store.PerformAsync(_ => true, _ => applied = true);
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (ui.IsEmpty && DateTime.UtcNow < deadline) await Task.Delay(10);
+        Assert.False(work.IsCompleted);
+        Assert.False(applied);
+        Assert.True(ui.TryDequeue(out var action));
+        action();
+        await work.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(applied);
+    }
+
+    [Fact]
+    public void TransactionFormMergesUntouchedFieldsAndRejectsOverlappingEdits()
+    {
+        using var store = NewStore();
+        var account = AddAccount(store);
+        AddTransaction(store, account, 12.125, "Original");
+        store.Reload();
+        var id = Assert.Single(new JournalViewModel(store).Rows).Transaction.Id;
+        var initial = store.Engine.TransactionDraft(id, [], Today);
+        var form = new TransactionFormViewModel(store, initial) { Description = "Local" };
+        store.Engine.SaveTransaction(initial with { Amount = 25.125 });
+        var remoteAmount = store.Engine.TransactionDraft(id, [], Today).Amount;
+        Assert.True(form.Submit());
+        var merged = store.Engine.TransactionDraft(id, [], Today);
+        Assert.Equal(remoteAmount, merged.Amount);
+        Assert.Equal("Local", merged.Description);
+        var conflict = new TransactionFormViewModel(store, merged) { Description = "Draft preserved" };
+        store.Engine.SaveTransaction(merged with { Description = "Remote" });
+        Assert.False(conflict.Submit());
+        Assert.NotNull(conflict.Error);
+        Assert.Equal("Draft preserved", conflict.Description);
+        Assert.Equal("Remote", store.Engine.TransactionDraft(id, [], Today).Description);
+    }
+
+    [Fact]
+    public void CategoryFiltersFollowCreationRenameAndRemoval()
+    {
+        using var store = NewStore();
+        using var journal = new JournalViewModel(store);
+        using var budget = new BudgetViewModel(store);
+        using var scheduled = new ScheduledViewModel(store);
+        var draft = store.Engine.CategoryDraft(null) with { Name = "Fixture catégorie" };
+        var id = store.Engine.SaveCategory(draft);
+        store.Reload();
+        Assert.Contains(journal.CategoryChoices, item => item.Id == id);
+        Assert.Contains(budget.CategoryChoices, item => item.Id == id);
+        Assert.Contains(scheduled.CategoryChoices, item => item.Id == id);
+        journal.Categories = [id]; budget.Categories = [id]; scheduled.Categories = [id];
+        store.Engine.SaveCategory(store.Engine.CategoryDraft(id) with { Name = "Renamed" });
+        store.Reload();
+        Assert.Equal("Renamed", journal.CategoryChoices.Single(item => item.Id == id).Name);
+        store.Engine.DeleteCategory(id); store.Reload();
+        Assert.Empty(journal.Categories); Assert.Empty(budget.Categories); Assert.Empty(scheduled.Categories);
     }
 
     [Fact]

@@ -37,6 +37,8 @@ export interface Transaction {
     checked: boolean;
     isTransfer?: boolean;
     linkedTransactionId?: string; // For transfers
+    bankSource?: string | null;
+    bankTransactionId?: string | null;
 }
 
 export interface PredictionFakeTransaction {
@@ -100,7 +102,8 @@ export interface BankContextType {
     deleteAccount: (id: string) => Promise<void>;
     addTransaction: (transaction: Omit<Transaction, 'id'>) => Promise<string>;
     addTransfer: (fromAccountId: string, toAccountId: string, amount: number, date: string, description: string) => Promise<void>;
-    updateTransaction: (transaction: Transaction) => Promise<void>;
+    updateTransfer: (fromTransaction: Transaction, toTransaction: Transaction, baseFrom: Transaction, baseTo: Transaction) => Promise<void>;
+    updateTransaction: (transaction: Transaction, base?: Transaction) => Promise<void>;
     deleteTransaction: (id: string) => Promise<void>;
     toggleTransactionCheck: (id: string) => Promise<void>;
     addCategory: (category: Omit<Category, 'id'>) => Promise<string>;
