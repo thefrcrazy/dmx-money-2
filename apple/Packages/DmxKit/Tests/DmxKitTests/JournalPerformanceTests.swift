@@ -99,6 +99,33 @@ final class JournalPerformanceTests: XCTestCase {
         XCTAssertTrue(journal.selection.isEmpty)
     }
     @MainActor
+    func testScheduledPreparationRevisionAdvancesOnlyForVisibleQueryResults() async throws {
+        let model = ScheduledModel(store: AppStore(engine: try DmxEngine.openInMemory()), active: false)
+        XCTAssertEqual(model.rowsRevision, 0)
+        XCTAssertNil(model.view)
+        model.isActive = true
+        await waitForScheduledRevision(model, atLeast: 1)
+        XCTAssertNotNil(model.view)
+        let visibleRevision = model.rowsRevision
+        model.isActive = false
+        model.search = "Fictif"
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(model.rowsRevision, visibleRevision)
+        model.isActive = true
+        await waitForScheduledRevision(model, atLeast: visibleRevision + 1)
+        XCTAssertNotNil(model.view)
+    }
+
+    @MainActor
+    private func waitForScheduledRevision(_ model: ScheduledModel, atLeast revision: UInt64) async {
+        let deadline = Date().addingTimeInterval(3)
+        while model.rowsRevision < revision && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertGreaterThanOrEqual(model.rowsRevision, revision)
+    }
+
+    @MainActor
     private func waitForRefresh(_ journal: JournalModel, change: () -> Void) async {
         let loaded = expectation(description: "Journal background result")
         journal.onChange = { loaded.fulfill() }

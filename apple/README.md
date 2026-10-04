@@ -40,9 +40,12 @@ montants et les règles restent identiques.
   de catégories ressortaient toutes en bleu au lieu de garder leur couleur.
 * **Largeurs fixes dans la barre d'outils** : le nom du compte est tronqué (128 pt) et chaque
   solde occupe 104 pt, pour que la barre ne respire pas au fil des montants.
-* **Édition en ligne du journal** (`InlineTextCell`) : la saisie reste locale et n'est envoyée au
+* **Édition en ligne du journal** (`EditableCell` dans le contrôleur AppKit partagé) : la saisie reste locale et n'est envoyée au
   noyau qu'à la validation ou en quittant le champ. Écrire à chaque frappe rechargeait la table
   sous le curseur, ce qui faisait perdre le focus et déplaçait la ligne en cours de frappe.
+  Le journal moderne réutilise les cellules `NSTableView`, prépare son tri hors du thread UI
+  et annule la publication du résultat au changement de page. Le test
+  `python3 scripts/tests/test-macos-journal.py` compare le rendu avec 30 000 opérations fictives.
 * **Dates** : champ à incréments plus un calendrier complet en popover (`DayField`).
 * **Paramètres dans la fenêtre** (`ModernSettings`, quatre onglets : Général, Compagnon mobile,
   Données, À propos), en colonne alignée à gauche et une icône par ligne. ⌘, sélectionne cette

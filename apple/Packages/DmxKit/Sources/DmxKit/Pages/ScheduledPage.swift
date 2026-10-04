@@ -21,6 +21,10 @@ public final class ScheduledModel: PageModel {
         willSet { objectWillChange.send() }
     }
 
+    public private(set) var rowsRevision: UInt64 = 0 {
+        willSet { objectWillChange.send() }
+    }
+
     public init(store: AppStore, active: Bool = true) {
         super.init(store: store)
         isActive = active
@@ -37,7 +41,11 @@ public final class ScheduledModel: PageModel {
             frequencies: allPeriodicities().filter { selected.contains(periodicityKey($0)) }
         )
         let today = store.today
-        load({ try $0.scheduled(query: query, today: today) }) { [weak self] in self?.view = $0 }
+        load({ try $0.scheduled(query: query, today: today) }) { [weak self] value in
+            guard let self else { return }
+            self.view = value
+            self.rowsRevision &+= 1
+        }
     }
 }
 

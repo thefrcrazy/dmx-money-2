@@ -4,7 +4,9 @@ import DmxKit
 import SwiftUI
 
 /// Journal en NSTableView : sélection multiple, édition de la description et du montant, pointage.
-final class JournalViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate, NSMenuDelegate {
+final class JournalViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate,
+    NSMenuDelegate
+{
     private enum Column: String, CaseIterable {
         case account, date, category, description, amount, budget, status, balance, actions
 
@@ -44,6 +46,12 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
 
     private let store: AppStore
     private let model: JournalModel
+    private let includesHeader: Bool
+    private var mounted = true
+    private var preparedRevision: UInt64?
+    private var requestedRevision: UInt64?
+    private var loadToken: TablePreparationToken?
+    private let preparationQueue = DispatchQueue(label: "com.dmxmoney.journal-table", qos: .userInitiated)
     private let tableView = JournalTableView()
     private var emptyView: NSView?
     private var rows: [JournalRow] = []
@@ -52,9 +60,10 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
     private var isApplyingSelection = false
     private var editing: (field: NSTextField, transactionID: String, rowsRevision: UInt64)?
 
-    init(store: AppStore, model: JournalModel) {
+    init(store: AppStore, model: JournalModel, includesHeader: Bool = true) {
         self.store = store
         self.model = model
+        self.includesHeader = includesHeader
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -73,7 +82,11 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
             tableColumn.title = column.title
             tableColumn.width = column.width
             tableColumn.minWidth = column == .description ? 160 : column.width * 0.7
-            tableColumn.resizingMask = column == .description ? [.autoresizingMask, .userResizingMask] : .userResizingMask
+            if [.account, .date, .category, .description, .amount, .balance].contains(column) {
+                tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.rawValue, ascending: true)
+            }
+            tableColumn.resizingMask =
+                column == .description ? [.autoresizingMask, .userResizingMask] : .userResizingMask
             switch column {
             case .amount, .budget, .balance: tableColumn.headerCell.alignment = .right
             case .status: tableColumn.headerCell.alignment = .center
@@ -84,7 +97,8 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
         tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         tableView.allowsMultipleSelection = true
         tableView.usesAlternatingRowBackgroundColors = true
-        tableView.rowHeight = 34
+        tableView.rowHeight = includesHeader ? 34 : 30
+        tableView.usesAutomaticRowHeights = false
         tableView.intercellSpacing = NSSize(width: 10, height: 0)
         tableView.dataSource = self
         tableView.delegate = self
@@ -95,13 +109,15 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
         tableView.menu = menu
         tableView.onDelete = { [weak self] in self?.model.deleteSelection() }
         tableView.onToggle = { [weak self] in self?.model.toggleCheckedSelection() }
+        tableView.onClear = { [weak self] in self?.model.selection = [] }
         if #available(macOS 11.0, *) {
-            tableView.style = .fullWidth
+            tableView.style = includesHeader ? .fullWidth : .inset
         }
 
         let scrollView = NSScrollView()
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -109,45 +125,108 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
         let empty = NSHostingView(rootView: StoreRoot(store: store) { JournalEmptyState(model: self.model) })
         empty.translatesAutoresizingMaskIntoConstraints = false
 
-        root.addSubview(header)
+        if includesHeader { root.addSubview(header) }
         root.addSubview(scrollView)
-        root.addSubview(empty)
+        if includesHeader { root.addSubview(empty) }
+        if includesHeader {
+            NSLayoutConstraint.activate([
+                header.topAnchor.constraint(equalTo: root.topAnchor),
+                header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+                header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                empty.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
+                empty.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+                empty.widthAnchor.constraint(equalToConstant: 420),
+            ])
+        }
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: root.topAnchor),
-            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
+            scrollView.topAnchor.constraint(equalTo: includesHeader ? header.bottomAnchor : root.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            empty.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
-            empty.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
-            empty.widthAnchor.constraint(equalToConstant: 420),
         ])
-        emptyView = empty
+        emptyView = includesHeader ? empty : nil
         view = root
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        model.onChange = { [weak self] in self?.reload() }
         model.objectWillChange
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] in self?.applySelection() }
+            .sink { [weak self] in
+                guard let self, self.mounted else { return }
+                if self.requestedRevision != self.model.rowsRevision { self.reload() } else { self.applySelection() }
+            }
             .store(in: &cancellables)
         reload()
     }
 
-    private func reload() {
-        guard isViewLoaded else { return }
-        // Clear the token before abortEditing can deliver an end-editing callback.
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        mounted = true
+        if preparedRevision != model.rowsRevision { reload() } else { applySelection() }
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        if editing != nil { tableView.window?.makeFirstResponder(nil) }
+        mounted = false
+        cancelPreparation()
         editing = nil
+        tableView.abortEditing()
+    }
+
+    /// Called when SwiftUI removes the journal: no queued result or cell work survives it.
+    func stopUpdates() {
+        if editing != nil { tableView.window?.makeFirstResponder(nil) }
+        mounted = false
+        cancelPreparation()
+        editing = nil
+        tableView.abortEditing()
+        cancellables.removeAll()
+        tableView.delegate = nil
+        tableView.dataSource = nil
+    }
+
+    private func cancelPreparation() {
+        loadToken?.cancel()
+        loadToken = nil
+        requestedRevision = preparedRevision
+    }
+
+    private func reload() {
+        guard isViewLoaded, mounted else { return }
+        cancelPreparation()
+        let token = TablePreparationToken()
+        loadToken = token
+        let revision = model.rowsRevision
+        requestedRevision = revision
+        let source = model.rows
+        let order = tableView.sortDescriptors.map { JournalSort(key: $0.key ?? "", ascending: $0.ascending) }
+        preparationQueue.async { [weak self] in
+            guard !token.isCancelled else { return }
+            let prepared = JournalTablePreparation.prepare(source, order: order)
+            guard !token.isCancelled else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.mounted, !token.isCancelled,
+                    self.model.rowsRevision == revision
+                else { return }
+                self.editing = nil
+                self.tableView.abortEditing()
+                self.rows = prepared.rows
+                self.rowIndexes = prepared.indexes
+                self.preparedRevision = revision
+                self.loadToken = nil
+                self.tableView.reloadData()
+                self.applySelection()
+                self.emptyView?.isHidden = !self.rows.isEmpty
+            }
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
+        // Finish the editor against its captured ID before moving any rows.
         tableView.window?.makeFirstResponder(tableView)
-        rows = model.rows
-        rowIndexes = Dictionary(rows.enumerated().map { ($0.element.transaction.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
-        tableView.reloadData()
-        applySelection()
-        emptyView?.isHidden = !rows.isEmpty
+        reload()
     }
 
     private func applySelection() {
@@ -165,7 +244,9 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row index: Int) -> NSView? {
-        guard let identifier = tableColumn?.identifier, let column = Column(rawValue: identifier.rawValue), rows.indices.contains(index) else {
+        guard let identifier = tableColumn?.identifier, let column = Column(rawValue: identifier.rawValue),
+            rows.indices.contains(index)
+        else {
             return nil
         }
         let row = rows[index]
@@ -180,19 +261,26 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
             return cell
         case .category:
             let cell = reuse(ChipCell.self, column)
-            cell.configure(title: row.category.name, icon: row.category.icon, color: PlatformColor.dmx(hex: row.category.color) ?? .systemGray)
+            cell.configure(
+                title: row.category.name, icon: row.category.icon,
+                color: PlatformColor.dmx(hex: row.category.color) ?? .systemGray)
             return cell
         case .description:
             let cell = reuse(EditableCell.self, column)
-            cell.configure(row.transaction.description, font: .systemFont(ofSize: 13, weight: .medium), color: .labelColor, alignment: .left)
+            cell.configure(
+                row.transaction.description, font: .systemFont(ofSize: 13, weight: .medium), color: .labelColor,
+                alignment: .left)
             cell.field.identifier = Self.descriptionField
             cell.field.delegate = self
             return cell
         case .amount:
             let cell = reuse(EditableCell.self, column)
             // Chaque côté d'un virement est un revenu ou une dépense : signe et couleur suivent ce sens.
-            let color: NSColor = row.transaction.transactionType == .income ? PlatformColor.dmx(hex: "#059669")! : .systemRed
-            cell.configure(Money.signed(row.transaction.amount, kind: row.transaction.transactionType), font: .monospacedDigitSystemFont(ofSize: 13, weight: .bold), color: color, alignment: .right)
+            let color: NSColor =
+                row.transaction.transactionType == .income ? PlatformColor.dmx(hex: "#059669")! : .systemRed
+            cell.configure(
+                Money.signed(row.transaction.amount, kind: row.transaction.transactionType),
+                font: .monospacedDigitSystemFont(ofSize: 13, weight: .bold), color: color, alignment: .right)
             cell.field.identifier = Self.amountField
             cell.field.delegate = self
             return cell
@@ -227,7 +315,8 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard !isApplyingSelection else { return }
-        let ids = Set(tableView.selectedRowIndexes.compactMap { rows.indices.contains($0) ? rows[$0].transaction.id : nil })
+        let ids = Set(
+            tableView.selectedRowIndexes.compactMap { rows.indices.contains($0) ? rows[$0].transaction.id : nil })
         if ids != model.selection {
             model.selection = ids
         }
@@ -237,7 +326,9 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
 
     func control(_ control: NSControl, textShouldBeginEditing fieldEditor: NSText) -> Bool {
         let index = tableView.row(for: control)
-        guard let field = control as? NSTextField, rows.indices.contains(index) else { return false }
+        guard let field = control as? NSTextField, rows.indices.contains(index),
+            preparedRevision == model.rowsRevision
+        else { return false }
         editing = (field, rows[index].transaction.id, model.rowsRevision)
         if control.identifier == Self.amountField {
             fieldEditor.string = AmountInput.text(rows[index].transaction.amount, emptyWhenZero: false)
@@ -250,7 +341,8 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
         guard let edit = editing, edit.field === field else { return }
         editing = nil
         guard edit.rowsRevision == model.rowsRevision,
-              let index = rowIndexes[edit.transactionID], rows.indices.contains(index) else { return }
+            let index = rowIndexes[edit.transactionID], rows.indices.contains(index)
+        else { return }
         let row = rows[index]
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -259,7 +351,9 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
                 field.stringValue = row.transaction.description
                 return
             }
-            DispatchQueue.main.async { self.model.updateDescription(row.transaction.id, text, baseDescription: row.transaction.description) }
+            DispatchQueue.main.async {
+                self.model.updateDescription(row.transaction.id, text, baseDescription: row.transaction.description)
+            }
         } else if field.identifier == Self.amountField {
             let display = Money.signed(row.transaction.amount, kind: row.transaction.transactionType)
             guard let amount = AmountInput.parse(text), amount != row.transaction.amount else {
@@ -267,7 +361,9 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
                 return
             }
             DispatchQueue.main.async {
-                if !self.model.updateAmount(row.transaction.id, text: text, baseAmount: row.transaction.amount) {
+                if !self.model.updateAmount(row.transaction.id, text: text, baseAmount: row.transaction.amount),
+                    self.transactionId(for: field) == row.transaction.id
+                {
                     field.stringValue = display
                 }
             }
@@ -321,7 +417,9 @@ final class JournalViewController: NSViewController, NSTableViewDataSource, NSTa
         toggle.target = self
         menu.addItem(toggle)
         menu.addItem(.separator())
-        let delete = NSMenuItem(title: count > 1 ? "Supprimer \(count) transactions" : "Supprimer", action: #selector(deleteSelection), keyEquivalent: "")
+        let delete = NSMenuItem(
+            title: count > 1 ? "Supprimer \(count) transactions" : "Supprimer", action: #selector(deleteSelection),
+            keyEquivalent: "")
         delete.target = self
         menu.addItem(delete)
     }
@@ -347,9 +445,11 @@ struct JournalHeader: View {
                 Text("Journal").font(.system(size: 24, weight: .bold))
                 Spacer()
                 if let view = model.view {
-                    Text("\(view.rows.count) / \(view.totalTransactionCount) lignes · Net \(view.visibleNet >= 0 ? "+" : "")\(Money.format(view.visibleNet))")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                    Text(
+                        "\(view.rows.count) / \(view.totalTransactionCount) lignes · Net \(view.visibleNet >= 0 ? "+" : "")\(Money.format(view.visibleNet))"
+                    )
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
                 }
                 Button(action: { store.present(.transaction(id: nil)) }) {
                     HStack(spacing: 6) {
@@ -364,12 +464,15 @@ struct JournalHeader: View {
                     .frame(maxWidth: 320)
                 MultiSelectButton(
                     "Toutes les catégories",
-                    options: store.categories.map { SelectOption(id: $0.id, label: $0.name, icon: $0.icon, color: $0.color) },
+                    options: store.categories.map {
+                        SelectOption(id: $0.id, label: $0.name, icon: $0.icon, color: $0.color)
+                    },
                     selection: $model.categories
                 )
                 MultiSelectButton("Tous les types", options: JournalModel.typeOptions, selection: $model.types)
                 MultiSelectButton("Tous les états", options: JournalModel.statusOptions, selection: $model.statuses)
-                MultiSelectButton("Tous les budgets", options: JournalModel.budgetOptions, selection: $model.budgetStatuses)
+                MultiSelectButton(
+                    "Tous les budgets", options: JournalModel.budgetOptions, selection: $model.budgetStatuses)
                 Spacer()
             }
             if !model.selection.isEmpty {
@@ -418,7 +521,11 @@ struct JournalEmptyState: View {
             EmptyStateView(
                 icon: "Search",
                 title: model.isLoading ? "Chargement du journal…" : "Aucune transaction",
-                message: model.isLoading ? nil : model.hasFilters ? "Aucun résultat pour vos filtres actuels." : "Commencez par ajouter une transaction ou importez un relevé bancaire."
+                message: model.isLoading
+                    ? nil
+                    : model.hasFilters
+                        ? "Aucun résultat pour vos filtres actuels."
+                        : "Commencez par ajouter une transaction ou importez un relevé bancaire."
             )
             if !model.hasFilters {
                 Button(action: { store.present(.transaction(id: nil)) }) {
@@ -438,6 +545,7 @@ struct JournalEmptyState: View {
 final class JournalTableView: NSTableView {
     var onDelete: (() -> Void)?
     var onToggle: (() -> Void)?
+    var onClear: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
@@ -445,129 +553,104 @@ final class JournalTableView: NSTableView {
             onDelete?()
         case 49:
             onToggle?()
+        case 53:
+            onClear?()
         default:
             super.keyDown(with: event)
         }
     }
 }
 
+// Fixed-height table cells use frames: no constraint graph is rebuilt while scrolling.
 final class LabelCell: NSTableCellView {
     private let label = NSTextField(labelWithString: "")
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        label.translatesAutoresizingMaskIntoConstraints = false
+    override init(frame: NSRect) {
+        super.init(frame: frame)
         label.lineBreakMode = .byTruncatingTail
         addSubview(label)
         textField = label
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
     }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) n'est pas utilisé")
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) n'est pas utilisé") }
+    override func layout() {
+        super.layout()
+        label.frame = NSRect(x: 2, y: (bounds.height - 18) / 2, width: max(0, bounds.width - 4), height: 18)
     }
-
     func configure(_ text: String, color: NSColor, alignment: NSTextAlignment = .left, monospaced: Bool = false) {
-        label.stringValue = text
+        if label.stringValue != text { label.stringValue = text }
         label.textColor = color
         label.alignment = alignment
         label.font = monospaced ? .monospacedDigitSystemFont(ofSize: 12, weight: .regular) : .systemFont(ofSize: 12)
     }
 }
-
 final class AccountCell: NSTableCellView {
     private let bar = NSView()
     private let label = NSTextField(labelWithString: "")
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+    override init(frame: NSRect) {
+        super.init(frame: frame)
         bar.wantsLayer = true
         bar.layer?.cornerRadius = 2
-        bar.translatesAutoresizingMaskIntoConstraints = false
-        label.translatesAutoresizingMaskIntoConstraints = false
         label.font = .systemFont(ofSize: 13, weight: .medium)
         label.lineBreakMode = .byTruncatingTail
         addSubview(bar)
         addSubview(label)
-        NSLayoutConstraint.activate([
-            bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
-            bar.centerYAnchor.constraint(equalTo: centerYAnchor),
-            bar.widthAnchor.constraint(equalToConstant: 4),
-            bar.heightAnchor.constraint(equalToConstant: 16),
-            label.leadingAnchor.constraint(equalTo: bar.trailingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+        textField = label
     }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) n'est pas utilisé")
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) n'est pas utilisé") }
+    override func layout() {
+        super.layout()
+        bar.frame = NSRect(x: 2, y: (bounds.height - 16) / 2, width: 4, height: 16)
+        label.frame = NSRect(x: 14, y: (bounds.height - 18) / 2, width: max(0, bounds.width - 16), height: 18)
     }
-
     func configure(name: String, color: NSColor) {
-        label.stringValue = name
+        if label.stringValue != name { label.stringValue = name }
         bar.layer?.backgroundColor = color.cgColor
     }
 }
-
 final class ChipCell: NSTableCellView {
-    private let chip = NSView()
-    private let icon = NSImageView()
-    private let label = NSTextField(labelWithString: "")
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+    private let chip = NSView(), icon = NSImageView(), label = NSTextField(labelWithString: "")
+    private var preferredWidth: CGFloat = 0
+    private var iconName: String?
+    override init(frame: NSRect) {
+        super.init(frame: frame)
         chip.wantsLayer = true
         chip.layer?.cornerRadius = 9
-        chip.translatesAutoresizingMaskIntoConstraints = false
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        label.translatesAutoresizingMaskIntoConstraints = false
         label.font = .systemFont(ofSize: 10, weight: .bold)
         label.lineBreakMode = .byTruncatingTail
         addSubview(chip)
         chip.addSubview(icon)
         chip.addSubview(label)
-        NSLayoutConstraint.activate([
-            chip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
-            chip.centerYAnchor.constraint(equalTo: centerYAnchor),
-            chip.heightAnchor.constraint(equalToConstant: 18),
-            chip.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -2),
-            icon.leadingAnchor.constraint(equalTo: chip.leadingAnchor, constant: 7),
-            icon.centerYAnchor.constraint(equalTo: chip.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 11),
-            icon.heightAnchor.constraint(equalToConstant: 11),
-            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 4),
-            label.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -8),
-            label.centerYAnchor.constraint(equalTo: chip.centerYAnchor),
-        ])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
     }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) n'est pas utilisé")
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) n'est pas utilisé") }
+    override func layout() {
+        super.layout()
+        let width = min(max(0, bounds.width - 4), preferredWidth)
+        chip.frame = NSRect(x: 2, y: (bounds.height - 18) / 2, width: width, height: 18)
+        icon.frame = NSRect(x: 7, y: 3.5, width: 11, height: 11)
+        label.frame = NSRect(x: 22, y: 2, width: max(0, width - 30), height: 15)
     }
-
     func configure(title: String, icon name: String, color: NSColor) {
-        label.stringValue = title.uppercased()
+        let text = title.uppercased()
+        if label.stringValue != text {
+            label.stringValue = text
+            preferredWidth = label.intrinsicContentSize.width + 30
+            needsLayout = true
+        }
+        if iconName != name {
+            iconName = name
+            icon.image = DmxIcon.image(name, size: 11)
+        }
         label.textColor = color
-        icon.image = DmxIcon.image(name, size: 11)
         icon.contentTintColor = color
         chip.layer?.backgroundColor = color.withAlphaComponent(0.13).cgColor
+        setAccessibilityLabel(title)
     }
 }
-
 final class EditableCell: NSTableCellView {
     let field = NSTextField()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        field.translatesAutoresizingMaskIntoConstraints = false
+    override init(frame: NSRect) {
+        super.init(frame: frame)
         field.isBordered = false
         field.drawsBackground = false
         field.isEditable = true
@@ -576,32 +659,24 @@ final class EditableCell: NSTableCellView {
         field.cell?.usesSingleLineMode = true
         addSubview(field)
         textField = field
-        NSLayoutConstraint.activate([
-            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
-            field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
-            field.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
     }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) n'est pas utilisé")
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) n'est pas utilisé") }
+    override func layout() {
+        super.layout()
+        field.frame = NSRect(x: 2, y: (bounds.height - 20) / 2, width: max(0, bounds.width - 4), height: 20)
     }
-
     func configure(_ text: String, font: NSFont, color: NSColor, alignment: NSTextAlignment) {
-        field.stringValue = text
+        if field.stringValue != text { field.stringValue = text }
         field.font = font
         field.textColor = color
         field.alignment = alignment
     }
 }
-
 final class BudgetCell: NSTableCellView {
     private let label = NSTextField(labelWithString: "")
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        label.translatesAutoresizingMaskIntoConstraints = false
+    private var preferredWidth: CGFloat = 0
+    override init(frame: NSRect) {
+        super.init(frame: frame)
         label.font = .monospacedDigitSystemFont(ofSize: 10, weight: .bold)
         label.textColor = NSColor.systemIndigo.withAlphaComponent(0.8)
         label.wantsLayer = true
@@ -609,91 +684,139 @@ final class BudgetCell: NSTableCellView {
         label.layer?.borderWidth = 1
         label.layer?.borderColor = NSColor.systemIndigo.withAlphaComponent(0.25).cgColor
         addSubview(label)
-        NSLayoutConstraint.activate([
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+        textField = label
     }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) n'est pas utilisé")
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) n'est pas utilisé") }
+    override func layout() {
+        super.layout()
+        let width = min(preferredWidth, max(0, bounds.width - 4))
+        label.frame = NSRect(x: bounds.width - width - 2, y: (bounds.height - 16) / 2, width: width, height: 16)
     }
-
     func configure(_ text: String?, tooltip: String?) {
         label.isHidden = text == nil
-        label.stringValue = text.map { " \($0) " } ?? ""
+        let value = text.map { " \($0) " } ?? ""
+        if label.stringValue != value {
+            label.stringValue = value
+            preferredWidth = label.intrinsicContentSize.width
+            needsLayout = true
+        }
         toolTip = tooltip
     }
 }
-
 final class StatusCell: NSTableCellView {
     private let button = NSButton()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        button.translatesAutoresizingMaskIntoConstraints = false
+    private var checkedValue: Bool?
+    override init(frame: NSRect) {
+        super.init(frame: frame)
         button.isBordered = false
         button.imagePosition = .imageOnly
         addSubview(button)
-        NSLayoutConstraint.activate([
-            button.centerXAnchor.constraint(equalTo: centerXAnchor),
-            button.centerYAnchor.constraint(equalTo: centerYAnchor),
-            button.widthAnchor.constraint(equalToConstant: 22),
-            button.heightAnchor.constraint(equalToConstant: 22),
-        ])
     }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) n'est pas utilisé")
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) n'est pas utilisé") }
+    override func layout() {
+        super.layout()
+        button.frame = NSRect(x: (bounds.width - 22) / 2, y: (bounds.height - 22) / 2, width: 22, height: 22)
     }
-
     func configure(checked: Bool, target: AnyObject, action: Selector) {
-        button.image = DmxIcon.image(checked ? "CheckCircle2" : "Circle", size: 18)
+        if checkedValue != checked {
+            checkedValue = checked
+            button.image = DmxIcon.image(checked ? "CheckCircle2" : "Circle", size: 18)
+        }
         button.contentTintColor = checked ? PlatformColor.dmx(hex: "#10b981") : .tertiaryLabelColor
-        button.toolTip = checked ? "Dépointer" : "Pointer"
+        let label = checked ? "Dépointer" : "Pointer"
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
         button.target = target
         button.action = action
     }
 }
-
 final class ActionsCell: NSTableCellView {
-    private let editButton = NSButton()
-    private let deleteButton = NSButton()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        for (button, icon) in [(editButton, "Edit2"), (deleteButton, "Trash2")] {
-            button.translatesAutoresizingMaskIntoConstraints = false
+    private let editButton = NSButton(), deleteButton = NSButton()
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        for (button, icon, label) in [(editButton, "Edit2", "Modifier"), (deleteButton, "Trash2", "Supprimer")] {
             button.isBordered = false
             button.imagePosition = .imageOnly
             button.image = DmxIcon.image(icon, size: 14)
+            button.toolTip = label
+            button.setAccessibilityLabel(label)
             addSubview(button)
         }
         editButton.contentTintColor = .secondaryLabelColor
-        editButton.toolTip = "Modifier"
         deleteButton.contentTintColor = .systemRed
-        deleteButton.toolTip = "Supprimer"
-        NSLayoutConstraint.activate([
-            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
-            deleteButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            deleteButton.widthAnchor.constraint(equalToConstant: 24),
-            editButton.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -4),
-            editButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            editButton.widthAnchor.constraint(equalToConstant: 24),
-        ])
     }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) n'est pas utilisé")
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) n'est pas utilisé") }
+    override func layout() {
+        super.layout()
+        deleteButton.frame = NSRect(x: bounds.width - 26, y: (bounds.height - 24) / 2, width: 24, height: 24)
+        editButton.frame = NSRect(x: bounds.width - 54, y: (bounds.height - 24) / 2, width: 24, height: 24)
     }
-
     func configure(target: AnyObject, edit: Selector, delete: Selector) {
         editButton.target = target
         editButton.action = edit
         deleteButton.target = target
         deleteButton.action = delete
+    }
+}
+
+final class TablePreparationToken: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+}
+
+struct JournalSort: Sendable {
+    let key: String
+    let ascending: Bool
+}
+
+/// Pure preparation off the UI thread; tie-breaks retain the kernel's existing row order.
+enum JournalTablePreparation {
+    static func prepare(_ source: [JournalRow], order: [JournalSort]) -> (rows: [JournalRow], indexes: [String: Int]) {
+        let rows: [JournalRow]
+        if order.isEmpty {
+            rows = source
+        } else {
+            rows = source.enumerated().sorted { left, right in
+                for sort in order {
+                    let result: ComparisonResult
+                    switch sort.key {
+                    case "account":
+                        result = left.element.accountName.localizedStandardCompare(right.element.accountName)
+                    case "date": result = left.element.transaction.date.compare(right.element.transaction.date)
+                    case "category":
+                        result = left.element.category.name.localizedStandardCompare(right.element.category.name)
+                    case "description":
+                        result = left.element.transaction.description.localizedStandardCompare(
+                            right.element.transaction.description)
+                    case "amount": result = compare(left.element.transaction.amount, right.element.transaction.amount)
+                    case "balance": result = compare(left.element.balance, right.element.balance)
+                    default: continue
+                    }
+                    if result != .orderedSame {
+                        return sort.ascending ? result == .orderedAscending : result == .orderedDescending
+                    }
+                }
+                return left.offset < right.offset
+            }.map(\.element)
+        }
+        let indexes = Dictionary(
+            rows.enumerated().map { ($0.element.transaction.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
+        return (rows, indexes)
+    }
+
+    private static func compare(_ left: Double, _ right: Double) -> ComparisonResult {
+        if left < right { return .orderedAscending }
+        if left > right { return .orderedDescending }
+        return .orderedSame
     }
 }

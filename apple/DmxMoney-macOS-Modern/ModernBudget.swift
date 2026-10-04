@@ -9,7 +9,7 @@ struct ModernBudget: View {
     var body: some View {
         PageBody {
             if let view = model.view {
-                VStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     header(view)
                     kpis(view)
                     consumption(view)
@@ -105,10 +105,10 @@ struct ModernBudget: View {
                 }
                 .frame(minHeight: 200)
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(view.categories.enumerated()), id: \.element.category.id) { item in
-                        if item.offset > 0 { Divider() }
-                        categoryRow(item.element)
+                LazyVStack(spacing: 0) {
+                    ForEach(view.categories, id: \.category.id) { row in
+                        categoryRow(row)
+                        if row.category.id != view.categories.last?.category.id { Divider() }
                     }
                 }
             }
@@ -116,7 +116,7 @@ struct ModernBudget: View {
     }
 
     private func categoryRow(_ row: BudgetCategoryRow) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        LazyVStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 CategoryBadge(icon: row.category.icon, colorHex: row.category.color, size: 30)
                 VStack(alignment: .leading, spacing: 1) {
