@@ -12,6 +12,19 @@ export interface VersionUpdate {
 
 export const CHANGELOG: VersionUpdate[] = [
     {
+        version: "2.1.0",
+        date: "2026-10-04",
+        title: "2.1.0 — Compagnon Internet et performances",
+        changes: [
+            "Compagnon sur Cloudflare Pages : synchronisation en Wi-Fi, 4G et 5G sans DNS individuel, avec le bureau ouvert et connecté.",
+            "La session mobile reprend après réouverture ; appairage par passkey, verrouillage volontaire et révocation restent disponibles.",
+            "Journal mobile virtualisé, cellules natives macOS réutilisables et changements de page allégés.",
+            "Modifications concurrentes, virements et imports protégés contre les écrasements, doublons et écritures partielles.",
+            "Refus de synchronisation visibles, reprise explicite et limites adaptées aux gros volumes de données.",
+            "Le cache financier mobile reste obfusqué et décodable ; la base locale et les sauvegardes restent non chiffrées."
+        ]
+    },
+    {
         version: "2.1.0-rc.2",
         date: "2026-10-03",
         title: "2.1.0 RC2 — Défilement du journal",

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.0 — 2026-10-04
+
+- Version stable du compagnon Internet : PWA sur Cloudflare Pages et relais chiffré, sans DNS individuel ni serveur local. Le téléphone fonctionne en Wi-Fi, 4G ou 5G lorsque le bureau reste ouvert et connecté.
+- Sessions mobiles conservées après réouverture ou rafraîchissement, avec appairage par passkey, verrouillage volontaire, expiration et révocation des appareils.
+- Journal mobile virtualisé ; journal macOS moderne et Intel à cellules AppKit réutilisables, tri hors interface et arrêt des mises à jour au changement de page. Budgets paresseux et tri de l’échéancier mis en cache.
+- Modifications concurrentes protégées : les formulaires conservent leur état initial, les conflits sont signalés et les virements sont appliqués atomiquement.
+- Imports CSV/QIF/OFX fiabilisés : achats distincts conservés, identités bancaires préservées et réimportations dédoublonnées après édition ou conversion en virement.
+- Synchronisation et saisies mobiles : reprises après coupure, refus visibles et reprise explicite, pagination et limites de charge pour les gros jeux de données.
+- Préparation des imports hors interface sur Apple, WinUI et GTK ; corrections des formulaires, filtres, modales, navigation clavier et libération des contrôles.
+- Durcissement des sessions/passkeys, validation des données, permissions Unix, téléchargements de mises à jour et bornes des graphiques/prévisions.
+- Distribution stable `2.1.0`, build Apple 9, flux macOS `updates.json`. Windows x64/arm64 conserve l’identité autosignée Developmax / Collignon Maxim ; cette identité locale ne garantit pas l’acceptation par Smart App Control.
+- Le cache financier mobile reste obfusqué mais décodable ; la base locale et les sauvegardes restent non chiffrées. CloudKit privé reste distinct du chiffrement de bout en bout du relais.
+
 ## 2.1.0-rc.2 — 2026-10-03
 
 - Journal PWA mobile : virtualisation des opérations et des en-têtes de date avec une fenêtre de rendu bornée, même après un long défilement ou sur une journée très chargée ; conservation de la sélection et de la ligne focalisée.

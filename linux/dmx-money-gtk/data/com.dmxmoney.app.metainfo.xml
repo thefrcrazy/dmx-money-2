@@ -56,6 +56,9 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="2.1.0" date="2026-10-04">
+      <description><p>Version stable : compagnon Internet sans DNS individuel, journal optimisé, imports fiabilisés et protection des modifications concurrentes. Préparation des imports hors interface et libération des contrôles.</p></description>
+    </release>
     <release version="2.1.0~rc.2" date="2026-10-03" type="development">
       <description><p>Pré-version RC2 : journal mobile virtualisé, cellules natives réutilisées et rechargements évités quand les données restent inchangées.</p></description>
     </release>
