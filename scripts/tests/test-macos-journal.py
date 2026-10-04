@@ -57,7 +57,14 @@ def main():
             subprocess.run([str(work / mode), str(work / mode)], check=True, stdout=result, stderr=errors, timeout=60)
         reports[mode] = json.loads((work / f"{mode}.json").read_text())
         assert reports[mode]["rows"] == 30000 and reports[mode]["tableDetached"]
-    assert reports["after"]["functionalAssertions"] >= 11
+    # Isolate edits/sort/selection from timing: the measured exit immediately follows
+    # the same scroll sequence in both variants. The functional run is a fresh process.
+    with (work / "functional.json").open("w") as result, (work / "functional.stderr").open("w") as errors:
+        subprocess.run([str(work / "after"), str(work / "functional"), "--functional"],
+                       check=True, stdout=result, stderr=errors, timeout=60)
+    functional = json.loads((work / "functional.json").read_text())
+    assert functional["functionalAssertions"] >= 11 and functional["tableDetached"]
+    reports["functional"] = functional
     # No timing gate: CI host load and font/window caches vary.
     (work / "comparison.json").write_text(json.dumps(reports, indent=2))
     print(json.dumps(reports, indent=2))

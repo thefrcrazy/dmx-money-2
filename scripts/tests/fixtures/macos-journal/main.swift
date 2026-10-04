@@ -26,6 +26,17 @@ func pump(_ seconds: Double) {
     while Date() < end { _ = RunLoop.current.run(mode: .default, before: end) }
 }
 func countViews(_ view: NSView) -> Int { 1 + view.subviews.reduce(0) { $0 + countViews($1) } }
+func require(_ condition: @autoclosure () -> Bool, file: String = #fileID, line: Int = #line) {
+    if !condition() {
+        FileHandle.standardError.write(Data("Assertion failed at \(file):\(line)\n".utf8))
+        exit(3)
+    }
+}
+func waitUntil(_ condition: () -> Bool, file: String = #fileID, line: Int = #line) {
+    let deadline = Date().addingTimeInterval(3)
+    while !condition() && Date() < deadline { pump(0.01) }
+    require(condition(), file: file, line: line)
+}
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let scenario = Scenario()
@@ -43,6 +54,7 @@ let scenarioTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { 
         print("NO TABLE")
         exit(2)
     }
+    waitUntil { table.numberOfRows == 30000 }
     var times: [Double] = []
     for i in 0..<80 {
         let start = DispatchTime.now().uptimeNanoseconds
@@ -59,46 +71,48 @@ let scenarioTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { 
         try! bitmap.representation(using: .png, properties: [:])!.write(
             to: URL(fileURLWithPath: CommandLine.arguments[1] + ".png"))
     }
-    // Functional assertions only apply to the new controller; the baseline has SwiftUI delegates.
+    // Functional assertions run only in a separate process; timing runs use identical paths.
     var assertions = 0
     // BEGIN CONTROLLER ASSERTIONS
-    if let controller = table.delegate as? JournalViewController {
+    if CommandLine.arguments.contains("--functional"), let controller = table.delegate as? JournalViewController {
         table.scrollRowToVisible(10)
         host.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
         let cell = table.view(atColumn: 3, row: 10, makeIfNecessary: true) as! EditableCell
-        precondition(controller.control(cell.field, textShouldBeginEditing: NSTextView()))
+        require(controller.control(cell.field, textShouldBeginEditing: NSTextView()))
         cell.field.stringValue = "Description fictive modifiée"
         controller.controlTextDidEndEditing(Notification(name: NSText.didEndEditingNotification, object: cell.field))
-        pump(0.02)
-        precondition(model.actions.contains("description|fiction-10|Description fictive modifiée"))
+        waitUntil { model.actions.contains("description|fiction-10|Description fictive modifiée") }
         assertions += 1
         let amountCell = table.view(atColumn: 4, row: 10, makeIfNecessary: true) as! EditableCell
-        precondition(controller.control(amountCell.field, textShouldBeginEditing: NSTextView()))
+        require(controller.control(amountCell.field, textShouldBeginEditing: NSTextView()))
         amountCell.field.stringValue = "12.50"
         controller.controlTextDidEndEditing(
             Notification(name: NSText.didEndEditingNotification, object: amountCell.field))
-        pump(0.03)
-        precondition(model.actions.contains("amount|fiction-10|12.50"))
+        waitUntil { model.actions.contains("amount|fiction-10|12.50") }
         assertions += 1
-        precondition(controller.control(cell.field, textShouldBeginEditing: NSTextView()))
+        require(controller.control(cell.field, textShouldBeginEditing: NSTextView()))
         model.rowsRevision += 1
         cell.field.stringValue = "Brouillon devenu périmé"
         controller.controlTextDidEndEditing(Notification(name: NSText.didEndEditingNotification, object: cell.field))
-        precondition(!model.actions.contains { $0.contains("périmé") })
+        require(!model.actions.contains { $0.contains("périmé") })
         assertions += 1
-        pump(0.03)
         table.sortDescriptors = [NSSortDescriptor(key: "amount", ascending: false)]
-        pump(0.15)
+        table.scrollRowToVisible(0)
+        waitUntil {
+            host.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            let shown = table.view(atColumn: 3, row: 0, makeIfNecessary: true) as? EditableCell
+            return shown?.field.stringValue == "Opération fictive 499"
+        }
         let prepared = JournalTablePreparation.prepare(model.rows, order: [JournalSort(key: "amount", ascending: true)])
-        precondition(prepared.rows.first?.transaction.amount == 0.37)
-        precondition(prepared.rows[1].id == "fiction-500")
+        require(prepared.rows.first?.transaction.amount == 0.37)
+        require(prepared.rows[1].id == "fiction-500")
         assertions += 2
-        precondition(prepared.indexes["fiction-10"] != nil)
+        require(prepared.indexes["fiction-10"] != nil)
         assertions += 1
         model.selection = ["fiction-10", "fiction-25000"]
-        pump(0.05)
-        precondition(table.selectedRowIndexes.count == 2)
+        waitUntil { table.selectedRowIndexes.count == 2 }
         assertions += 1
         let before = model.actions.count
         table.scrollRowToVisible(0)
@@ -106,12 +120,12 @@ let scenarioTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { 
         window.displayIfNeeded()
         let status = table.view(atColumn: 6, row: 0, makeIfNecessary: true) as! StatusCell
         (status.subviews.first as! NSButton).performClick(nil)
-        precondition(model.actions.count == before + 1)
+        require(model.actions.count == before + 1)
         assertions += 1
-        precondition(model.actions.last == "check|fiction-499")
+        require(model.actions.last == "check|fiction-499")
         assertions += 1
         let shown = table.view(atColumn: 3, row: 0, makeIfNecessary: true) as! EditableCell
-        precondition(shown.field.stringValue == "Opération fictive 499")
+        require(shown.field.stringValue == "Opération fictive 499")
         assertions += 1
     }
     // END CONTROLLER ASSERTIONS
@@ -124,8 +138,7 @@ let scenarioTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { 
     }
     let switchMs = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6
     if assertions > 0 {
-        pump(0.05)
-        precondition(table.delegate == nil && table.dataSource == nil)
+        waitUntil { table.delegate == nil && table.dataSource == nil }
         assertions += 1
     }
     let sorted = times.sorted()

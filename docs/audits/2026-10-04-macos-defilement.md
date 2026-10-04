@@ -13,15 +13,15 @@ Le journal moderne utilisait une `Table` SwiftUI avec neuf colonnes, des états 
 
 ## Mesures et vérifications
 
-Commande : `python3 scripts/tests/test-macos-journal.py`, macOS Apple Silicon, compilation Swift 5 optimisée avec cible macOS 26. Deux exécutions locales, chacune avec 30 000 opérations synthétiques et 80 sauts alternant le début et la fin de la table. Chaque saut appelle `scrollRowToVisible`, force layout/affichage et traite brièvement la boucle d'événements. Les deux variantes sont compilées et lancées dans les mêmes conditions de chaque passage ; la baseline est toujours exécutée en premier. Les caches de fenêtres/polices et la charge du host peuvent varier.
+Commande : `python3 scripts/tests/test-macos-journal.py`, macOS Apple Silicon, compilation Swift 5 optimisée avec cible macOS 26. Exécution comparative locale avec 30 000 opérations synthétiques et 80 sauts alternant le début et la fin de la table. Chaque saut appelle `scrollRowToVisible`, force layout/affichage et traite brièvement la boucle d'événements. Les deux variantes sont compilées et lancées dans les mêmes conditions ; la baseline est toujours exécutée en premier. Le retrait est mesuré immédiatement après la même séquence de défilement, sans édition/tri intercalés. Les assertions fonctionnelles utilisent un troisième processus distinct. Les caches de fenêtres/polices et la charge du host peuvent varier.
 
-| Mesure | Avant (deux passages) | Après (deux passages) |
+| Mesure | Avant | Après |
 | --- | --- | --- |
-| Saut de défilement, médiane | 86–96 ms | 26 ms |
-| Saut de défilement, 95e percentile | 121–147 ms | 35–45 ms |
-| Retrait du journal après les sauts | 195–225 ms | 14–15 ms |
+| Saut de défilement, médiane | 84,4 ms | 25,8 ms |
+| Saut de défilement, 95e percentile | 100,2 ms | 30,9 ms |
+| Retrait du journal après les sauts | 129,5 ms | 18,9 ms |
 
-Onze assertions utilisent le contrôleur et les cellules réels : édition du libellé/montant sur l'ID capturé, rejet du brouillon après changement de révision, tri stable, index d'ID, sélection après tri, pointage de la bonne ligne, contenu affiché et détachement des delegates. Le test est ajouté à la CI Apple avec conservation des JSON/logs/captures de sa propre fenêtre. Aucun seuil de timing dépendant du host n'est imposé.
+Onze assertions utilisent le contrôleur et les cellules réels : édition du libellé/montant sur l'ID capturé, rejet du brouillon après changement de révision, tri stable, index d'ID, sélection après tri, pointage de la bonne ligne, contenu affiché et détachement des delegates. Les résultats asynchrones sont attendus avec une échéance bornée, plutôt qu'un délai arbitraire ; les échecs indiquent leur ligne. Le test est ajouté à la CI Apple avec conservation des JSON/logs/captures de sa propre fenêtre. Aucun seuil de timing dépendant du host n'est imposé.
 
 Un XCTest vérifie également que la révision de l'échéancier n'avance qu'après une réponse visible, ne change pas pour un filtre sur page masquée et reprend à la réactivation.
 
