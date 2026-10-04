@@ -69,17 +69,21 @@ public final class JournalModel: ObservableObject {
     public static let statusOptions: [SelectOption] = []
     public static let budgetOptions: [SelectOption] = []
     public init(count: Int) {
-        view = JournalView(
-            rows: (0..<count).map { i in
-                JournalRow(
-                    transaction: Transaction(
-                        id: "fiction-\(i)", date: "2026-10-03", description: "Opération fictive \(i)",
-                        amount: Double(i % 500) + 0.37, transactionType: i % 2 == 0 ? .expense : .income,
-                        checked: i % 3 == 0), accountName: "Compte fictif", accountColor: "#6366f1",
-                    category: Category(name: "Catégorie fictive", icon: "Wallet", color: "#6366f1", id: "fiction"),
-                    budget: Budget(remaining: Double(i % 100), budgetName: "Budget fictif"), balance: Double(i) * 0.27,
-                    displayType: i % 2 == 0 ? .expense : .income)
-            })
+        let category = Category(name: "Catégorie fictive", icon: "Wallet", color: "#6366f1", id: "fiction")
+        var rows: [JournalRow] = []
+        rows.reserveCapacity(count)
+        for i in 0..<count {
+            let kind: TransactionType = i % 2 == 0 ? .expense : .income
+            let transaction = Transaction(
+                id: "fiction-\(i)", date: "2026-10-03", description: "Opération fictive \(i)",
+                amount: Double(i % 500) + 0.37, transactionType: kind, checked: i % 3 == 0)
+            let budget = Budget(remaining: Double(i % 100), budgetName: "Budget fictif")
+            let row = JournalRow(
+                transaction: transaction, accountName: "Compte fictif", accountColor: "#6366f1",
+                category: category, budget: budget, balance: Double(i) * 0.27, displayType: kind)
+            rows.append(row)
+        }
+        view = JournalView(rows: rows)
     }
     public func clearFilters() {}
     public func toggleCheckedSelection() {}
